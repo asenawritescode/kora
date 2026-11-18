@@ -14,14 +14,12 @@ import (
 	"github.com/asenawritescode/kora/internal/db"
 )
 
-// jobTable holds one row per fact rebuild job of a tenant.
 const jobTable = "_kora_fact_rebuild_job"
 
 // sequenceTable is the outbox sequence row. The outbox takes FOR UPDATE on it in the
 // transaction that writes an event, so a locking read here waits for in-flight events.
 const sequenceTable = "_kora_tenant_event_sequence"
 
-// leaseSeconds is how long a claim lasts without renewal. Expiry is judged on the database clock.
 const leaseSeconds = 45
 
 // JobStatus is the state of a rebuild job.
@@ -41,7 +39,7 @@ var allJobStatuses = []JobStatus{JobQueued, JobRunning, JobDone, JobFailed, JobC
 // jobMoves is the only list of status changes. Claiming (queued, or running with an expired
 // lease, to running with a new lease) is guarded separately because it also takes the lease.
 var jobMoves = map[JobStatus][]JobStatus{
-	JobQueued:  {JobRunning},
+	JobQueued:  {JobRunning, JobCancelled},
 	JobRunning: {JobDone, JobFailed, JobCancelled},
 }
 
@@ -77,8 +75,7 @@ type Job struct {
 	token         int64
 }
 
-// JobStore persists rebuild jobs. Every write that changes a job is guarded by its status, its
-// lease owner and its fencing token, and checks the rowcount.
+// JobStore persists rebuild jobs; writes to a leased job are guarded by status, owner and token.
 type JobStore struct {
 	DB      *sql.DB
 	Dialect db.Dialect
@@ -87,8 +84,7 @@ type JobStore struct {
 	ready bool
 }
 
-// Enqueue stores a queued job for model. It captures the outbox sequence in the same transaction,
-// so every event at or below it is committed before the capture returns.
+// Enqueue stores a queued job for model and captures the outbox sequence under its lock.
 func (s *JobStore) Enqueue(ctx context.Context, model string) (*Job, error) {
 	if err := s.ensure(ctx); err != nil {
 		return nil, err
@@ -131,10 +127,11 @@ func (s *JobStore) Claim(ctx context.Context, model, owner string) (*Job, error)
 	if err := s.ensure(ctx); err != nil {
 		return nil, err
 	}
+	nowExpr, nowArg := dbClock(s.Dialect, 0)
 	query := fmt.Sprintf(`SELECT %s FROM %s WHERE model = ? AND status IN (?, ?) AND lease_until <= %s
-		ORDER BY created_at, id LIMIT 1`, jobColumns, s.table(), s.Dialect.NowMinusSeconds())
+		ORDER BY created_at, id LIMIT 1`, jobColumns, s.table(), nowExpr)
 	job, err := scanJob(s.DB.QueryRowContext(ctx, db.Rebind(s.Dialect, query),
-		model, string(JobQueued), string(JobRunning), 0))
+		model, string(JobQueued), string(JobRunning), nowArg))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -142,11 +139,11 @@ func (s *JobStore) Claim(ctx context.Context, model, owner string) (*Job, error)
 		return nil, fmt.Errorf("facts: find rebuild job: %w", err)
 	}
 	// The fencing token is compared too, so a takeover that raced this read is refused.
+	leaseExpr, leaseArg := dbClock(s.Dialect, leaseSeconds)
 	claim := fmt.Sprintf(`UPDATE %s SET status = ?, lease_owner = ?, fencing_token = ?, lease_until = %s, updated_at = ?
-		WHERE id = ? AND fencing_token = ? AND status IN (?, ?) AND lease_until <= %s`,
-		s.table(), s.Dialect.NowMinusSeconds(), s.Dialect.NowMinusSeconds())
-	args := []any{string(JobRunning), owner, job.token + 1, -leaseSeconds, time.Now().UTC(),
-		job.ID, job.token, string(JobQueued), string(JobRunning), 0}
+		WHERE id = ? AND fencing_token = ? AND status IN (?, ?) AND lease_until <= %s`, s.table(), leaseExpr, nowExpr)
+	args := []any{string(JobRunning), owner, job.token + 1, leaseArg, time.Now().UTC(),
+		job.ID, job.token, string(JobQueued), string(JobRunning), nowArg}
 	changed, err := s.execRows(ctx, claim, args)
 	if err != nil {
 		return nil, fmt.Errorf("facts: claim rebuild job: %w", err)
@@ -160,13 +157,15 @@ func (s *JobStore) Claim(ctx context.Context, model, owner string) (*Job, error)
 
 // Renew extends the lease of a running job the caller holds.
 func (s *JobStore) Renew(ctx context.Context, job *Job) error {
+	leaseExpr, leaseArg := dbClock(s.Dialect, leaseSeconds)
+	nowExpr, nowArg := dbClock(s.Dialect, 0)
 	query := fmt.Sprintf(`UPDATE %s SET lease_until = %s WHERE id = ? AND status = ? AND lease_owner = ?
-		AND fencing_token = ? AND lease_until > %s`, s.table(), s.Dialect.NowMinusSeconds(), s.Dialect.NowMinusSeconds())
-	args := []any{-leaseSeconds, job.ID, string(JobRunning), job.owner, job.token, 0}
+		AND fencing_token = ? AND lease_until > %s`, s.table(), leaseExpr, nowExpr)
+	args := []any{leaseArg, job.ID, string(JobRunning), job.owner, job.token, nowArg}
 	return s.leased(ctx, query, args, "renew")
 }
 
-// Finish moves a job the caller holds from running to a terminal state. failure is kept for failed jobs.
+// Finish moves a job the caller holds from running to a terminal state; failure is kept.
 func (s *JobStore) Finish(ctx context.Context, job *Job, to JobStatus, failure string) error {
 	if !JobRunning.CanMoveTo(to) {
 		return fmt.Errorf("facts: rebuild job cannot move from %s to %s", JobRunning, to)
@@ -174,7 +173,7 @@ func (s *JobStore) Finish(ctx context.Context, job *Job, to JobStatus, failure s
 	return s.move(ctx, job, to, "error = ?, updated_at = ?", failure, time.Now().UTC())
 }
 
-// Cancel moves a running job to cancelled. The worker finds out on its next guarded write.
+// Cancel moves a queued or running job to cancelled; a running worker stops on its next write.
 func (s *JobStore) Cancel(ctx context.Context, id string) error {
 	if err := s.ensure(ctx); err != nil {
 		return err
@@ -187,19 +186,26 @@ func (s *JobStore) Cancel(ctx context.Context, id string) error {
 		return fmt.Errorf("facts: cancel rebuild job %s: %w", id, err)
 	}
 	if changed != 1 {
-		return fmt.Errorf("facts: rebuild job %s is not running", id)
+		return fmt.Errorf("facts: rebuild job %s is neither queued nor running", id)
 	}
 	return nil
 }
 
-// move changes the status of a job the caller holds. extraSet assigns more columns, args bind them.
+// move changes the status of a job the caller holds; extraSet assigns more columns.
 func (s *JobStore) move(ctx context.Context, job *Job, to JobStatus, extraSet string, args ...any) error {
 	marks, from := inList(sourcesOf(to))
+	nowExpr, nowArg := dbClock(s.Dialect, 0)
 	query := fmt.Sprintf(`UPDATE %s SET status = ?, %s WHERE id = ? AND status IN (%s) AND lease_owner = ?
-		AND fencing_token = ? AND lease_until > %s`, s.table(), extraSet, marks, s.Dialect.NowMinusSeconds())
+		AND fencing_token = ? AND lease_until > %s`, s.table(), extraSet, marks, nowExpr)
 	all := append(append([]any{string(to)}, args...), job.ID)
-	all = append(append(all, from...), job.owner, job.token, 0)
+	all = append(append(all, from...), job.owner, job.token, nowArg)
 	return s.leased(ctx, query, all, "move")
+}
+
+// dbClock is the database clock plus plusSeconds, as SQL and its bound argument. NowMinusSeconds
+// subtracts its bound, so the argument is the negation. Leases never use Go's clock.
+func dbClock(d db.Dialect, plusSeconds int) (string, any) {
+	return d.NowMinusSeconds(), -plusSeconds
 }
 
 // leased runs a guarded write and maps a refused write to ErrLeaseLost.
@@ -271,7 +277,6 @@ func scanJob(row *sql.Row) (*Job, error) {
 	return &job, nil
 }
 
-// readSequence returns the newest outbox sequence, locking it until tx ends.
 func readSequence(ctx context.Context, tx *sql.Tx) (int64, error) {
 	var seq int64
 	err := tx.QueryRowContext(ctx, "SELECT last_sequence FROM "+sequenceTable+" WHERE id = 1 FOR UPDATE").Scan(&seq)

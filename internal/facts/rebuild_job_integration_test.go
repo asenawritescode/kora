@@ -97,16 +97,24 @@ func TestJobStoreLifecycle(t *testing.T) {
 			}
 			assertJob(t, store, failed.ID, JobFailed, "boom")
 
+			queued, err := store.Enqueue(ctx, "Sale")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = store.Cancel(ctx, queued.ID); err != nil {
+				t.Fatalf("cancel of a queued job: %v", err)
+			}
+			assertJob(t, store, queued.ID, JobCancelled, "")
+			if err = store.Cancel(ctx, queued.ID); err == nil {
+				t.Fatal("second cancel was accepted")
+			}
 			cancelled, err := store.Enqueue(ctx, "Sale")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err = store.Cancel(ctx, cancelled.ID); err == nil {
-				t.Fatal("cancel of a queued job was accepted")
-			}
 			d, err := store.Claim(ctx, "Sale", "worker-d")
-			if err != nil || d == nil {
-				t.Fatalf("claim d = %+v, %v", d, err)
+			if err != nil || d == nil || d.ID != cancelled.ID {
+				t.Fatalf("claim d = %+v, %v; want the queued job after cancel", d, err)
 			}
 			if err = store.Cancel(ctx, cancelled.ID); err != nil {
 				t.Fatalf("cancel running: %v", err)

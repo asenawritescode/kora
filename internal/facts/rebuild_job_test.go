@@ -6,6 +6,7 @@ import "testing"
 func TestJobStatusMoves(t *testing.T) {
 	allowed := map[[2]JobStatus]bool{
 		{JobQueued, JobRunning}:    true,
+		{JobQueued, JobCancelled}:  true,
 		{JobRunning, JobDone}:      true,
 		{JobRunning, JobFailed}:    true,
 		{JobRunning, JobCancelled}: true,
@@ -30,7 +31,7 @@ func TestSourcesOf(t *testing.T) {
 		{JobRunning, []JobStatus{JobQueued}},
 		{JobDone, []JobStatus{JobRunning}},
 		{JobFailed, []JobStatus{JobRunning}},
-		{JobCancelled, []JobStatus{JobRunning}},
+		{JobCancelled, []JobStatus{JobQueued, JobRunning}},
 	}
 	for _, tc := range tests {
 		got := sourcesOf(tc.to)

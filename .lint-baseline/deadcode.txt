@@ -198,6 +198,7 @@ internal/facts/rebuild_job.go::JobStore.execRows
 internal/facts/rebuild_job.go::JobStore.leased
 internal/facts/rebuild_job.go::JobStore.move
 internal/facts/rebuild_job.go::JobStore.table
+internal/facts/rebuild_job.go::dbClock
 internal/facts/rebuild_job.go::inList
 internal/facts/rebuild_job.go::jobDDL
 internal/facts/rebuild_job.go::readSequence
