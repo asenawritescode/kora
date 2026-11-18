@@ -1,9 +1,12 @@
 package net
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -194,5 +197,90 @@ func TestServerHeaderLimits(t *testing.T) {
 	}
 	if srv.MaxHeaderBytes != 1<<20 {
 		t.Errorf("MaxHeaderBytes = %d, want 1 MiB", srv.MaxHeaderBytes)
+	}
+}
+
+func TestOverflowEnvelopeIsPlainUnderGzipOnDirectAndSitePaths(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("KORA_MAX_REQUEST_MB", "1")
+	tests := []struct {
+		name     string
+		path     string
+		bodySize int
+	}{
+		{name: "direct small body", path: "/api/v1/echo", bodySize: 64},
+		{name: "direct large body", path: "/api/v1/echo", bodySize: 64 << 10},
+		{name: "site small body", path: "/s/acme/api/v1/echo", bodySize: 64},
+		{name: "site large body", path: "/s/acme/api/v1/echo", bodySize: 64 << 10},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			r := gin.New()
+			r.Use(RequestBodyLimitMiddleware())
+			group := r.Group("/api/v1")
+			group.Use(CompressMiddleware())
+			group.POST("/echo", func(c *gin.Context) {
+				_, _ = io.ReadAll(c.Request.Body)
+				c.Data(http.StatusOK, "text/plain; charset=utf-8", bytes.Repeat([]byte("x"), test.bodySize))
+			})
+			r.NoRoute(func(c *gin.Context) {
+				c.Request.URL.Path = "/api/v1/echo"
+				r.HandleContext(c)
+			})
+
+			request := httptest.NewRequest(http.MethodPost, test.path, io.LimitReader(zeroReader{}, 2<<20))
+			request.ContentLength = -1
+			request.Header.Set("Accept-Encoding", "gzip")
+			recorder := httptest.NewRecorder()
+			r.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("status = %d, want 413", recorder.Code)
+			}
+			if enc := recorder.Header().Get("Content-Encoding"); enc != "" {
+				t.Fatalf("Content-Encoding = %q on a plain 413 envelope", enc)
+			}
+			body := recorder.Body.Bytes()
+			if got := recorder.Header().Get("Content-Length"); got != strconv.Itoa(len(body)) {
+				t.Fatalf("Content-Length = %q, want %d", got, len(body))
+			}
+			var envelope struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(body, &envelope); err != nil || envelope.Error.Code != "request.body_too_large" {
+				t.Fatalf("body is not the 413 envelope: %v %q", err, body)
+			}
+		})
+	}
+}
+
+func TestWrappersKeepWriteDeadlineControl(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(RequestBodyLimitMiddleware())
+	group := r.Group("/api/v1")
+	group.Use(CompressMiddleware())
+	deadlineErr := make(chan error, 1)
+	group.GET("/stream", func(c *gin.Context) {
+		deadlineErr <- http.NewResponseController(c.Writer).SetWriteDeadline(time.Now().Add(time.Minute))
+		c.Status(http.StatusOK)
+	})
+	server := httptest.NewServer(r)
+	defer server.Close()
+
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Accept-Encoding", "gzip")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if err := <-deadlineErr; err != nil {
+		t.Fatalf("SetWriteDeadline through the response wrappers: %v", err)
 	}
 }

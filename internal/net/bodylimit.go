@@ -1,6 +1,7 @@
 package net
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -114,41 +115,63 @@ func (w *limitedWriter) WriteString(s string) (int, error) {
 	return w.Write([]byte(s))
 }
 
+// Unwrap exposes the underlying writer to http.ResponseController.
+func (w *limitedWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+// writeEnvelope sends the 413 envelope once. Headers the handler set for its
+// own body are replaced: a stale Content-Encoding or Content-Length would
+// describe a body that is no longer sent.
 func (w *limitedWriter) writeEnvelope() {
 	if w.state.replaced {
 		return
 	}
 	w.state.replaced = true
 	body, _ := json.Marshal(gin.H{"error": gin.H{"code": "request.body_too_large", "message": "Request body exceeds the size limit."}})
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	h := w.Header()
+	h.Del("Content-Encoding")
+	h.Set("Content-Type", "application/json; charset=utf-8")
+	h.Set("Content-Length", strconv.Itoa(len(body)))
 	w.ResponseWriter.WriteHeader(http.StatusRequestEntityTooLarge)
 	_, _ = w.ResponseWriter.Write(body)
+}
+
+// bodyLimitStateKey carries the request's cap state across site re-dispatch,
+// which resets the gin context but keeps the request.
+type bodyLimitStateKey struct{}
+
+func bodyLimitStateFrom(c *gin.Context) (*bodyLimitState, bool) {
+	state, ok := c.Request.Context().Value(bodyLimitStateKey{}).(*bodyLimitState)
+	return state, ok
 }
 
 // RequestBodyLimitMiddleware caps request bodies. A declared length over the
 // cap is refused with 413 before the handler runs. A body that is larger than
 // declared, or chunked, is cut off during the read, and the response becomes
-// 413 whatever the handler writes. A request that is already capped (site
-// re-dispatch) is passed through unchanged.
+// 413 whatever the handler writes. Site re-dispatch re-runs this middleware on
+// the same request: the body cap is installed once and the response writer is
+// wrapped again, since re-dispatch resets it.
 func RequestBodyLimitMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if _, capped := c.Writer.(*limitedWriter); capped {
-			c.Next()
-			return
+		state, redispatched := bodyLimitStateFrom(c)
+		if !redispatched {
+			limit := requestBodyLimit(routeTemplate(c))
+			if c.Request.ContentLength > limit {
+				abortBodyTooLarge(c)
+				return
+			}
+			state = &bodyLimitState{}
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), bodyLimitStateKey{}, state))
+			if c.Request.Body != nil {
+				c.Request.Body = limitedBody{ReadCloser: http.MaxBytesReader(c.Writer, c.Request.Body, limit), state: state}
+			}
 		}
-		limit := requestBodyLimit(routeTemplate(c))
-		if c.Request.ContentLength > limit {
-			abortBodyTooLarge(c)
-			return
-		}
-		state := &bodyLimitState{}
-		if c.Request.Body != nil {
-			c.Request.Body = limitedBody{ReadCloser: http.MaxBytesReader(c.Writer, c.Request.Body, limit), state: state}
-		}
-		c.Writer = &limitedWriter{ResponseWriter: c.Writer, state: state}
+		lw := &limitedWriter{ResponseWriter: c.Writer, state: state}
+		c.Writer = lw
 		c.Next()
 		if state.overflowed {
-			c.Writer.(*limitedWriter).writeEnvelope()
+			lw.writeEnvelope()
 		}
 	}
 }
