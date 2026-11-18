@@ -1284,13 +1284,7 @@ func registerAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB, mail
 	{
 
 		auth.POST("/logout", func(c *gin.Context) {
-			sid, _ := c.Cookie("kora_sid")
-			if sid == "" {
-				authHeader := c.GetHeader("Authorization")
-				if strings.HasPrefix(authHeader, "Bearer ") {
-					sid = strings.TrimPrefix(authHeader, "Bearer ")
-				}
-			}
+			sid := sessionIDFromRequest(c)
 			if sid != "" {
 				// Use site DB if available.
 				logoutSM := sm

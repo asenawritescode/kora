@@ -109,3 +109,30 @@ func TestSiteGuardRefusesNonBearerAuthorizationWithCookieSession(t *testing.T) {
 		t.Fatalf("non-Bearer Authorization with a cookie: status %d reached=%v, want 401", recorder.Code, reached)
 	}
 }
+
+func TestRealtimeRevalidationRequiresBearerForExtensionIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name   string
+		header string
+	}{
+		{name: "non-bearer header", header: "Basic dXNlcjpwYXNz"},
+		{name: "empty bearer", header: "Bearer "},
+		{name: "no header", header: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/realtime", nil)
+			c.Request.AddCookie(&http.Cookie{Name: "kora_sid", Value: "sid-cookie"})
+			if test.header != "" {
+				c.Request.Header.Set("Authorization", test.header)
+			}
+			c.Set("auth_type", "extension")
+			ok, err := RevalidateRealtimeIdentity(c)
+			if ok || err != nil {
+				t.Fatalf("RevalidateRealtimeIdentity = (%v, %v), want (false, nil)", ok, err)
+			}
+		})
+	}
+}

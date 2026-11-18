@@ -309,12 +309,8 @@ func RevalidateRealtimeIdentity(c *gin.Context) (bool, error) {
 	guard := &SiteGuard{}
 	authType := c.GetString("auth_type")
 	if authType == "extension" || authType == "channel_session" {
-		header := c.GetHeader("Authorization")
-		if !strings.HasPrefix(header, "Bearer ") {
-			return false, nil
-		}
-		token := strings.TrimPrefix(header, "Bearer ")
-		if token == "" {
+		token, ok := bearerToken(c.GetHeader("Authorization"))
+		if !ok {
 			return false, nil
 		}
 		if authType == "channel_session" {
