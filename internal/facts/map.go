@@ -100,14 +100,18 @@ func newRow(dt *doctype.DocType, ev Change, src map[string]any, clock tenanttime
 }
 
 // businessDate reads the time axis: creation, a Date day as stored, or a Datetime through the clock.
+// A missing or unparseable axis value is the zero Date, which the consumer rejects.
 func businessDate(dt *doctype.DocType, ev Change, src map[string]any, clock tenanttime.Clock) tenanttime.Date {
 	f := dt.Facts
-	if f.Time == "creation" {
-		return clock.BusinessDate(ev.Created)
+	t := ev.Created
+	if f.Time != "creation" {
+		t = instant(src[f.Time])
+		if fld := dt.GetField(f.Time); fld != nil && fld.Fieldtype == "Date" && !t.IsZero() {
+			return tenanttime.Date{Year: t.Year(), Month: t.Month(), Day: t.Day()}
+		}
 	}
-	t := instant(src[f.Time])
-	if fld := dt.GetField(f.Time); fld != nil && fld.Fieldtype == "Date" {
-		return tenanttime.Date{Year: t.Year(), Month: t.Month(), Day: t.Day()}
+	if t.IsZero() {
+		return tenanttime.Date{}
 	}
 	return clock.BusinessDate(t)
 }
@@ -116,6 +120,9 @@ func businessDate(dt *doctype.DocType, ev Change, src map[string]any, clock tena
 func instant(v any) time.Time {
 	if t, ok := v.(time.Time); ok {
 		return t
+	}
+	if b, ok := v.([]byte); ok {
+		v = string(b)
 	}
 	s, _ := v.(string)
 	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999", "2006-01-02T15:04:05.999999999", "2006-01-02"} {
@@ -157,6 +164,9 @@ func valueAt(path string, rec, line map[string]any) any {
 func text(v any) string {
 	if v == nil {
 		return ""
+	}
+	if b, ok := v.([]byte); ok {
+		return string(b)
 	}
 	if s, ok := v.(string); ok {
 		return s

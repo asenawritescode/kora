@@ -213,3 +213,22 @@ func mustZone(t *testing.T, name string) *time.Location {
 	}
 	return loc
 }
+
+func TestMapMissingAxisIsZeroDate(t *testing.T) {
+	tests := []struct {
+		name    string
+		posting any
+	}{
+		{"absent", nil},
+		{"empty", ""},
+		{"unparseable", "not a date"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			head, _ := Map(saleFacts(), Change{RecordID: "SAL-1", Data: map[string]any{"posting_date": tc.posting}}, tenanttime.Default())
+			if head.BusinessDate != (tenanttime.Date{}) {
+				t.Fatalf("business date = %v, want zero", head.BusinessDate)
+			}
+		})
+	}
+}
