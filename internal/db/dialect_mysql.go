@@ -16,6 +16,9 @@ type MySQLDialect struct{}
 
 func (d *MySQLDialect) DriverName() string { return "mysql" }
 
+// IsAbortedTransaction is always false: MySQL reports no SQLSTATE 25P02.
+func (d *MySQLDialect) IsAbortedTransaction(err error) bool { return false }
+
 func (d *MySQLDialect) IsWriteConflict(err error) bool {
 	var mysqlErr *mysql.MySQLError
 	if !errors.As(err, &mysqlErr) {

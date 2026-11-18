@@ -434,7 +434,7 @@ func (m *mutation) writeItem(ctx context.Context, recordDT *doctype.DocType, doc
 	txMgr, tx := m.run.Mgr, m.run.Tx
 	if oldDoc == nil {
 		if err := txMgr.InsertInTx(tx, recordDT, doc, m.owner, m.user); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
-			return "", wrapORMError(err)
+			return "", wrapORMError(err, m.k.dialect())
 		}
 		if hookErr := captureLifecycleHooks(ctx, txMgr, tx, recordDT, lifecycleEvent{script.EventAfterInsert, doc, nil}); hookErr != nil {
 			return "", hookErr

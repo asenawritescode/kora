@@ -17,6 +17,9 @@ type LibSQLDialect struct{}
 
 func (d *LibSQLDialect) DriverName() string { return "libsql" }
 
+// IsAbortedTransaction is always false: SQLite-family drivers report no 25P02.
+func (d *LibSQLDialect) IsAbortedTransaction(err error) bool { return false }
+
 func (d *LibSQLDialect) IsWriteConflict(err error) bool {
 	if err == nil {
 		return false

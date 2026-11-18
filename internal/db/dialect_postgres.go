@@ -18,6 +18,12 @@ type PostgresDialect struct{}
 
 func (d *PostgresDialect) DriverName() string { return "postgres" }
 
+// IsAbortedTransaction reports 25P02 (in_failed_sql_transaction).
+func (d *PostgresDialect) IsAbortedTransaction(err error) bool {
+	var postgresErr *pq.Error
+	return errors.As(err, &postgresErr) && postgresErr.Code == "25P02"
+}
+
 func (d *PostgresDialect) IsWriteConflict(err error) bool {
 	var postgresErr *pq.Error
 	if !errors.As(err, &postgresErr) {
@@ -348,7 +354,7 @@ func (d *PostgresDialect) ParseError(err error, dt *doctype.DocType) *doctype.Va
 	}
 	switch pqErr.Code {
 	case "23505": // unique_violation
-		fieldName := parsePostgresKeyField(string(pqErr.Code), pqErr)
+		fieldName := postgresUniqueConstraint(pqErr.Constraint).field(dt.RawTableName())
 		if fieldName == "" {
 			fieldName = pqErr.Column
 		}
@@ -382,14 +388,19 @@ func (d *PostgresDialect) ParseError(err error, dt *doctype.DocType) *doctype.Va
 	return nil
 }
 
-// parsePostgresKeyField extracts the field name from a PostgreSQL constraint name.
-// Constraint names follow the pattern: uq_tab<table>_<field>
-// We extract the field name by taking everything after the last underscore.
-func parsePostgresKeyField(_ string, _ *pq.Error) string {
-	// The pq.Error struct does not expose Constraint directly in a standard way.
-	// For a complete implementation, we rely on the Column field from the error.
-	// This is a placeholder for future enhancement.
-	return ""
+// postgresUniqueConstraint is the name of a unique index as CreateIndex writes
+// it: uq_<table>_<field>. pq.Error.Column is empty for unique violations, so
+// the field comes from this name.
+type postgresUniqueConstraint string
+
+// field returns the field part of the name for table, or "" when the name was
+// not built for that table.
+func (c postgresUniqueConstraint) field(table string) string {
+	prefix := "uq_" + table + "_"
+	if !strings.HasPrefix(string(c), prefix) {
+		return ""
+	}
+	return strings.TrimPrefix(string(c), prefix)
 }
 
 func (d *PostgresDialect) Placeholder(n int) string {
