@@ -19,9 +19,7 @@ var fixedColumns = [...]struct{ name, fieldtype string }{
 	{"source_sequence", "Int"}, {"deleted", "Check"},
 }
 
-// DDL returns the statements creating dt's fact table and, when Lines is set, its line
-// table. Run them once at creation: the business_date index is not IF NOT EXISTS.
-// It returns nil when dt has no facts.
+// DDL returns the statements creating dt's fact and line tables. Run once: the index is not IF NOT EXISTS.
 func DDL(dialect db.Dialect, dt *doctype.DocType) []string {
 	f := dt.Facts
 	if f == nil {

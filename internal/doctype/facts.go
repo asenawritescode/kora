@@ -110,9 +110,18 @@ func (c *factChecks) bad(field, message string) {
 	c.errs = append(c.errs, CrossFileError{Code: "InvalidFacts", DocType: c.dt.Name, Field: field, Message: message})
 }
 
-// claim records an output column name and reports a second claim on it.
+// reservedFactColumns are the fixed columns of every fact table.
+var reservedFactColumns = map[string]bool{
+	"record_id": true, "line_id": true, "legal_entity": true, "owner": true, "business_date": true,
+	"occurred_at": true, "status": true, "source_sequence": true, "deleted": true,
+}
+
+// claim records a measure or dimension column name. A reserved name or a second claim is a problem.
 func (c *factChecks) claim(field, name string) {
-	if c.names[name] {
+	switch {
+	case reservedFactColumns[name]:
+		c.bad(field, fmt.Sprintf("facts column %q is reserved for the fact table", name))
+	case c.names[name]:
 		c.bad(field, fmt.Sprintf("facts column %q is declared more than once", name))
 	}
 	c.names[name] = true
@@ -139,7 +148,6 @@ func (f *FactModel) checkTime(c *factChecks) {
 			c.bad("facts.time", fmt.Sprintf("facts time %q must be a Date or Datetime field on %s, or creation", f.Time, c.dt.Name))
 		}
 	}
-	c.claim("facts.time", f.Time)
 }
 
 func (f *FactModel) checkLines(c *factChecks, reg map[string]*DocType) {
@@ -194,7 +202,6 @@ func (f *FactModel) checkStatus(c *factChecks) {
 	if sf := c.dt.GetField(f.StatusField); sf == nil || sf.Fieldtype != "Select" {
 		c.bad("facts.status_field", fmt.Sprintf("facts status_field %q must be a Select field on %s", f.StatusField, c.dt.Name))
 	}
-	c.claim("facts.status_field", f.StatusField)
 }
 
 // column resolves a record path or a "lines.name" path. It returns a non-empty reason

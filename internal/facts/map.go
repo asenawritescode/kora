@@ -12,9 +12,8 @@ import (
 	"github.com/asenawritescode/kora/internal/tenanttime"
 )
 
-// Change is one decoded record event. The caller fills Owner and Created, which the
-// payload lacks. Data is the row after the change, OldData the row before it; a delete
-// has Data nil and Deleted set.
+// Change is one decoded record event; the caller fills Owner and Created (not in the payload).
+// A delete has Data nil and Deleted set.
 type Change struct {
 	RecordID    string
 	LegalEntity string
@@ -43,9 +42,8 @@ type Row struct {
 	Dimensions     map[string]string
 }
 
-// Map turns one change into its header row and, when dt.Facts.Lines is set, one row per
-// child line. Lines an update dropped, and every line of a delete, come back as
-// tombstones (Deleted set). A missing or unparsable axis value maps to the zero Date.
+// Map turns a change into its header row and, if Lines is set, one row per child line.
+// Dropped lines and every line of a delete are tombstones. A bad axis value maps to the zero Date.
 func Map(dt *doctype.DocType, ev Change, clock tenanttime.Clock) (Row, []Row) {
 	f := dt.Facts
 	src := ev.Data
@@ -74,8 +72,7 @@ func Map(dt *doctype.DocType, ev Change, clock tenanttime.Clock) (Row, []Row) {
 	return head, rows
 }
 
-// lineRow copies the header and fills it with one child line. Header dimensions travel
-// with each line; header measures stay on the header so line sums do not double count.
+// lineRow fills a copy of the header with one child line; header measures stay on the header.
 func lineRow(head Row, f *doctype.FactModel, rec, child map[string]any, deleted bool) Row {
 	head.LineID = text(child["name"])
 	head.Deleted = deleted
@@ -102,8 +99,7 @@ func newRow(dt *doctype.DocType, ev Change, src map[string]any, clock tenanttime
 	}
 }
 
-// businessDate reads the time axis: "creation" uses the creation instant, a Date field is
-// the calendar day as stored, and a Datetime field goes through the clock.
+// businessDate reads the time axis: creation, a Date day as stored, or a Datetime through the clock.
 func businessDate(dt *doctype.DocType, ev Change, src map[string]any, clock tenanttime.Clock) tenanttime.Date {
 	f := dt.Facts
 	if f.Time == "creation" {
@@ -116,8 +112,7 @@ func businessDate(dt *doctype.DocType, ev Change, src map[string]any, clock tena
 	return clock.BusinessDate(t)
 }
 
-// instant parses a stored Date or Datetime value. Naive values are UTC; anything else is
-// the zero time.
+// instant parses a stored Date or Datetime; naive values are UTC.
 func instant(v any) time.Time {
 	if t, ok := v.(time.Time); ok {
 		return t
@@ -131,8 +126,7 @@ func instant(v any) time.Time {
 	return time.Time{}
 }
 
-// measureValues reads each measure from rec (record path) or line ("lines.name" path).
-// An absent value is zero.
+// measureValues reads each measure from rec or line; an absent value is zero.
 func measureValues(ms []doctype.FactMeasure, rec, line map[string]any) map[string]decimal.Decimal {
 	out := make(map[string]decimal.Decimal, len(ms))
 	for _, m := range ms {

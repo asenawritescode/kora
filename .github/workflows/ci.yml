@@ -125,10 +125,11 @@ jobs:
           KORA_RECON_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/kora_dbaccess_test?parseTime=true&multiStatements=true"
           KORA_SITE_SETTINGS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_TENANT_CLOCK_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+          KORA_FACTS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
         run: >-
           go test -tags=integration -p 1
           ./internal/dbaccess ./internal/api ./internal/tenanttime ./internal/analytics ./internal/outbox ./internal/site ./internal/requests/sqlstore ./internal/workflow/sqlstore
-          ./internal/notifications/sqlstore ./internal/management/sqlstore -count=1 -timeout=15m
+          ./internal/notifications/sqlstore ./internal/management/sqlstore ./internal/facts -count=1 -timeout=15m
 
       - name: Test programmatic module owner command fixture
         env:
@@ -143,6 +144,11 @@ jobs:
           done
           echo "libSQL did not open port 8080" >&2
           exit 1
+
+      - name: Test fact tables on disposable PostgreSQL
+        env:
+          KORA_FACTS_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
+        run: go test -tags=integration ./internal/facts -count=1 -timeout=5m
 
       - name: Test reconciliation persistence on disposable SQL dialects
         env:

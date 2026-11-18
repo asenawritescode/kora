@@ -77,6 +77,23 @@ func TestFactModelValidate(t *testing.T) {
 		{"measure name clashes with a dimension", func(_ *DocType, _ map[string]*DocType, f *FactModel) {
 			f.Measures = append(f.Measures, FactMeasure{Field: "total", Name: "register"})
 		}, "declared more than once"},
+		{"measure named like a fixed column", func(_ *DocType, _ map[string]*DocType, f *FactModel) {
+			f.Measures = append(f.Measures, FactMeasure{Field: "total", Name: "owner"})
+		}, "is reserved for the fact table"},
+		{"dimension named like a fixed column", func(dt *DocType, _ map[string]*DocType, f *FactModel) {
+			dt.Fields = append(dt.Fields, Field{Fieldname: "business_date", Fieldtype: "Data"})
+			f.Dimensions = append(f.Dimensions, FactDimension{Field: "business_date"})
+		}, "is reserved for the fact table"},
+		{"dimension named like the status column", func(dt *DocType, _ map[string]*DocType, f *FactModel) {
+			dt.Fields = append(dt.Fields, Field{Fieldname: "status", Fieldtype: "Data"})
+			f.Dimensions = append(f.Dimensions, FactDimension{Field: "status"})
+		}, "is reserved for the fact table"},
+		{"measure named like the time field is allowed", func(dt *DocType, _ map[string]*DocType, f *FactModel) {
+			f.Measures = append(f.Measures, FactMeasure{Field: "total", Name: "posting_date"})
+		}, ""},
+		{"dimension repeats a leaf name", func(_ *DocType, _ map[string]*DocType, f *FactModel) {
+			f.Dimensions = append(f.Dimensions, FactDimension{Field: "items.amount"})
+		}, "declared more than once"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

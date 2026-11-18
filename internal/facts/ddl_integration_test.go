@@ -23,8 +23,8 @@ func TestFactTablesAcceptMappedRows(t *testing.T) {
 	tests := []struct {
 		driver, dialect, envVar string
 	}{
-		{"mysql", "mysql", "KORA_FACTS_MYSQL_DSN"},
-		{"postgres", "postgres", "KORA_FACTS_POSTGRES_DSN"},
+		{"mysql", "mysql", "KORA_FACTS_DISPOSABLE_MYSQL_DSN"},
+		{"postgres", "postgres", "KORA_FACTS_DISPOSABLE_POSTGRES_DSN"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.driver, func(t *testing.T) {
