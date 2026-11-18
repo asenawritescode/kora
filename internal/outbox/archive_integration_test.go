@@ -62,6 +62,9 @@ func runArchiveSuite(t *testing.T, driver, dsn string, dialect db.Dialect, ddl [
 		"leaves every other state untouched":              scenarioLeavesOtherRows,
 		"keeps rows when the archive write fails":         scenarioKeepsRowsOnPutFailure,
 		"rerun after a crash writes the same key":         scenarioRerunAfterCrash,
+		"cutoff holds in a UTC+14 session zone":           sessionZoneScenario("Pacific/Kiritimati", "+14:00"),
+		"cutoff holds in a UTC-12 session zone":           sessionZoneScenario("Etc/GMT+12", "-12:00"),
+		"probe finds only archivable rows":                scenarioProbeFindsDueRows,
 	}
 	for name, run := range scenarios {
 		t.Run(name, func(t *testing.T) {
@@ -204,10 +207,9 @@ func scenarioRerunAfterCrash(t *testing.T, f archiveFixture) {
 	f.insertReceipt(t, "webhooks", "old-1")
 	store := newMemArchive()
 	a := f.archiver(t, store, nil, 10)
-	cutoff := time.Now().UTC().Add(-a.Horizon)
 	// Simulate a crash after Put and before the delete transaction: the object is
 	// written, the rows stay.
-	rows, created, err := a.selectDue(context.Background(), "acme", cutoff)
+	rows, created, err := a.selectDue(context.Background(), "acme")
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("selectDue = %d rows, %v; want 2", len(rows), err)
 	}
@@ -239,4 +241,65 @@ func keysOf(m map[string][]byte) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// sessionZoneScenario sets the session time zone (PostgreSQL name, MySQL offset)
+// and checks the horizon boundary: a row one hour past the horizon is archived,
+// one hour inside it is kept. created_at is stamped by the database in that
+// session zone, so a cutoff bound from UTC would move the boundary by the zone
+// offset and fail this check.
+func sessionZoneScenario(pgZone, mysqlZone string) func(t *testing.T, f archiveFixture) {
+	return func(t *testing.T, f archiveFixture) {
+		f.db.SetMaxOpenConns(1)
+		f.db.SetMaxIdleConns(1)
+		if f.dialect.DriverName() == "postgres" {
+			f.exec(t, "SET TIME ZONE '"+pgZone+"'")
+		} else {
+			f.exec(t, "SET time_zone = '"+mysqlZone+"'")
+		}
+		insertAged := func(id string, extra time.Duration) {
+			f.exec(t, `INSERT INTO _kora_outbox (id, site, event_type, status, created_at, published_at, payload) VALUES (?, 'acme', 'kora.test.created', 'published', `+archiveCutoffSQL(f.dialect)+`, NULL, ?)`,
+				id, archiveHorizonSeconds(MinArchiveHorizon+extra), `{"id":"`+id+`"}`)
+		}
+		insertAged("past-horizon", time.Hour)
+		insertAged("inside-horizon", -time.Hour)
+		store := newMemArchive()
+		if n, err := f.archiver(t, store, nil, 10).ArchiveDue(context.Background(), "acme"); err != nil || n != 1 {
+			t.Fatalf("ArchiveDue = %d, %v; want 1, nil", n, err)
+		}
+		if got := f.count(t, `SELECT COUNT(*) FROM _kora_outbox WHERE id = ?`, "inside-horizon"); got != 1 {
+			t.Fatalf("inside-horizon row kept = %d, want 1", got)
+		}
+		if got := f.count(t, `SELECT COUNT(*) FROM _kora_outbox WHERE id = ?`, "past-horizon"); got != 0 {
+			t.Fatalf("past-horizon row archived = %d rows left, want 0", got)
+		}
+	}
+}
+
+// scenarioProbeFindsDueRows checks that the scanner probe answers the same
+// question as the archiver: old published rows yes, recent or failed rows no.
+func scenarioProbeFindsDueRows(t *testing.T, f archiveFixture) {
+	probe := func() bool {
+		query, args := ArchiveDueProbe(f.dialect, MinArchiveHorizon)
+		var one int
+		err := f.db.QueryRow(query, args...).Scan(&one)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			t.Fatal("probe:", err)
+		}
+		return err == nil
+	}
+	f.insertRow(t, "recent", "published", time.Now().UTC().Add(-24*time.Hour))
+	if probe() {
+		t.Fatal("probe reported due work for a recent published row")
+	}
+	f.insertRow(t, "old", "published", oldTime())
+	f.insertRow(t, "old-failed", "published", oldTime())
+	f.exec(t, `INSERT INTO _kora_outbox_delivery_failure (consumer_name, event_id, site, attempts, quarantined, last_error, updated_at) VALUES ('webhooks', 'old-failed', 'acme', 5, ?, 'boom', ?)`, true, time.Now().UTC())
+	if !probe() {
+		t.Fatal("probe missed an old published row")
+	}
+	f.exec(t, `DELETE FROM _kora_outbox WHERE id = ?`, "old")
+	if probe() {
+		t.Fatal("probe reported a row kept by a delivery failure")
+	}
 }

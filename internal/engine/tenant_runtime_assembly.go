@@ -137,6 +137,7 @@ func AssembleTenantRuntime(config TenantRuntimeAssemblyConfig) (*TenantRuntimeAs
 		Common: config.Common, CellID: config.CellID,
 		DirectoryConsumerID: config.DirectoryConsumerID,
 		Analytics:           config.Services.Analytics,
+		ArchiveHorizon:      config.Services.ArchiveHorizon,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("configure durable tenant work scanner: %w", err)

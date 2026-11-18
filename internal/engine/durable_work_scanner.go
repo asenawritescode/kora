@@ -18,6 +18,7 @@ import (
 	"github.com/asenawritescode/kora/internal/configstore"
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/outbox"
 	"github.com/asenawritescode/kora/internal/scheduler"
 	schedulersql "github.com/asenawritescode/kora/internal/scheduler/sqlstore"
 	"github.com/asenawritescode/kora/internal/site"
@@ -50,6 +51,9 @@ type DurableWorkScannerConfig struct {
 	ProbeTimeout        time.Duration
 	PageYield           time.Duration
 	Interval            time.Duration
+	// ArchiveHorizon is the outbox archive horizon. Zero disables the archive
+	// probe, so cold tenants are not woken for archive work nobody will run.
+	ArchiveHorizon time.Duration
 }
 
 // DurableWorkScanner walks local credential-free descriptors in bounded
@@ -81,6 +85,7 @@ type DurableWorkScanner struct {
 	probeWait              time.Duration
 	pageYield              time.Duration
 	interval               time.Duration
+	archiveHorizon         time.Duration
 	probes                 atomic.Uint64
 	due                    atomic.Uint64
 	probeFails             atomic.Uint64
@@ -159,7 +164,8 @@ func NewDurableWorkScanner(config DurableWorkScannerConfig) (*DurableWorkScanner
 		tenantWorkAdmission: config.TenantWorkAdmission,
 		common:              config.Common, analytics: config.Analytics, cellID: strings.TrimSpace(config.CellID), scanKey: scanKey,
 		pageSize: config.PageSize, probeWait: config.ProbeTimeout, pageYield: config.PageYield, interval: config.Interval,
-		done: make(chan struct{}),
+		archiveHorizon: config.ArchiveHorizon,
+		done:           make(chan struct{}),
 	}, nil
 }
 
@@ -350,7 +356,7 @@ func activeScanDescriptor(descriptor site.Descriptor, cellID string) bool {
 
 // probeTenantDatabase registers the active scheduled jobs for a cold tenant and
 // reports whether the tenant has work that is already due.
-func probeTenantDatabase(ctx context.Context, config *site.Config, info site.DBSiteInfo) (bool, error) {
+func probeTenantDatabase(ctx context.Context, config *site.Config, info site.DBSiteInfo, archiveHorizon time.Duration) (bool, error) {
 	database, err := site.Connect(ctx, config)
 	if err != nil {
 		return false, err
@@ -367,7 +373,7 @@ func probeTenantDatabase(ctx context.Context, config *site.Config, info site.DBS
 			return false, err
 		}
 	}
-	return hasDueTenantWork(ctx, database, dialect)
+	return hasDueTenantWork(ctx, database, dialect, archiveHorizon)
 }
 
 // registerScheduledJobs records each scheduled job definition with its next run time.
@@ -444,7 +450,7 @@ func (s *DurableWorkScanner) probeTenant(ctx context.Context, descriptor site.De
 	}
 	var due bool
 	due, err = withTenantProbeAdmission(ctx, admission, func() (bool, error) {
-		return probeTenantDatabase(ctx, config, info)
+		return probeTenantDatabase(ctx, config, info, s.archiveHorizon)
 	})
 	if err != nil || due {
 		return due, err
@@ -561,7 +567,7 @@ func (s *DurableWorkScanner) publishColdWALSnapshot() {
 	s.walScanActive = false
 }
 
-func hasDueTenantWork(ctx context.Context, database *sql.DB, dialect db.Dialect) (bool, error) {
+func hasDueTenantWork(ctx context.Context, database *sql.DB, dialect db.Dialect, archiveHorizon time.Duration) (bool, error) {
 	now := dialect.NowTimestamp()
 	checks := []struct {
 		tables []string
@@ -611,7 +617,29 @@ func hasDueTenantWork(ctx context.Context, database *sql.DB, dialect db.Dialect)
 			return false, fmt.Errorf("probe durable work tables %v: %w", check.tables, err)
 		}
 	}
-	return false, nil
+	return hasArchiveDueOutbox(ctx, database, dialect, archiveHorizon)
+}
+
+// hasArchiveDueOutbox reports whether the outbox archive has rows to move. The
+// archive runs daily, so this only decides whether a cold tenant is woken.
+func hasArchiveDueOutbox(ctx context.Context, database *sql.DB, dialect db.Dialect, archiveHorizon time.Duration) (bool, error) {
+	if archiveHorizon <= 0 {
+		return false, nil
+	}
+	tables, err := durableTablesPresent(ctx, database, dialect.DriverName(), map[string]struct{}{"_kora_outbox": {}, "_kora_outbox_delivery_failure": {}})
+	if err != nil || !tables["_kora_outbox"] || !tables["_kora_outbox_delivery_failure"] {
+		return false, err
+	}
+	query, args := outbox.ArchiveDueProbe(dialect, archiveHorizon)
+	var one int
+	err = database.QueryRowContext(ctx, query, args...).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("probe due outbox archive: %w", err)
+	}
+	return true, nil
 }
 
 func durableTablesPresent(ctx context.Context, database *sql.DB, driver string, wanted map[string]struct{}) (map[string]bool, error) {

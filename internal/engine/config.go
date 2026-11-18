@@ -44,6 +44,7 @@ type Config struct {
 	TenantActivationWait    time.Duration
 	RetirementLimit         uint16
 	ResolveStorage          func(*site.Config) (storage.Backend, error)
+	OutboxArchiveHorizon    time.Duration
 	CellURLs                map[string]string
 	DirectoryConsumerID     string
 	NATSConfig              *natsprovider.Config
@@ -296,6 +297,7 @@ func newEngine(ctx context.Context, config Config, deps engineAssemblyDependenci
 			SessionCacheBudget:  resources.SessionCacheBudget,
 			UploadAdmission:     resources.UploadAdmission,
 			OutboxEnabled:       config.OutboxEnabled || shared.NATSProvider != nil,
+			ArchiveHorizon:      config.OutboxArchiveHorizon,
 			Workflow:            config.Workflow,
 			RequestAuthorizer:   config.RequestAuthorizer,
 			WorkflowApprovals:   config.WorkflowApprovals,

@@ -199,17 +199,6 @@ internal/notifications/notifications.go::Worker.Run
 internal/numeric/decimal.go::Float64
 internal/orm/hooks.go::HookEnqueueFailedCount
 internal/orm/hooks.go::RecordHookEnqueueFailure
-internal/outbox/archive.go::Archiver.ArchiveDue
-internal/outbox/archive.go::Archiver.archiveChunk
-internal/outbox/archive.go::Archiver.deleteArchived
-internal/outbox/archive.go::Archiver.selectDue
-internal/outbox/archive.go::NewArchiver
-internal/outbox/archive.go::archiveKey
-internal/outbox/archive.go::encodeArchive
-internal/outbox/archive.go::indexOf
-internal/outbox/archive.go::normalizeArchiveValue
-internal/outbox/outbox.go::BacklogMetrics.RecordArchiveFailure
-internal/outbox/outbox.go::BacklogMetrics.RecordArchived
 internal/outbox/outbox.go::Consumer.RecordReceipt
 internal/outbox/outbox.go::Consumer.RecordReceiptTx
 internal/outbox/outbox.go::Dispatcher.InspectQuarantined
