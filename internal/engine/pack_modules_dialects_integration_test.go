@@ -166,10 +166,10 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 			owner := get("Owner")
 			ownerOps, ownerQueries := refs(owner)
 			t.Logf("owner operations=%v queries=%v", ownerOps, ownerQueries)
-			if len(ownerOps) != 11 {
-				t.Errorf("owner operations = %d, want 11: %v", len(ownerOps), ownerOps)
+			if len(ownerOps) != 7 {
+				t.Errorf("owner operations = %d, want 7: %v", len(ownerOps), ownerOps)
 			}
-			for _, name := range []string{"receive_stock", "adjust_stock", "open_session", "close_session", "open_shift", "close_shift", "open_till", "close_till", "record_sale", "return_sale", "void_sale"} {
+			for _, name := range []string{"receive_stock", "adjust_stock", "open_session", "close_session", "record_sale", "return_sale", "void_sale"} {
 				found := false
 				for _, ref := range ownerOps {
 					found = found || strings.HasSuffix(ref, "~"+name)
@@ -178,11 +178,11 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 					t.Errorf("owner catalog lacks operation %s", name)
 				}
 			}
-			// 19 published queries (favourite_items #570 adds one the Owner reads); the Owner reads all but my_closed_session and
+			// 18 published queries (favourite_items #570 adds one the Owner reads); the Owner reads all but my_closed_session and
 			// my_sales, the Cashier's own-till and own-sales variants of
 			// closed_session (#384) and recent_sales (#91).
-			if len(ownerQueries) != 17 {
-				t.Errorf("owner queries = %d, want 17: %v", len(ownerQueries), ownerQueries)
+			if len(ownerQueries) != 16 {
+				t.Errorf("owner queries = %d, want 16: %v", len(ownerQueries), ownerQueries)
 			}
 			for _, name := range []string{"sale_items", "sale_payments", "recent_sales"} {
 				if !slices.Contains(ownerQueries, "pos.core/"+name) {
@@ -292,8 +292,7 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 				}
 			}
 			// record_sale requires an open till (#233) that belongs to the cashier
-			// (#375/#379): open_session records the actor as the till's cashier,
-			// whereas open_till leaves it blank and is for Owner/Manager/Administrator.
+			// (#375/#379): open_session records the actor as the till's cashier.
 			var sch contract.SchemaRef
 			sessionRef := ""
 			for _, o := range cashier.PublishedOperations {
@@ -456,8 +455,8 @@ func assertPOSPublished(t *testing.T, database *sql.DB, dialect db.Dialect, site
 	if got := strings.Join(ids, ","); got != "inventory.app,inventory.core,pos.app,pos.core" {
 		t.Errorf("modules = %s", got)
 	}
-	if len(snap.PrintFormats) != 5 {
-		t.Errorf("print formats = %d, want 5", len(snap.PrintFormats))
+	if len(snap.PrintFormats) != 4 {
+		t.Errorf("print formats = %d, want 4", len(snap.PrintFormats))
 	}
 	opFormats := 0
 	for _, raw := range snap.PrintFormats {
@@ -477,8 +476,8 @@ func assertPOSPublished(t *testing.T, database *sql.DB, dialect db.Dialect, site
 			t.Errorf("print format for.operation %q is not a published ref ", f.For.Operation)
 		}
 	}
-	if opFormats != 3 {
-		t.Errorf("operation-targeted print formats = %d, want 3", opFormats)
+	if opFormats != 2 {
+		t.Errorf("operation-targeted print formats = %d, want 2", opFormats)
 	}
 	yaml, err := os.ReadFile(filepath.Join("..", "..", "config", "pos", "permissions.yaml"))
 	if err != nil {

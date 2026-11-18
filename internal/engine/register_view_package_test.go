@@ -26,7 +26,7 @@ type: register
 layout: two_panel
 resources:
   - {id: items, query: published.query, params: {owner_module_id: inventory.core, query_name: item_search}}
-  - {id: session, query: published.query, params: {owner_module_id: pos.core, query_name: open_till}}
+  - {id: session, query: published.query, params: {owner_module_id: pos.core, query_name: my_session}}
 components:
   - {id: products, type: product_grid, version: 2, resource_bindings: {items: items}, bindings: {title: item_name, price: price, sku: barcode}}
   - {id: cart, type: cart_panel, version: 2, region: side}

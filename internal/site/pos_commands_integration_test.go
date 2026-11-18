@@ -116,7 +116,7 @@ func runPOSCommandFeatures(t *testing.T, driver string, conn *sql.DB, dbName str
 
 	// #94: $actor and $now are resolved at runtime and persisted.
 	before := time.Now().Add(-time.Minute)
-	first := must("pos.open_shift", "open-1", map[string]any{"data": map[string]any{"register": register}})
+	first := must("pos.open_session", "open-1", map[string]any{"data": map[string]any{"register": register, "location": loc, "opening_float": 500}})
 	shift := fmt.Sprint(first["steps"].([]any)[0].(map[string]any)["name"])
 	if got := q("SELECT cashier FROM "+table("Shift")+" WHERE name = ?", shift); got != "cashier-1" {
 		t.Fatalf("$actor cashier = %q", got)
@@ -131,7 +131,7 @@ func runPOSCommandFeatures(t *testing.T, driver string, conn *sql.DB, dbName str
 
 	// #94: replay with the same idempotency key returns the same result and $now.
 	time.Sleep(1100 * time.Millisecond)
-	replay := must("pos.open_shift", "open-1", map[string]any{"data": map[string]any{"register": register}})
+	replay := must("pos.open_session", "open-1", map[string]any{"data": map[string]any{"register": register, "location": loc, "opening_float": 500}})
 	if fmt.Sprint(replay["steps"].([]any)[0].(map[string]any)["name"]) != shift {
 		t.Fatalf("replay created another shift: %v", replay)
 	}
@@ -142,28 +142,23 @@ func runPOSCommandFeatures(t *testing.T, driver string, conn *sql.DB, dbName str
 		t.Fatalf("replay changed $now: %q -> %q", startedAt, got)
 	}
 
-	// #110: a second open shift on the same register is refused, nothing written.
-	if _, cerr := exec("pos.open_shift", "open-2", map[string]any{"data": map[string]any{"register": register}}); cerr == nil || !strings.Contains(cerr.Message, "already has an open shift") {
-		t.Fatalf("second open_shift err = %+v", cerr)
+	// #110: a second open on the same register is refused, nothing written.
+	if _, cerr := exec("pos.open_session", "open-2", map[string]any{"data": map[string]any{"register": register, "location": loc, "opening_float": 1}}); cerr == nil || !strings.Contains(cerr.Message, "already has an open shift") {
+		t.Fatalf("second open_session err = %+v", cerr)
 	}
 	if n := q("SELECT COUNT(*) FROM " + table("Shift")); n != "1" {
 		t.Fatalf("shifts after rejected open = %s, want 1", n)
 	}
 
-	// #111: open_till, then close_till records variance = counted - expected.
-	must("pos.open_till", "", map[string]any{"data": map[string]any{"shift": shift, "opening_float": 500}})
-	if _, cerr := exec("pos.open_till", "", map[string]any{"data": map[string]any{"shift": shift, "opening_float": 1}}); cerr == nil {
-		t.Fatal("second open_till for the same shift was accepted")
-	}
-	must("pos.close_till", "", map[string]any{"data": map[string]any{"shift": shift, "closing_count": 495, "expected_cash": 800}})
+	// #111: close_session records variance = counted - expected (expected starts at the float).
+	must("pos.close_session", "", map[string]any{"data": map[string]any{"shift": shift, "closing_count": 495}})
 	if got := q("SELECT variance FROM "+table("Till Session")+" WHERE shift = ?", shift); got != "-5" && !strings.HasPrefix(got, "-5.0") {
 		t.Fatalf("variance = %q, want -5", got)
 	}
 
-	// close_shift: $now on update, and the register can open a new shift.
-	must("pos.close_shift", "", map[string]any{"data": map[string]any{"register": register}})
+	// close_session: $now on the shift update, and the register can open a new shift.
 	if got := q("SELECT ended_at FROM "+table("Shift")+" WHERE name = ?", shift); got == "" {
-		t.Fatal("close_shift did not set ended_at via $now")
+		t.Fatal("close_session did not set ended_at via $now")
 	}
-	must("pos.open_shift", "open-3", map[string]any{"data": map[string]any{"register": register}})
+	must("pos.open_session", "open-4", map[string]any{"data": map[string]any{"register": register, "location": loc, "opening_float": 0}})
 }

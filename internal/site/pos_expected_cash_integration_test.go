@@ -116,8 +116,8 @@ func runPOSExpectedCash(t *testing.T, driver string, conn *sql.DB, dbName string
 	register := id("Register", map[string]any{"register_name": "Front", "location": loc, "enabled": 1})
 	tea := id("Item", map[string]any{"item_name": "Tea", "uom": "Nos", "price": 100})
 	id("Stock Balance", map[string]any{"item": tea, "location": loc, "quantity": 50, "reorder_level": 1})
-	shift := fmt.Sprint(must("pos.open_shift", map[string]any{"data": map[string]any{"register": register}})["steps"].([]any)[0].(map[string]any)["name"])
-	must("pos.open_till", map[string]any{"data": map[string]any{"shift": shift, "opening_float": 500, "expected_cash": 9999}})
+	opened := must("pos.open_session", map[string]any{"data": map[string]any{"register": register, "location": loc, "opening_float": 500}})
+	shift := fmt.Sprint(opened["steps"].([]any)[0].(map[string]any)["name"])
 	till := str("SELECT name FROM "+table("Till Session")+" WHERE shift = ?", shift)
 	pay := posPayments(t, conn, dialect, siteName)
 	expected := func() float64 {
@@ -131,7 +131,7 @@ func runPOSExpectedCash(t *testing.T, driver string, conn *sql.DB, dbName string
 			t.Fatalf("%s: expected_cash = %v, want %v", label, got, v)
 		}
 	}
-	want("open (sent expected_cash ignored)", 500)
+	want("open", 500)
 	items := func(qty int) []map[string]any {
 		return []map[string]any{{"item": tea, "quantity": qty, "unit_price": 100, "amount": 100 * qty}}
 	}
@@ -202,7 +202,7 @@ func runPOSExpectedCash(t *testing.T, driver string, conn *sql.DB, dbName string
 	want("void cash sale", 700)
 
 	// Close: count 690 against expected 700 -> variance -10; reference is the till name.
-	closeOut := must("pos.close_till", map[string]any{"data": map[string]any{"shift": shift, "closing_count": 690, "expected_cash": 1}})
+	closeOut := must("pos.close_session", map[string]any{"data": map[string]any{"shift": shift, "closing_count": 690}})
 	if got := fmt.Sprint(closeOut["output"].(map[string]any)["reference"]); got != till {
 		t.Fatalf("close reference = %q, want %q", got, till)
 	}
@@ -217,8 +217,8 @@ func runPOSExpectedCash(t *testing.T, driver string, conn *sql.DB, dbName string
 		return str("SELECT COUNT(*) FROM "+table("Sale")) + "/" + str("SELECT COUNT(*) FROM "+table("Stock Entry"))
 	}
 	before := counts()
-	if _, cerr = exec("pos.close_till", map[string]any{"data": map[string]any{"shift": shift, "closing_count": 1}}); cerr == nil {
-		t.Fatal("second close_till accepted")
+	if _, cerr = exec("pos.close_session", map[string]any{"data": map[string]any{"shift": shift, "closing_count": 1}}); cerr == nil {
+		t.Fatal("second close_session accepted")
 	}
 	if _, cerr = sell(1, pay("cash", 100)); cerr == nil {
 		t.Fatal("sale on closed till accepted")
@@ -254,7 +254,7 @@ func runPOSExpectedCash(t *testing.T, driver string, conn *sql.DB, dbName string
 		return nil
 	}
 	var rendered []string
-	for _, file := range []string{"z_report.yaml", "z_report_close_session.yaml", "z_report_reprint.yaml"} {
+	for _, file := range []string{"z_report.yaml", "z_report_reprint.yaml"} {
 		body, err := os.ReadFile(filepath.Join("..", "..", "config", "pos", "print_formats", file))
 		if err != nil {
 			t.Fatal(err)
@@ -279,7 +279,7 @@ func runPOSExpectedCash(t *testing.T, driver string, conn *sql.DB, dbName string
 		}
 		rendered = append(rendered, txt)
 	}
-	if rendered[0] != rendered[1] || rendered[0] != rendered[2] {
+	if rendered[0] != rendered[1] {
 		t.Fatal("reprint differs from operation print")
 	}
 	// Voided sale is excluded; lines are method, count, total.

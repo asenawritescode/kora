@@ -116,8 +116,7 @@ func runPOSReturnBalances(t *testing.T, driver string, conn *sql.DB, dbName stri
 	register := id("Register", map[string]any{"register_name": "Front", "location": loc, "enabled": 1})
 	tea := id("Item", map[string]any{"item_name": "Tea", "uom": "Nos", "price": 19.99})
 	id("Stock Balance", map[string]any{"item": tea, "location": loc, "quantity": 20, "reorder_level": 1})
-	shift := fmt.Sprint(must("pos.open_shift", "", map[string]any{"data": map[string]any{"register": register}})["steps"].([]any)[0].(map[string]any)["name"])
-	must("pos.open_till", "", map[string]any{"data": map[string]any{"shift": shift, "opening_float": 0}})
+	shift := fmt.Sprint(must("pos.open_session", "", map[string]any{"data": map[string]any{"register": register, "location": loc, "opening_float": 0}})["steps"].([]any)[0].(map[string]any)["name"])
 	till := q("SELECT name FROM "+table("Till Session")+" WHERE shift = ?", shift)
 
 	pay := posPayments(t, conn, dialect, siteName)

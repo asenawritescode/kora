@@ -163,18 +163,6 @@
 - doctype: module.pos.core.operation.open_session
   role: Owner
   write: true
-- doctype: module.pos.core.operation.open_shift
-  role: Owner
-  write: true
-- doctype: module.pos.core.operation.close_shift
-  role: Owner
-  write: true
-- doctype: module.pos.core.operation.open_till
-  role: Owner
-  write: true
-- doctype: module.pos.core.operation.close_till
-  role: Owner
-  write: true
 - doctype: module.pos.core.operation.close_session
   role: Owner
   write: true
@@ -187,9 +175,6 @@
 - doctype: module.pos.core.operation.void_sale
   role: Owner
   write: true
-- doctype: module.pos.core.query.open_till
-  role: Owner
-  read: true
 - doctype: module.pos.core.query.my_session
   role: Owner
   read: true
@@ -218,18 +203,6 @@
 - doctype: module.pos.core.operation.open_session
   role: Manager
   write: true
-- doctype: module.pos.core.operation.open_shift
-  role: Manager
-  write: true
-- doctype: module.pos.core.operation.close_shift
-  role: Manager
-  write: true
-- doctype: module.pos.core.operation.open_till
-  role: Manager
-  write: true
-- doctype: module.pos.core.operation.close_till
-  role: Manager
-  write: true
 - doctype: module.pos.core.operation.close_session
   role: Manager
   write: true
@@ -242,9 +215,6 @@
 - doctype: module.pos.core.operation.void_sale
   role: Manager
   write: true
-- doctype: module.pos.core.query.open_till
-  role: Manager
-  read: true
 - doctype: module.pos.core.query.my_session
   role: Manager
   read: true
@@ -273,18 +243,6 @@
 - doctype: module.pos.core.operation.open_session
   role: Cashier
   write: true
-- doctype: module.pos.core.operation.open_shift
-  role: Cashier
-  write: true
-- doctype: module.pos.core.operation.close_shift
-  role: Cashier
-  write: true
-- doctype: module.pos.core.operation.open_till
-  role: Cashier
-  write: true
-- doctype: module.pos.core.operation.close_till
-  role: Cashier
-  write: true
 - doctype: module.pos.core.operation.close_session
   role: Cashier
   write: true
@@ -297,9 +255,6 @@
 - doctype: module.pos.core.operation.void_sale
   role: Cashier
   write: true
-- doctype: module.pos.core.query.open_till
-  role: Cashier
-  read: true
 - doctype: module.pos.core.query.my_session
   role: Cashier
   read: true

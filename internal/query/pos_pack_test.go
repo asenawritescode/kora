@@ -28,7 +28,7 @@ func TestPOSPackQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"open_till": "Till Session", "my_session": "Till Session", "closed_session": "Till Session", "my_closed_session": "Till Session", "my_registers": "Register", "recent_sales": "Sale", "sale_lines": "Sale Line Balance", "sale_items": "Sale Item", "sale_payments": "Sale Payment", "my_sales": "Sale", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment", "payments_by_account": "Sale Payment"}
+	want := map[string]string{"my_session": "Till Session", "closed_session": "Till Session", "my_closed_session": "Till Session", "my_registers": "Register", "recent_sales": "Sale", "sale_lines": "Sale Line Balance", "sale_items": "Sale Item", "sale_payments": "Sale Payment", "my_sales": "Sale", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment", "payments_by_account": "Sale Payment"}
 	if len(defs) != len(want) {
 		t.Fatalf("got %d queries, want %d", len(defs), len(want))
 	}
@@ -127,7 +127,7 @@ func TestPOSPackQueriesAcceptEmptyInput(t *testing.T) {
 		}
 	}
 	// my_session has no actor here, so it matches nobody.
-	wantRows := map[string]int{"my_session": 0, "my_registers": 1, "open_till": 1, "recent_sales": 3, "my_sales": 3, "today_totals": 1, "payments_by_method": 1, "refunds_by_method": 1, "payments_by_account": 0}
+	wantRows := map[string]int{"my_session": 0, "my_registers": 1, "recent_sales": 3, "my_sales": 3, "today_totals": 1, "payments_by_method": 1, "refunds_by_method": 1, "payments_by_account": 0}
 	for _, d := range defs {
 		if d.Name == "sale_lines" || d.Name == "sale_items" || d.Name == "sale_payments" {
 			continue // the sale input is required: TestPOSSaleLines and TestPOSSaleDetailQueries pin the 400

@@ -107,7 +107,7 @@ func TestPOSZReportRenders(t *testing.T) {
 		Now:    time.Unix(0, 0).UTC(),
 	}
 	var outs []string
-	for _, file := range []string{"z_report.yaml", "z_report_close_session.yaml", "z_report_reprint.yaml"} {
+	for _, file := range []string{"z_report.yaml", "z_report_reprint.yaml"} {
 		body, err := os.ReadFile("../../config/pos/print_formats/" + file)
 		if err != nil {
 			t.Fatal(err)
@@ -162,7 +162,7 @@ func TestPOSZReportHTMLCarriesTheTextSections(t *testing.T) {
 		{"no payments at all", nil, nil, nil,
 			[]string{"<h2>SALES</h2>", "No sales"}, []string{"REFUNDS", "BY ACCOUNT"}},
 	}
-	for _, file := range []string{"z_report.yaml", "z_report_close_session.yaml", "z_report_reprint.yaml"} {
+	for _, file := range []string{"z_report.yaml", "z_report_reprint.yaml"} {
 		body, err := os.ReadFile("../../config/pos/print_formats/" + file)
 		if err != nil {
 			t.Fatal(err)
