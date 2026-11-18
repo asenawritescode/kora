@@ -38,7 +38,7 @@ func TestLivePostgresAnalyticsInsights(t *testing.T) {
 	if _, err := database.Exec(`SET search_path TO "` + schemaName + `"`); err != nil {
 		t.Fatal("select isolated PostgreSQL schema:", err)
 	}
-	if _, err := database.Exec(`CREATE TABLE _kora_analytics_daily (site TEXT NOT NULL, doctype TEXT NOT NULL, metric TEXT NOT NULL, dimension TEXT NOT NULL, date DATE NOT NULL, value DOUBLE PRECISION NOT NULL)`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE _kora_analytics_daily (site TEXT NOT NULL, doctype TEXT NOT NULL, metric TEXT NOT NULL, dimension TEXT NOT NULL, date DATE NOT NULL, value DOUBLE PRECISION NOT NULL, scope_kind TEXT NOT NULL DEFAULT 'tenant', legal_entity_id TEXT NOT NULL DEFAULT '')`); err != nil {
 		t.Fatal("create analytics daily fixture:", err)
 	}
 	if _, err := database.Exec(`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value) VALUES ($1,$2,$3,$4,CURRENT_DATE,$5)`, "site-pg", "Sale", "sale_count", "", 3.0); err != nil {

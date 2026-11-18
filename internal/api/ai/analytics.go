@@ -520,45 +520,21 @@ func executeAnalyticsInsights(tx *orm.TxManager, reg *doctype.Registry, doctypeN
 
 	// "all" → list doctypes with data.
 	if doctypeName == "" || doctypeName == "all" {
-		rows, err := tx.DB.Query(
-			kdb.Rebind(tx.Dialect, "SELECT DISTINCT doctype FROM _kora_analytics_daily WHERE site = ? LIMIT 20"),
-			siteName,
-		)
-		if err != nil {
-			return "Analytics not available. Create documents first."
-		}
-		defer rows.Close()
-		var dts []string
-		for rows.Next() {
-			var d string
-			if err := rows.Scan(&d); err != nil {
-				continue
-			}
-			if doctypeName != "all" {
-				dts = append(dts, d)
-				continue
-			}
-			if _, allowed := readable[d]; allowed {
-				dts = append(dts, d)
-			}
-		}
-		if len(dts) == 0 {
-			return "No analytics data yet. Create documents and metrics will appear within seconds."
-		}
-		return fmt.Sprintf("Doctypes with analytics data: %s. Use get_analytics_insights with a specific doctype name to see its metrics.", strings.Join(dts, ", "))
+		return listRollupDoctypes(tx, siteName, doctypeName, readable)
 	}
 
+	scope := rollupScope(tx.BusinessScope, siteName)
 	// Get pre-computed metrics for this doctype.
 	from := time.Now().AddDate(0, 0, -30).Format("2006-01-02")
 	to := time.Now().Format("2006-01-02")
 	rows, err := tx.DB.Query(
 		kdb.Rebind(tx.Dialect, `SELECT metric, dimension, SUM(value)
 		 FROM _kora_analytics_daily
-		 WHERE site = ? AND doctype = ?
+		 WHERE site = ? AND scope_kind = ? AND legal_entity_id = ? AND doctype = ?
 		   AND date >= ? AND date <= ?
 		 GROUP BY metric, dimension
 		 ORDER BY metric, SUM(value) DESC`),
-		siteName, doctypeName, from, to,
+		siteName, string(scope.Kind), scope.LegalEntityID, doctypeName, from, to,
 	)
 	if err != nil {
 		return fmt.Sprintf("Error querying analytics: %v", err)
@@ -635,4 +611,46 @@ func formatAnalyticsLabel(metric, doctype string) string {
 	name := strings.TrimPrefix(metric, prefix)
 	name = strings.ReplaceAll(name, "_", " ")
 	return cases.Title(language.English, cases.NoLower).String(name)
+}
+
+// rollupScope is the business scope rollup rows are keyed by. Entity-owned
+// sources store legal_entity rows only, so a caller without an exact entity
+// scope must not sum across entities. A missing tenant falls back to the site.
+func rollupScope(scope contract.BusinessScope, siteName string) contract.BusinessScope {
+	if scope.TenantID == "" {
+		return contract.BusinessScope{TenantID: contract.TenantID(siteName), Kind: contract.ScopeKindTenant}
+	}
+	return scope
+}
+
+// listRollupDoctypes names the doctypes with rollup rows visible to the scope.
+// With "all", only doctypes the caller may read are named.
+func listRollupDoctypes(tx *orm.TxManager, siteName, doctypeName string, readable map[string]struct{}) string {
+	scope := rollupScope(tx.BusinessScope, siteName)
+	rows, err := tx.DB.Query(
+		kdb.Rebind(tx.Dialect, "SELECT DISTINCT doctype FROM _kora_analytics_daily WHERE site = ? AND scope_kind = ? AND legal_entity_id = ? LIMIT 20"),
+		siteName, string(scope.Kind), scope.LegalEntityID,
+	)
+	if err != nil {
+		return "Analytics not available. Create documents first."
+	}
+	defer rows.Close()
+	var dts []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			continue
+		}
+		if doctypeName != "all" {
+			dts = append(dts, d)
+			continue
+		}
+		if _, allowed := readable[d]; allowed {
+			dts = append(dts, d)
+		}
+	}
+	if len(dts) == 0 {
+		return "No analytics data yet. Create documents and metrics will appear within seconds."
+	}
+	return fmt.Sprintf("Doctypes with analytics data: %s. Use get_analytics_insights with a specific doctype name to see its metrics.", strings.Join(dts, ", "))
 }
