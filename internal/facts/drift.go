@@ -100,7 +100,32 @@ func (c *DriftChecker) RunDue(ctx context.Context) (int, error) {
 			return drifted, err
 		}
 	}
+	if err := c.drainRebuilds(ctx); err != nil {
+		return drifted, err
+	}
 	return drifted, nil
+}
+
+// drainRebuilds runs the queued rebuild jobs of every model under this lease, so a repair queued by the check
+// is applied without an operator. Jobs are claimed one at a time: a crashed run leaves its job resumable.
+func (c *DriftChecker) drainRebuilds(ctx context.Context) error {
+	store := &JobStore{DB: c.DB, Dialect: c.Dialect}
+	rebuilder := &Rebuilder{DB: c.DB, Dialect: c.Dialect, Registry: c.Registry, Site: c.Site, Store: store}
+	for _, dt := range c.models() {
+		for {
+			job, err := store.Claim(ctx, dt.Name, c.Owner)
+			if err != nil {
+				return err
+			}
+			if job == nil {
+				break
+			}
+			if err := rebuilder.Run(ctx, job); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Run checks until ctx ends, pausing driftEvery plus up to half of it as jitter.
@@ -146,8 +171,19 @@ func (c *DriftChecker) checkModel(ctx context.Context, dt *doctype.DocType, days
 			continue
 		}
 		slog.Warn("fact drift", "model", dt.Name, "day", day.String(), "summary_drift", summaryOff, "source_drift", sourceOff)
+		if held, err := c.held(ctx); err != nil || !held {
+			if err == nil {
+				err = errDriftLeaseLost
+			}
+			return drifted, err
+		}
 		if err := c.markDirtyDay(ctx, dt, day); err != nil {
 			return drifted, err
+		}
+		if sourceOff {
+			if err := c.queueRepair(ctx, dt, day); err != nil {
+				return drifted, err
+			}
 		}
 		if c.Drifted != nil {
 			c.Drifted.Add(ctx, 1, metric.WithAttributes(attribute.String(driftMetricLabel, dt.Name)))
@@ -276,10 +312,9 @@ func (c *DriftChecker) expectedHeaders(ctx context.Context, tx *sql.Tx, dt *doct
 
 // candidates lists the source records whose axis falls within driftWindowDays of day.
 func (c *DriftChecker) candidates(ctx context.Context, tx *sql.Tx, dt *doctype.DocType, day tenanttime.Date) ([]string, error) {
-	axis := dt.Facts.Time
-	start := time.Date(day.Year, day.Month, day.Day, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -driftWindowDays)
-	end := start.AddDate(0, 0, 2*driftWindowDays+1)
-	query := fmt.Sprintf("SELECT name FROM %s WHERE %s >= ? AND %s < ?", c.Dialect.QuoteIdent(dt.RawTableName()), c.Dialect.QuoteIdent(axis), c.Dialect.QuoteIdent(axis))
+	axis := c.Dialect.QuoteIdent(dt.Facts.Time)
+	start, end := windowBounds(Window{From: day, To: day})
+	query := fmt.Sprintf("SELECT name FROM %s WHERE %s >= ? AND %s < ?", c.Dialect.QuoteIdent(dt.RawTableName()), axis, axis) //nolint:gosec // identifiers only, quoted by the dialect
 	rows, err := tx.QueryContext(ctx, db.Rebind(c.Dialect, query), start, end)
 	if err != nil {
 		return nil, fmt.Errorf("facts: read source window: %w", err)
@@ -331,15 +366,20 @@ func (c *DriftChecker) liveHeaders(ctx context.Context, dt *doctype.DocType, day
 	return out, rows.Err()
 }
 
-// markDirtyDay marks one business day dirty, after confirming the lease is still ours.
-func (c *DriftChecker) markDirtyDay(ctx context.Context, dt *doctype.DocType, day tenanttime.Date) error {
-	held, err := c.held(ctx)
-	if err != nil {
+// queueRepair queues a rebuild covering day, unless a queued or running job of the model already covers it.
+// The caller holds the drift lease.
+func (c *DriftChecker) queueRepair(ctx context.Context, dt *doctype.DocType, day tenanttime.Date) error {
+	store := &JobStore{DB: c.DB, Dialect: c.Dialect}
+	covered, err := store.covers(ctx, dt.Name, day)
+	if err != nil || covered {
 		return err
 	}
-	if !held {
-		return errDriftLeaseLost
-	}
+	_, err = store.Enqueue(ctx, dt.Name, Window{From: day, To: day})
+	return err
+}
+
+// markDirtyDay marks one business day dirty. The caller has checked the lease.
+func (c *DriftChecker) markDirtyDay(ctx context.Context, dt *doctype.DocType, day tenanttime.Date) error {
 	tx, err := c.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("facts: begin drift mark: %w", err)
