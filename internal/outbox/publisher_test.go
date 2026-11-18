@@ -32,6 +32,8 @@ func TestPublisherReleasesDatabaseAdmissionBeforeDestinationPublish(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	mock.ExpectExec(`UPDATE _kora_outbox SET status = \? WHERE status = \? AND next_attempt_at <= \?`).
+		WithArgs("pending", "blocked", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT id FROM _kora_outbox`).
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(event.ID))
@@ -44,8 +46,8 @@ func TestPublisherReleasesDatabaseAdmissionBeforeDestinationPublish(t *testing.T
 	mock.ExpectQuery(`SELECT payload, source_sequence FROM _kora_outbox WHERE id = \?`).
 		WithArgs(event.ID).
 		WillReturnRows(sqlmock.NewRows([]string{"payload", "source_sequence"}).AddRow(string(payload), 0))
-	mock.ExpectExec(`UPDATE _kora_outbox SET status = \?, published_at = \?, lease_owner = '', lease_until = NULL WHERE id = \? AND status = 'publishing' AND lease_owner = \?`).
-		WithArgs(string(StatusPublished), sqlmock.AnyArg(), event.ID, sqlmock.AnyArg()).
+	mock.ExpectExec(`UPDATE _kora_outbox SET status = \?, published_at = \?, lease_owner = '', lease_until = NULL WHERE id = \? AND status = \? AND lease_owner = \?`).
+		WithArgs(string(StatusPublished), sqlmock.AnyArg(), event.ID, string(StatusPublishing), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	admission := &dispatcherAdmissionProbe{}
@@ -66,8 +68,8 @@ func TestPublisherReleasesDatabaseAdmissionBeforeDestinationPublish(t *testing.T
 	if active := admission.active.Load(); active != 0 {
 		t.Fatalf("active permits after publish = %d, want zero", active)
 	}
-	if calls := admission.calls.Load(); calls != 5 {
-		t.Fatalf("admission calls = %d, want selection, claim, attempts, payload and acknowledgment", calls)
+	if calls := admission.calls.Load(); calls != 6 {
+		t.Fatalf("admission calls = %d, want blocked promotion, selection, claim, attempts, payload and acknowledgment", calls)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal("unmet SQL expectations:", err)
@@ -92,6 +94,8 @@ func TestPublishDueReturnsPublishedAcknowledgmentError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mock.ExpectExec(`UPDATE _kora_outbox SET status = \? WHERE status = \? AND next_attempt_at <= \?`).
+		WithArgs("pending", "blocked", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT id FROM _kora_outbox`).
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(event.ID))
@@ -104,8 +108,8 @@ func TestPublishDueReturnsPublishedAcknowledgmentError(t *testing.T) {
 	mock.ExpectQuery(`SELECT payload, source_sequence FROM _kora_outbox WHERE id = \?`).
 		WithArgs(event.ID).
 		WillReturnRows(sqlmock.NewRows([]string{"payload", "source_sequence"}).AddRow(string(payload), 0))
-	mock.ExpectExec(`UPDATE _kora_outbox SET status = \?, published_at = \?, lease_owner = '', lease_until = NULL WHERE id = \? AND status = 'publishing' AND lease_owner = \?`).
-		WithArgs(string(StatusPublished), sqlmock.AnyArg(), event.ID, sqlmock.AnyArg()).
+	mock.ExpectExec(`UPDATE _kora_outbox SET status = \?, published_at = \?, lease_owner = '', lease_until = NULL WHERE id = \? AND status = \? AND lease_owner = \?`).
+		WithArgs(string(StatusPublished), sqlmock.AnyArg(), event.ID, string(StatusPublishing), sqlmock.AnyArg()).
 		WillReturnError(errors.New("database acknowledgment unavailable"))
 
 	publisher := NewPublisher(database, eventPublisherFunc(func(context.Context, contract.EventEnvelope) error { return nil }), db.Resolve("mysql"))
@@ -140,6 +144,8 @@ func TestPublishDueDoesNotAcknowledgeAClaimTakenOverByAnotherWorker(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	mock.ExpectExec(`UPDATE _kora_outbox SET status = \? WHERE status = \? AND next_attempt_at <= \?`).
+		WithArgs("pending", "blocked", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT id FROM _kora_outbox`).
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(event.ID))
@@ -152,8 +158,8 @@ func TestPublishDueDoesNotAcknowledgeAClaimTakenOverByAnotherWorker(t *testing.T
 	mock.ExpectQuery(`SELECT payload, source_sequence FROM _kora_outbox WHERE id = \?`).
 		WithArgs(event.ID).
 		WillReturnRows(sqlmock.NewRows([]string{"payload", "source_sequence"}).AddRow(string(payload), 0))
-	mock.ExpectExec(`UPDATE _kora_outbox SET status = \?, published_at = \?, lease_owner = '', lease_until = NULL WHERE id = \? AND status = 'publishing' AND lease_owner = \?`).
-		WithArgs(string(StatusPublished), sqlmock.AnyArg(), event.ID, sqlmock.AnyArg()).
+	mock.ExpectExec(`UPDATE _kora_outbox SET status = \?, published_at = \?, lease_owner = '', lease_until = NULL WHERE id = \? AND status = \? AND lease_owner = \?`).
+		WithArgs(string(StatusPublished), sqlmock.AnyArg(), event.ID, string(StatusPublishing), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	publisher := NewPublisher(database, eventPublisherFunc(func(context.Context, contract.EventEnvelope) error { return nil }), db.Resolve("mysql"))

@@ -15,8 +15,8 @@ func TestReplayFailedResetsEligibleRows(t *testing.T) {
 	}
 	defer db.Close()
 
-	mock.ExpectExec(`UPDATE _kora_outbox SET status = 'pending', next_attempt_at = NULL, last_error = NULL`).
-		WithArgs(8).
+	mock.ExpectExec(`UPDATE _kora_outbox SET status = \?, attempts = 0, next_attempt_at = NULL, last_error = NULL`).
+		WithArgs("pending", "failed").
 		WillReturnResult(sqlmock.NewResult(0, 3))
 
 	admission := &dispatcherAdmissionProbe{}

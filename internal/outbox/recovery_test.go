@@ -29,6 +29,8 @@ func TestPublishDueReclaimsExpiredPublishingLeaseAfterRestart(t *testing.T) {
 		Data:          contract.MustEncodeData(map[string]any{"doctype": "Sales Invoice"}),
 	}
 
+	mock.ExpectExec(`UPDATE _kora_outbox SET status = \? WHERE status = \? AND next_attempt_at <= \?`).
+		WithArgs("pending", "blocked", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT id FROM _kora_outbox`).
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(event.ID))
@@ -47,8 +49,8 @@ func TestPublishDueReclaimsExpiredPublishingLeaseAfterRestart(t *testing.T) {
 	mock.ExpectQuery(`SELECT payload, source_sequence FROM _kora_outbox WHERE id = \?`).
 		WithArgs(event.ID).
 		WillReturnRows(sqlmock.NewRows([]string{"payload", "source_sequence"}).AddRow(`{"id":"EVT-1","type":"kora.sales_invoice.after_insert","version":1,"source":"kora.kernel","site":"test.local","aggregate_type":"Sales Invoice","aggregate_id":"SINV-0001","occurred_at":"`+event.OccurredAt.Format(time.RFC3339Nano)+`","data":{"doctype":"Sales Invoice"}}`, 17))
-	mock.ExpectExec(`UPDATE _kora_outbox SET status = \?, published_at = \?, lease_owner = '', lease_until = NULL WHERE id = \? AND status = 'publishing' AND lease_owner = \?`).
-		WithArgs(string(StatusPublished), sqlmock.AnyArg(), event.ID, sqlmock.AnyArg()).
+	mock.ExpectExec(`UPDATE _kora_outbox SET status = \?, published_at = \?, lease_owner = '', lease_until = NULL WHERE id = \? AND status = \? AND lease_owner = \?`).
+		WithArgs(string(StatusPublished), sqlmock.AnyArg(), event.ID, string(StatusPublishing), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	var delivered contract.EventEnvelope

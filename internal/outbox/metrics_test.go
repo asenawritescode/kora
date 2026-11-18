@@ -55,6 +55,9 @@ func TestPublisherBacklogUsesBoundedIndexedStateSamples(t *testing.T) {
 	mock.ExpectQuery(`SELECT created_at FROM _kora_outbox WHERE status = \? ORDER BY created_at ASC LIMIT \?`).
 		WithArgs("publishing", BacklogSampleLimit).
 		WillReturnRows(sqlmock.NewRows([]string{"created_at"}))
+	mock.ExpectQuery(`SELECT created_at FROM _kora_outbox WHERE status = \? ORDER BY created_at ASC LIMIT \?`).
+		WithArgs("blocked", BacklogSampleLimit).
+		WillReturnRows(sqlmock.NewRows([]string{"created_at"}))
 	admission := &dispatcherAdmissionProbe{}
 	metrics, err := (&Publisher{DB: database, Dialect: db.Resolve("mysql"), WorkAdmission: admission}).Backlog(context.Background())
 	if err != nil {
@@ -66,8 +69,8 @@ func TestPublisherBacklogUsesBoundedIndexedStateSamples(t *testing.T) {
 	if metrics.OldestUnpublishedAge < time.Minute {
 		t.Fatalf("oldest sampled event age = %s, want >=1m", metrics.OldestUnpublishedAge)
 	}
-	if admission.calls.Load() != 3 || admission.active.Load() != 0 {
-		t.Fatalf("backlog admission calls/active = %d/%d, want three SQL samples and no held permit", admission.calls.Load(), admission.active.Load())
+	if admission.calls.Load() != 4 || admission.active.Load() != 0 {
+		t.Fatalf("backlog admission calls/active = %d/%d, want four SQL samples and no held permit", admission.calls.Load(), admission.active.Load())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
@@ -83,7 +86,7 @@ func TestBacklogMetricsKeepLeaseLossAcrossRefresh(t *testing.T) {
 		t.Fatal("sqlmock.New:", err)
 	}
 	defer database.Close()
-	for _, state := range []string{"pending", "failed", "publishing"} {
+	for _, state := range []string{"pending", "failed", "publishing", "blocked"} {
 		mock.ExpectQuery(`SELECT created_at FROM _kora_outbox WHERE status = \? ORDER BY created_at ASC LIMIT \?`).
 			WithArgs(state, BacklogSampleLimit).
 			WillReturnRows(sqlmock.NewRows([]string{"created_at"}))
@@ -96,5 +99,31 @@ func TestBacklogMetricsKeepLeaseLossAcrossRefresh(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestBacklogMetricsKeepPublishFailuresAcrossRefresh(t *testing.T) {
+	metrics := &BacklogMetrics{}
+	metrics.RecordPublishFailure(true)
+	metrics.RecordPublishFailure(true)
+	metrics.RecordPublishFailure(false)
+	(*BacklogMetrics)(nil).RecordPublishFailure(true)
+
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("sqlmock.New:", err)
+	}
+	defer database.Close()
+	for _, state := range []string{"pending", "failed", "publishing", "blocked"} {
+		mock.ExpectQuery(`SELECT created_at FROM _kora_outbox WHERE status = \? ORDER BY created_at ASC LIMIT \?`).
+			WithArgs(state, BacklogSampleLimit).
+			WillReturnRows(sqlmock.NewRows([]string{"created_at"}).AddRow(time.Now()))
+	}
+	if err := metrics.Refresh(context.Background(), &Publisher{DB: database, Dialect: db.Resolve("mysql")}); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	snapshot := metrics.Snapshot(time.Now())
+	if snapshot.PublishFailuresFull != 2 || snapshot.PublishFailuresOther != 1 || snapshot.Blocked != 1 {
+		t.Fatalf("snapshot = full %d other %d blocked %d, want 2/1/1", snapshot.PublishFailuresFull, snapshot.PublishFailuresOther, snapshot.Blocked)
 	}
 }
