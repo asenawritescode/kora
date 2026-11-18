@@ -5,6 +5,7 @@ package orm
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -41,20 +42,18 @@ func TestDateTodayDefaultUsesTenantClock(t *testing.T) {
 					t.Fatalf("system tables: %v", err)
 				}
 			}
-			// The table is migrated without the default: a "today" default also
-			// becomes DDL, and MySQL refuses DEFAULT CURRENT_DATE (a separate bug).
-			// The ORM applies the default in Go, which is what this test checks.
+			// CREATE TABLE must accept a "today" Date default (MySQL rejects
+			// DEFAULT CURRENT_DATE); the ORM fills the day in the tenant zone.
 			fields := []doctype.Field{
 				{Fieldname: "code", Fieldtype: "Data", Label: "Code"},
-				{Fieldname: "visited_on", Fieldtype: "Date", Label: "Visited on"},
+				{Fieldname: "visited_on", Fieldtype: "Date", Label: "Visited on", Default: "today"},
 			}
-			schemaReg := doctype.NewRegistry()
-			schemaReg.LoadFull([]*doctype.DocType{{Name: "Visit", Module: "T", Fields: fields}}, nil, nil)
-			if err := schema.MigrateSiteFromRegistry(conn, "", schemaReg, d); err != nil {
-				t.Fatalf("migrate: %v", err)
-			}
-			fields[1].Default = "today"
 			dt := &doctype.DocType{Name: "Visit", Module: "T", Fields: fields}
+			schemaReg := doctype.NewRegistry()
+			schemaReg.LoadFull([]*doctype.DocType{dt}, nil, nil)
+			if err := schema.MigrateSiteFromRegistry(conn, "", schemaReg, d); err != nil {
+				t.Fatalf("create table with today default: %v", err)
+			}
 			reg := doctype.NewRegistry()
 			reg.LoadFull([]*doctype.DocType{dt}, nil, nil)
 
@@ -135,4 +134,52 @@ func readVisitedOn(t *testing.T, conn *sql.DB, d kdb.Dialect, name string) strin
 		t.Fatal(err)
 	}
 	return got.Format(time.DateOnly)
+}
+
+// TestDateTodayDefaultAddColumn adds a "today" Date field to an existing table
+// (ADD COLUMN, not CREATE TABLE). The statement must succeed for a nullable and
+// a required field, and an ORM insert afterwards must fill the tenant's day.
+func TestDateTodayDefaultAddColumn(t *testing.T) {
+	for _, tc := range []struct{ name, dialect, env string }{
+		{"mysql", "mysql", "KORA_TENANT_CLOCK_DISPOSABLE_MYSQL_DSN"},
+		{"postgres", "postgres", "KORA_TENANT_CLOCK_DISPOSABLE_POSTGRES_DSN"},
+	} {
+		for _, reqd := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/reqd=%v", tc.name, reqd), func(t *testing.T) {
+				dsn := os.Getenv(tc.env)
+				if dsn == "" {
+					t.Skipf("set %s", tc.env)
+				}
+				conn := disposabledb.Open(t, tc.dialect, dsn).DB
+				d := kdb.Resolve(tc.dialect)
+				for _, ddl := range d.SystemTableSQL() {
+					if strings.HasPrefix(strings.TrimSpace(ddl), "CREATE TABLE IF NOT EXISTS") {
+						if _, err := conn.Exec(ddl); err != nil {
+							t.Fatalf("system tables: %v", err)
+						}
+					}
+				}
+				base := []doctype.Field{{Fieldname: "code", Fieldtype: "Data", Label: "Code"}}
+				before := doctype.NewRegistry()
+				before.LoadFull([]*doctype.DocType{{Name: "Visit", Module: "T", Fields: base}}, nil, nil)
+				if err := schema.MigrateSiteFromRegistry(conn, "", before, d); err != nil {
+					t.Fatalf("create table: %v", err)
+				}
+
+				fields := append(append([]doctype.Field{}, base...),
+					doctype.Field{Fieldname: "visited_on", Fieldtype: "Date", Label: "Visited on", Default: "today", Reqd: reqd})
+				dt := &doctype.DocType{Name: "Visit", Module: "T", Fields: fields}
+				reg := doctype.NewRegistry()
+				reg.LoadFull([]*doctype.DocType{dt}, nil, nil)
+				if err := schema.MigrateSiteFromRegistry(conn, "", reg, d); err != nil {
+					t.Fatalf("add column with today default: %v", err)
+				}
+
+				visit := insertVisitForZone(t, conn, d, reg, dt, "it-add-column", "Pacific/Kiritimati", "V-3")
+				if visit.stored != visit.want && visit.stored != visit.wantAfter {
+					t.Fatalf("visited_on = %s, want business day %s", visit.stored, visit.want)
+				}
+			})
+		}
+	}
 }

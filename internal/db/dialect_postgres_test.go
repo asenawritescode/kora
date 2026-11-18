@@ -99,14 +99,14 @@ func TestPostgres_CreateTableTemporalDefaults(t *testing.T) {
 	}
 
 	stmt := d.CreateTable(dt)[0]
-	if !contains(stmt, `"sale_date" DATE DEFAULT CURRENT_DATE`) || contains(stmt, `"sale_date" DATE DEFAULT NULL`) {
-		t.Fatalf("expected CURRENT_DATE default, got: %s", stmt)
+	if !contains(stmt, `"sale_date" DATE DEFAULT NULL`) || contains(stmt, "CURRENT_DATE") {
+		t.Fatalf("Date today is ORM-filled: want no DB default, got: %s", stmt)
 	}
 	if !contains(stmt, `"sale_time" TIME DEFAULT CURRENT_TIME`) || contains(stmt, `"sale_time" TIME DEFAULT NULL`) {
 		t.Fatalf("expected CURRENT_TIME default, got: %s", stmt)
 	}
-	if !contains(stmt, `"created_at" TIMESTAMP DEFAULT NOW()`) || contains(stmt, `"created_at" TIMESTAMP DEFAULT NULL`) {
-		t.Fatalf("expected NOW() default, got: %s", stmt)
+	if !contains(stmt, `"created_at" TIMESTAMP DEFAULT NULL`) {
+		t.Fatalf("Datetime now is ORM-filled: want no DB default, got: %s", stmt)
 	}
 }
 
@@ -114,8 +114,8 @@ func TestPostgres_AddColumnEscapesAndFormatsDefaults(t *testing.T) {
 	d := &PostgresDialect{}
 
 	dateStmt := d.AddColumn("tabTest", &doctype.Field{Fieldname: "sale_date", Fieldtype: "Date", Default: "Today"})
-	if !contains(dateStmt, "DEFAULT CURRENT_DATE") {
-		t.Fatalf("expected CURRENT_DATE in add column, got: %s", dateStmt)
+	if !contains(dateStmt, `"sale_date" DATE DEFAULT NULL`) || contains(dateStmt, "CURRENT_DATE") {
+		t.Fatalf("Date today is ORM-filled: want DEFAULT NULL, got: %s", dateStmt)
 	}
 
 	textStmt := d.AddColumn("tabTest", &doctype.Field{Fieldname: "title", Fieldtype: "Data", Default: "O'Reilly"})
@@ -124,8 +124,8 @@ func TestPostgres_AddColumnEscapesAndFormatsDefaults(t *testing.T) {
 	}
 
 	nullableTemporalStmt := d.AddColumn("tabTest", &doctype.Field{Fieldname: "received_at", Fieldtype: "Datetime", Default: "Now"})
-	if !contains(nullableTemporalStmt, `"received_at" TIMESTAMP DEFAULT NOW()`) || contains(nullableTemporalStmt, `"received_at" TIMESTAMP DEFAULT NULL`) {
-		t.Fatalf("nullable column should have one temporal default, got: %s", nullableTemporalStmt)
+	if !contains(nullableTemporalStmt, `"received_at" TIMESTAMP DEFAULT NULL`) || contains(nullableTemporalStmt, "NOW()") {
+		t.Fatalf("Datetime now is ORM-filled: want DEFAULT NULL, got: %s", nullableTemporalStmt)
 	}
 }
 
