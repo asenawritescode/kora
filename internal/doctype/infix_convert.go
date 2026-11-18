@@ -1,6 +1,8 @@
 package doctype
 
 import (
+	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -11,6 +13,9 @@ func InfixToSExpr(expr string) string {
 	expr = strings.TrimSpace(expr)
 	if strings.HasPrefix(expr, "(") {
 		return expr // already an s-expression
+	}
+	if sexpr, ok := infixCondition(expr).aggregateCompare(); ok {
+		return sexpr
 	}
 	if strings.HasPrefix(expr, "@script:") {
 		return expr // script hooks pass through unchanged
@@ -116,4 +121,53 @@ func toLispOp(op string) string {
 		return "/"
 	}
 	return op
+}
+
+// aggregateComparePattern matches one comparison between a SUM or COUNT over a
+// child table and a field or number, e.g. SUM(items.amount) = total.
+var aggregateComparePattern = regexp.MustCompile(`^\s*((?:SUM|COUNT)\(\s*\w+(?:\.\w+)?\s*\))\s*(==|!=|<=|>=|<|>|=)\s*([A-Za-z_]\w*|-?[0-9.]+)\s*$`)
+
+// infixCondition is a doc-constraint condition written in infix form.
+type infixCondition string
+
+// aggregateCompare converts one infix comparison of a child-table aggregate to
+// an s-expression. "=" is equality, as in "==".
+func (c infixCondition) aggregateCompare() (string, bool) {
+	m := aggregateComparePattern.FindStringSubmatch(string(c))
+	if m == nil {
+		return "", false
+	}
+	op := m[2]
+	if op == "=" {
+		op = "=="
+	}
+	return "(" + op + " " + InfixToSExpr(m[1]) + " " + m[3] + ")", true
+}
+
+// hasAggregate reports whether an infix condition sums or counts child rows.
+func (c infixCondition) hasAggregate() bool {
+	return sumPattern.MatchString(string(c)) || countPattern.MatchString(string(c))
+}
+
+// bareEquals matches a single = that is not part of ==, !=, <= or >=.
+var bareEquals = regexp.MustCompile(`[^=!<>]=[^=]|^=[^=]`)
+
+// validateForm rejects an infix condition that sums or counts child rows in a
+// form the evaluator cannot read. Only one comparison of an aggregate against a
+// field or number is accepted, or an s-expression written by hand.
+func (c infixCondition) validateForm() error {
+	condition := string(c)
+	if strings.HasPrefix(strings.TrimSpace(condition), "(") {
+		return nil
+	}
+	if bareEquals.MatchString(condition) {
+		return fmt.Errorf("condition %q uses = for equality; write == instead", condition)
+	}
+	if !c.hasAggregate() {
+		return nil
+	}
+	if _, ok := c.aggregateCompare(); ok {
+		return nil
+	}
+	return fmt.Errorf("condition %q sums child rows in an unsupported infix form; write one comparison such as SUM(table.field) = total, or an s-expression such as (== (sum \"table\" \"field\") total)", condition)
 }

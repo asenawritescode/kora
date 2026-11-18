@@ -51,17 +51,8 @@ func evaluateCondition(exprStr string, doc *Document, userRoles []string) bool {
 		}
 	}
 
-	// Handle legacy expr-lang patterns.
-	if !strings.HasPrefix(exprStr, "(") {
-		if handled, result := evalLegacyEquals(exprStr, docFields); handled {
-			return result
-		}
-		if handled, result := evalLegacyComparison(exprStr, docFields); handled {
-			return result
-		}
-		if handled, result := evalLegacyHasRole(exprStr, userRoles); handled {
-			return result
-		}
+	if handled, result := infixCondition(exprStr).evalLegacy(docFields, userRoles); handled {
+		return result
 	}
 
 	// Convert legacy infix or evaluate directly through Lisp sandbox.
@@ -73,7 +64,7 @@ func evaluateCondition(exprStr string, doc *Document, userRoles []string) bool {
 	s := NewLispSandbox()
 	defer s.Close()
 
-	result, err := s.Eval(evalExpr, docFields, nil)
+	result, err := s.Eval(evalExpr, docFields, childTablesOf(doc))
 	if err != nil {
 		slog.Warn("condition evaluation failed, defaulting to false", "expr", exprStr, "error", err)
 		return false
@@ -285,3 +276,34 @@ func stringToFloat(s string) (float64, error) {
 
 // DefaultEngine is the package-level expression engine used by validation and workflow.
 var DefaultEngine = NewExprEngine()
+
+// childTablesOf returns the child rows of every Table field of doc, so a
+// condition can sum them. Validation runs before ComputeFields, so the rows
+// must come from the document itself.
+func childTablesOf(doc *Document) map[string][]map[string]any {
+	if doc == nil {
+		return nil
+	}
+	tables := map[string][]map[string]any{}
+	for name := range doc.Fields {
+		collectChildTable(doc, name, tables)
+	}
+	return tables
+}
+
+// evalLegacy handles the legacy expr-lang patterns. Aggregate conditions go
+// straight to the converter: the legacy paths read a plain field and would
+// misjudge a SUM.
+func (c infixCondition) evalLegacy(docFields map[string]any, userRoles []string) (bool, bool) {
+	expr := string(c)
+	if strings.HasPrefix(expr, "(") || c.hasAggregate() {
+		return false, false
+	}
+	if handled, result := evalLegacyEquals(expr, docFields); handled {
+		return true, result
+	}
+	if handled, result := evalLegacyComparison(expr, docFields); handled {
+		return true, result
+	}
+	return evalLegacyHasRole(expr, userRoles)
+}
