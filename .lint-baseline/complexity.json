@@ -287,7 +287,7 @@
    "cognitive": 28
   },
   "internal/api/ai::analyticsModelReadable": {
-   "cognitive": 56,
+   "cognitive": 55,
    "cyclomatic": 42,
    "statements": 62
   },
@@ -310,9 +310,9 @@
    "statements": 50
   },
   "internal/api/ai::executeAnalyticsInsights": {
-   "cognitive": 47,
-   "cyclomatic": 27,
-   "statements": 61
+   "cognitive": 33,
+   "cyclomatic": 22,
+   "statements": 48
   },
   "internal/api/ai::executeCreateDoctypeDraft": {
    "cognitive": 16
@@ -951,9 +951,9 @@
    "lines": 89
   },
   "internal/auth::RevalidateRealtimeIdentity": {
-   "cognitive": 19,
-   "cyclomatic": 17,
-   "statements": 47
+   "cognitive": 17,
+   "cyclomatic": 16,
+   "statements": 44
   },
   "internal/auth::allowMagicLinkRequest": {
    "cognitive": 22
@@ -971,7 +971,7 @@
    "cyclomatic": 17
   },
   "internal/auth::registerAuthRoutes": {
-   "cognitive": 25
+   "cognitive": 20
   },
   "internal/auth::registerMagicLinkRoutes": {
    "cognitive": 37,
@@ -1202,8 +1202,8 @@
    "statements": 44
   },
   "internal/doctype::(*DocType).Validate": {
-   "cognitive": 114,
-   "cyclomatic": 60
+   "cognitive": 105,
+   "cyclomatic": 54
   },
   "internal/doctype::(*DocType).validateDecimalFields": {
    "cognitive": 18
@@ -1247,7 +1247,7 @@
    "cognitive": 19
   },
   "internal/doctype::Validate": {
-   "statements": 99
+   "statements": 92
   },
   "internal/doctype::ValidateAll": {
    "cognitive": 26
@@ -1294,9 +1294,6 @@
    "cognitive": 44,
    "cyclomatic": 29,
    "statements": 54
-  },
-  "internal/doctype::evaluateCondition": {
-   "cognitive": 16
   },
   "internal/doctype::findUnknownKeys": {
    "cognitive": 178,
@@ -1767,8 +1764,7 @@
    "cognitive": 19
   },
   "internal/kernel::(*CommandResource).RequiredInputs": {
-   "cognitive": 28,
-   "cyclomatic": 16
+   "cognitive": 24
   },
   "internal/kernel::(*CommandResource).fieldReadAliases": {
    "cognitive": 36,
@@ -1801,12 +1797,9 @@
    "cognitive": 16,
    "cyclomatic": 21
   },
-  "internal/kernel::(*Kernel).checkCommandGuards": {
-   "cognitive": 23
-  },
   "internal/kernel::(*Kernel).execDefinedCommand": {
-   "cognitive": 151,
-   "cyclomatic": 75
+   "cognitive": 144,
+   "cyclomatic": 73
   },
   "internal/kernel::(*Kernel).executeScriptMutationInTx": {
    "cognitive": 76,
@@ -1860,7 +1853,7 @@
    "cyclomatic": 16
   },
   "internal/kernel::execDefinedCommand": {
-   "statements": 212
+   "statements": 207
   },
   "internal/kernel::executeInTx": {
    "statements": 60
@@ -1936,8 +1929,7 @@
    "lines": 104
   },
   "internal/net::RegisterPathSiteRoutes": {
-   "cognitive": 34,
-   "cyclomatic": 18
+   "cognitive": 23
   },
   "internal/notifications/sqlstore::(*Store).Claim": {
    "cognitive": 32,

@@ -3,6 +3,7 @@ package kernel
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -96,6 +97,9 @@ type GuardCount struct {
 type GuardMatch struct {
 	Record string            `yaml:"record" json:"record"`
 	Where  map[string]string `yaml:"where" json:"where"`
+	// Optional skips the guard when a $input reference in Where is absent from
+	// the payload, so a command can take an optional number and check it only when given.
+	Optional bool `yaml:"optional,omitempty" json:"optional,omitempty"`
 }
 
 func (c *CommandResource) validateGuards(aliases map[string]bool) error {
@@ -181,7 +185,6 @@ func (c *CommandResource) validateGuardAlias(index int, guard CommandGuard, alia
 }
 
 func (k *Kernel) checkCommandGuards(run txRun, op Operation, cmd *CommandResource, env refEnv) *contract.Error {
-	txMgr, reg := run.Mgr, run.Reg
 	for i, guard := range cmd.Require {
 		if guard.skippedFor(op.Context.Roles) {
 			continue
@@ -192,31 +195,8 @@ func (k *Kernel) checkCommandGuards(run txRun, op Operation, cmd *CommandResourc
 			}
 			continue
 		}
-		match, wantExists := guard.Exists, true
-		if match == nil {
-			match, wantExists = guard.NotExists, false
-		}
-		dt := reg.Get(match.Record)
-		if dt == nil {
-			return contract.NewError(contract.CodeNotFound, fmt.Sprintf("require %d: record %q not found", i, match.Record))
-		}
-		filters, cerr := guardFilters(dt, match, env, i)
-		if cerr != nil {
+		if cerr := checkMatchGuard(run, op, guard, env, i); cerr != nil {
 			return cerr
-		}
-		found, exists, err := txMgr.FirstMatchingNameLocked(dt, filters, scopeForOperation(reg, op, dt.Name, "read"))
-		if err != nil {
-			return contract.NewError(contract.CodeDependencyUnavailable, fmt.Sprintf("require %d: check failed", i))
-		}
-		if exists != wantExists {
-			message := guard.Message
-			if message == "" {
-				message = fmt.Sprintf("precondition %d on %s was not met", i, dt.Name)
-			}
-			return contract.NewError(contract.CodeConflict, message)
-		}
-		if guard.As != "" {
-			env.steps[guard.As] = found
 		}
 	}
 	return nil
@@ -240,6 +220,52 @@ func (k *Kernel) checkValueGuard(run txRun, op Operation, cmd *CommandResource, 
 	default:
 		return checkCountGuard(run, op, guard.Count, at.env, at.index)
 	}
+}
+
+// absentRef reports whether a $input reference in the match is missing from the payload.
+func absentRef(match *GuardMatch, env refEnv) bool {
+	for _, ref := range match.Where {
+		if _, err := resolveEnvRef(ref, env); errors.Is(err, errRefAbsent) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkMatchGuard checks an exists or not_exists guard. An optional guard whose
+// reference is absent passes.
+func checkMatchGuard(run txRun, op Operation, guard CommandGuard, env refEnv, i int) *contract.Error {
+	reg, txMgr := run.Reg, run.Mgr
+	match, wantExists := guard.Exists, true
+	if match == nil {
+		match, wantExists = guard.NotExists, false
+	}
+	if match.Optional && absentRef(match, env) {
+		return nil
+	}
+	dt := reg.Get(match.Record)
+	if dt == nil {
+		return contract.NewError(contract.CodeNotFound, fmt.Sprintf("require %d: record %q not found", i, match.Record))
+	}
+	filters, cerr := guardFilters(dt, match, env, i)
+	if cerr != nil {
+		return cerr
+	}
+	found, exists, err := txMgr.FirstMatchingNameLocked(dt, filters, scopeForOperation(reg, op, dt.Name, "read"))
+	if err != nil {
+		return contract.NewError(contract.CodeDependencyUnavailable, fmt.Sprintf("require %d: check failed", i))
+	}
+	if exists != wantExists {
+		message := guard.Message
+		if message == "" {
+			message = fmt.Sprintf("precondition %d on %s was not met", i, dt.Name)
+		}
+		return contract.NewError(contract.CodeConflict, message)
+	}
+	if guard.As != "" {
+		env.steps[guard.As] = found
+	}
+	return nil
 }
 
 // guardFilters builds the ORM filter list. Field names are checked against the

@@ -217,10 +217,14 @@ func (s CommandStep) updateSpec() *StepUpdate {
 	return s.Update
 }
 
-// validateUpsert checks that an upsert names its record, name, block and values.
+// validateUpsert checks that an upsert names its record and values, and that a
+// name comes with its block. Without a name, the upsert creates under the series.
 func (c *CommandResource) validateUpsert(i int, u *StepUpsert) error {
-	if u.Record == "" || u.Name == "" || u.InBlock == "" || len(u.Values) == 0 {
-		return fmt.Errorf("command %q: step %d upsert requires record, name, in_block and values", c.Name, i)
+	if u.Record == "" || len(u.Values) == 0 {
+		return fmt.Errorf("command %q: step %d upsert requires record and values", c.Name, i)
+	}
+	if (u.Name == "") != (u.InBlock == "") {
+		return fmt.Errorf("command %q: step %d upsert sets name and in_block together or not at all", c.Name, i)
 	}
 	return nil
 }

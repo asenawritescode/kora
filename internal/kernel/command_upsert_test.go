@@ -71,7 +71,7 @@ input:
 		wantErr    bool
 	}{
 		{"complete", "transaction:\n  - upsert:\n      record: Sale\n      name: $input.sale_number\n      in_block: $input.till_session\n      values: {status: Held}\n", false},
-		{"no name", "transaction:\n  - upsert:\n      record: Sale\n      in_block: $input.till_session\n      values: {status: Held}\n", true},
+		{"no name creates under the series", "transaction:\n  - upsert:\n      record: Sale\n      values: {status: Held}\n", false},
 		{"no block", "transaction:\n  - upsert:\n      record: Sale\n      name: $input.sale_number\n      values: {status: Held}\n", true},
 		{"no values", "transaction:\n  - upsert:\n      record: Sale\n      name: $input.sale_number\n      in_block: $input.till_session\n", true},
 		{"upsert with create", "transaction:\n  - upsert:\n      record: Sale\n      name: $input.sale_number\n      in_block: $input.till_session\n      values: {status: Held}\n    create:\n      record: Sale\n      values: {status: Held}\n", true},

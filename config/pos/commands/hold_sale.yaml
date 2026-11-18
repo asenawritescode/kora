@@ -24,6 +24,7 @@ require:
         till_session: $input.till_session
         status: Held
       limit: 20
+      except: $input.sale_number
     message: 20 held sales is the most for one till. Recall or delete one first.
   - exists:
       record: Till Session
@@ -38,13 +39,15 @@ require:
         cashier: $actor
     unless_role: [Owner, Manager, Administrator]
     message: This till belongs to another cashier
-  - not_exists:
-      record: Sale
-      where:
-        name: $input.sale_number
-    message: That sale number is already used
+  # A held sale may be held again (an edit); a paid, voided or returned one may not.
+  - not_exists: {record: Sale, where: {name: $input.sale_number, status: Paid}}
+    message: That sale is already paid
+  - not_exists: {record: Sale, where: {name: $input.sale_number, status: Void}}
+    message: That sale is already voided
+  - not_exists: {record: Sale, where: {name: $input.sale_number, status: Return}}
+    message: That sale is already returned
 transaction:
-  - create:
+  - upsert:
       record: Sale
       name: $input.sale_number
       in_block: $input.till_session

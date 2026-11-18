@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/asenawritescode/kora/contract"
@@ -62,8 +63,12 @@ func (k *Kernel) resolveUpsertStep(run txRun, step CommandStep, at stepEnv) (Com
 		return step, contract.NewError(contract.CodeNotFound, fmt.Sprintf("upsert record %q not found", up.Record))
 	}
 	name, err := resolveEnvStringRef(up.Name, at.env)
-	if err != nil || name == "" {
-		return step, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: upsert name is required", at.index))
+	if errors.Is(err, errRefAbsent) || (err == nil && name == "") {
+		// No number given: the record is created under the series, as a plain create.
+		return CommandStep{As: step.As, ForEach: step.ForEach, Create: &StepCreate{Record: up.Record, Values: up.Values}}, nil
+	}
+	if err != nil {
+		return step, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: upsert name: %v", at.index, err))
 	}
 	filters, _ := json.Marshal([][]any{{"name", "=", name}})
 	_, exists, err := run.Mgr.FirstMatchingNameLocked(dt, string(filters), policy.RowScope{})
