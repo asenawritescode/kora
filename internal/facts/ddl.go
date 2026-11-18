@@ -58,3 +58,8 @@ func createTable(dialect db.Dialect, table string, cols []doctype.FactColumn) []
 func columnDef(dialect db.Dialect, name, fieldtype string) string {
 	return fmt.Sprintf("%s %s NOT NULL", dialect.QuoteIdent(name), dialect.ColumnType(&doctype.Field{Fieldtype: fieldtype}))
 }
+
+// nullableDef is one column that accepts NULL, typed by the dialect for fieldtype.
+func nullableDef(dialect db.Dialect, name, fieldtype string) string {
+	return fmt.Sprintf("%s %s NULL", dialect.QuoteIdent(name), dialect.ColumnType(&doctype.Field{Fieldtype: fieldtype}))
+}

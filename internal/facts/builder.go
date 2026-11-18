@@ -194,17 +194,20 @@ func (b *Builder) writeRow(ctx context.Context, tx *sql.Tx, table string, row Ro
 	return b.exec(ctx, tx, update, append(args, row.RecordID, row.LineID))
 }
 
-// markDirty records that a partition needs recomputing. Duplicates are ignored.
+// markDirty records that a partition needs recomputing. Every mark bumps the version a refresher
+// fences on, so a mark that lands during a recompute is never cleared by it.
 func (b *Builder) markDirty(ctx context.Context, tx *sql.Tx, model string, d tenanttime.Date) error {
-	var n int
-	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE model = ? AND business_date = ?", b.Dialect.QuoteIdent(dirtyTable))
-	if err := tx.QueryRowContext(ctx, db.Rebind(b.Dialect, query), model, d.String()).Scan(&n); err != nil {
-		return fmt.Errorf("facts: read dirty marker: %w", err)
+	bump := fmt.Sprintf("UPDATE %s SET version = version + 1 WHERE model = ? AND business_date = ?", b.Dialect.QuoteIdent(dirtyTable))
+	res, err := tx.ExecContext(ctx, db.Rebind(b.Dialect, bump), model, d.String())
+	if err != nil {
+		return fmt.Errorf("facts: mark dirty partition: %w", err)
 	}
-	if n > 0 {
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("facts: mark dirty partition: %w", err)
+	} else if n > 0 {
 		return nil
 	}
-	insert := fmt.Sprintf("INSERT INTO %s (model, business_date) VALUES (?, ?)", b.Dialect.QuoteIdent(dirtyTable))
+	insert := fmt.Sprintf("INSERT INTO %s (model, business_date, version) VALUES (?, ?, 0)", b.Dialect.QuoteIdent(dirtyTable))
 	return b.exec(ctx, tx, insert, []any{model, d.String()})
 }
 
@@ -224,7 +227,7 @@ func (b *Builder) ensure(ctx context.Context, dt *doctype.DocType) error {
 	if b.ready[dt] {
 		return nil
 	}
-	if err := b.execDDL(ctx, []string{dirtyDDL(b.Dialect)}); err != nil {
+	if err := b.execDDL(ctx, []string{dirtyDDL(b.Dialect), summaryDDL(b.Dialect, dt)}); err != nil {
 		return err
 	}
 	var stmts []string
@@ -258,10 +261,12 @@ func (b *Builder) tableExists(ctx context.Context, table string) bool {
 	return err == nil
 }
 
-// dirtyDDL creates the dirty-partition table; IF NOT EXISTS keeps it safe to repeat.
+// dirtyDDL creates the dirty-partition table; IF NOT EXISTS keeps it safe to repeat. version counts
+// marks; lease_owner and lease_at hold a refresher's claim and are NULL when unclaimed.
 func dirtyDDL(dialect db.Dialect) string {
-	ddl := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n  %s,\n  %s,\n  PRIMARY KEY (%s, %s)\n)",
+	ddl := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n  %s,\n  %s,\n  %s,\n  %s,\n  %s,\n  PRIMARY KEY (%s, %s)\n)",
 		dialect.QuoteIdent(dirtyTable), columnDef(dialect, "model", "Data"), columnDef(dialect, "business_date", "Date"),
+		columnDef(dialect, "version", "Int"), nullableDef(dialect, "lease_owner", "Data"), nullableDef(dialect, "lease_at", "Datetime"),
 		dialect.QuoteIdent("model"), dialect.QuoteIdent("business_date"))
 	if suffix := dialect.TableSuffix(); suffix != "" {
 		ddl += " " + suffix
