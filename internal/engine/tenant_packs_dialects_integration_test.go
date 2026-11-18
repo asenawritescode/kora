@@ -93,8 +93,8 @@ func TestTenantPackQueriesPrintAndRequiresAcrossDialects(t *testing.T) {
 					t.Fatalf("seed sale: %v", err)
 				}
 			}
-			if _, err := database.Exec(db.Rebind(dialect, "INSERT INTO "+till+" (name, owner, creation, modified, modified_by, doc_status, idx, shift, opening_float) VALUES (?,?,?,?,?,?,?,?,?)"),
-				"T-1", "Administrator", ts, ts, "Administrator", 0, 0, "SH1", 500); err != nil {
+			if _, err := database.Exec(db.Rebind(dialect, "INSERT INTO "+till+" (name, owner, creation, modified, modified_by, doc_status, idx, shift, opening_float, cashier, status) VALUES (?,?,?,?,?,?,?,?,?,?,?)"),
+				"T-1", "Administrator", ts, ts, "Administrator", 0, 0, "SH1", 500, "Administrator", "Open"); err != nil {
 				t.Fatalf("seed till: %v", err)
 			}
 			run := func(name string, in map[string]any) []map[string]any {
@@ -110,8 +110,8 @@ func TestTenantPackQueriesPrintAndRequiresAcrossDialects(t *testing.T) {
 			if rows := run("recent_sales", map[string]any{"register": "OTHER"}); len(rows) != 0 {
 				t.Fatalf("recent_sales other register = %v", rows)
 			}
-			if rows := run("open_till", map[string]any{"shift": "SH1"}); len(rows) != 1 || fmt.Sprint(rows[0]["name"]) != "T-1" {
-				t.Fatalf("open_till rows = %v", rows)
+			if rows := run("my_session", map[string]any{}); len(rows) != 1 || fmt.Sprint(rows[0]["name"]) != "T-1" {
+				t.Fatalf("my_session rows = %v", rows)
 			}
 		})
 	}

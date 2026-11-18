@@ -112,7 +112,7 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 		f, _ := print.Decode(raw)
 		refs[f.Name] = f.For.Operation
 	}
-	if refs["sale_receipt"] != "pos.core~pos.checkout~record_sale" || refs["z_report"] != "pos.core~pos.drawer~close_till" || refs["z_report_close_session"] != "pos.core~pos.drawer~close_session" {
+	if refs["sale_receipt"] != "pos.core~pos.checkout~record_sale" || refs["z_report"] != "pos.core~pos.drawer~close_session" {
 		t.Fatalf("stored print operation refs: %v", refs)
 	}
 	cmds := kernel.NewCommandRegistry()
@@ -201,12 +201,11 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 		create("Stock Balance", map[string]any{"item": item, "location": loc, "quantity": qty, "reorder_level": 4})
 	}
 
-	shift := run("pos.open_shift", map[string]any{"data": map[string]any{"register": register}})
+	shift := run("pos.open_session", map[string]any{"data": map[string]any{"register": register, "location": loc, "opening_float": 500}})
 	shiftName := fmt.Sprint(shift["steps"].([]any)[0].(map[string]any)["name"])
 	if shiftName == "" || shiftName == "<nil>" {
-		t.Fatalf("open_shift returned no name: %v", shift)
+		t.Fatalf("open_session returned no shift: %v", shift)
 	}
-	run("pos.open_till", map[string]any{"data": map[string]any{"shift": shiftName, "opening_float": 500}})
 	till := scalar("SELECT name FROM "+table("Till Session")+" WHERE shift = ?", shiftName)
 
 	sale := run("pos.record_sale", map[string]any{"data": map[string]any{
@@ -396,13 +395,6 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 		t.Fatalf("status = %s", st)
 	}
 	s4 := newSale()
-	run("pos.close_shift", map[string]any{"data": map[string]any{"register": register}})
-	if cerr := void(s4); cerr == nil {
-		t.Fatal("void after shift close must be refused")
-	}
-	if got := stock(bread); got != 2 {
-		t.Fatalf("bread after refused void = %v, want 2", got)
-	}
 
 	// Payment guard: only confirmed, matching, unused intents record a sale.
 	trySale := func(pays []map[string]any) (*contract.Error, contract.CommandResult) {
@@ -471,8 +463,11 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 			t.Fatalf("Cashier must not read %s", dt)
 		}
 	}
-	// open_session records the cashier on the till, so the cashier owns it.
-	cs, cerr := asCashier("pos.open_session", map[string]any{"data": map[string]any{"register": register, "location": loc, "opening_float": 100}})
+	// open_session records the cashier on the till, so the cashier owns it. The
+	// Owner's till above stays open until the end of this test, so the cashier
+	// works on a register of its own.
+	cashRegister := create("Register", map[string]any{"register_name": "Cashier", "location": loc, "enabled": 1})
+	cs, cerr := asCashier("pos.open_session", map[string]any{"data": map[string]any{"register": cashRegister, "location": loc, "opening_float": 100}})
 	if cerr != nil || cs.Status != contract.StatusCompleted {
 		t.Fatalf("cashier open_session: %+v", cerr)
 	}
@@ -488,7 +483,7 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	}
 	before, breadBefore := stock(tea), stock(bread)
 	res, cerr := asCashier("pos.record_sale", map[string]any{"data": map[string]any{
-		"register": register, "till_session": ctill, "location": loc, "items": one,
+		"register": cashRegister, "till_session": ctill, "location": loc, "items": one,
 		"currency": "KES", "payments": []map[string]any{pay("cash", 50)},
 	}})
 	if cerr != nil || res.Status != contract.StatusCompleted {
@@ -505,20 +500,28 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	if _, cerr = asCashier(kernel.CommandRecordCreate, kernel.RecordCreatePayload{Doctype: "Till Session", Data: json.RawMessage(`{}`)}); cerr == nil {
 		t.Fatal("cashier direct Till Session create must be refused")
 	}
-	rawDirect, _ := json.Marshal(map[string]any{"data": map[string]any{"register": register}})
+	rawDirect, _ := json.Marshal(map[string]any{"data": map[string]any{"register": register, "location": loc, "opening_float": 100}})
 	direct := opCtx("direct", "cashier1", cashier, cexec) // no module execution: the direct kernel route
-	if _, cerr = k.Execute(ctx, conn, reg, kernel.Operation{Command: "pos.open_shift", Payload: rawDirect, Context: direct}); cerr == nil {
-		t.Fatal("cashier direct-route pos.open_shift must be refused")
+	if _, cerr = k.Execute(ctx, conn, reg, kernel.Operation{Command: "pos.open_session", Payload: rawDirect, Context: direct}); cerr == nil {
+		t.Fatal("cashier direct-route pos.open_session must be refused")
 	}
 
 	// Close the till: count 10 short of the server-derived expected_cash.
 	exp := num("SELECT expected_cash FROM "+table("Till Session")+" WHERE name = ?", till)
-	closed := run("pos.close_till", map[string]any{"data": map[string]any{"shift": shiftName, "closing_count": exp - 10}})
+	closed := run("pos.close_session", map[string]any{"data": map[string]any{"shift": shiftName, "closing_count": exp - 10}})
 	if got := num("SELECT variance FROM "+table("Till Session")+" WHERE name = ?", till); got != -10 {
 		t.Fatalf("variance = %v, want -10", got)
 	}
 	if o, _ := closed["output"].(map[string]any); fmt.Sprint(o["reference"]) != till {
 		t.Fatalf("close reference = %v, want %s", o["reference"], till)
+	}
+	// A sale that was open before the close cannot be voided once the till is closed.
+	beforeVoid := stock(bread)
+	if cerr := void(s4); cerr == nil {
+		t.Fatal("void after till close must be refused")
+	}
+	if got := stock(bread); got != beforeVoid {
+		t.Fatalf("bread after refused void = %v, want %v", got, beforeVoid)
 	}
 }
 

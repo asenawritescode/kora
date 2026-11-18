@@ -6,43 +6,6 @@ import (
 	"testing"
 )
 
-func TestPOSShiftCommandsParse(t *testing.T) {
-	for name, wantGuard := range map[string]bool{"open_shift": true, "close_shift": true} {
-		raw, err := os.ReadFile(filepath.Join("..", "..", "config", "pos", "commands", name+".yaml"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		def, err := ParseCommandResource(raw)
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		if (len(def.Require) > 0) != wantGuard {
-			t.Fatalf("%s: guards = %#v", name, def.Require)
-		}
-	}
-	raw, _ := os.ReadFile(filepath.Join("..", "..", "config", "pos", "commands", "open_shift.yaml"))
-	def, _ := ParseCommandResource(raw)
-	if g := def.Require[1].NotExists; g == nil || g.Where["status"] != "Open" || g.Where["register"] != "$input.register" {
-		t.Fatalf("second open is not refused per register: %#v", def.Require)
-	}
-}
-
-func TestPOSTillCommandsParse(t *testing.T) {
-	for _, name := range []string{"open_till", "close_till"} {
-		raw, err := os.ReadFile(filepath.Join("..", "..", "config", "pos", "commands", name+".yaml"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		def, err := ParseCommandResource(raw)
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		if len(def.Require) == 0 || len(def.Steps) != 1 {
-			t.Fatalf("%s: require=%d steps=%d", name, len(def.Require), len(def.Steps))
-		}
-	}
-}
-
 func TestRecordSaleCommand(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "pos", "commands", "record_sale.yaml"))
 	if err != nil {
@@ -122,22 +85,18 @@ func TestPOSOpenSessionCommandParse(t *testing.T) {
 }
 
 // TestPOSCloseSessionCommandParse (#390): one command closes the till and its
-// shift together, taking close_till's inputs and returning the till as reference.
+// shift together and returns the till as reference.
 func TestPOSCloseSessionCommandParse(t *testing.T) {
-	read := func(name string) *CommandResource {
-		raw, err := os.ReadFile(filepath.Join("..", "..", "config", "pos", "commands", name+".yaml"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		def, err := ParseCommandResource(raw)
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		return def
+	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "pos", "commands", "close_session.yaml"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	def, closeTill := read("close_session"), read("close_till")
-	if def.Input.Record != closeTill.Input.Record || def.Permission != closeTill.Permission {
-		t.Fatalf("close_session input/permission = %q/%q, want close_till's %q/%q", def.Input.Record, def.Permission, closeTill.Input.Record, closeTill.Permission)
+	def, err := ParseCommandResource(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if def.Input.Record != "Till Session" || def.Permission != "write" {
+		t.Fatalf("close_session input/permission = %q/%q, want Till Session/write", def.Input.Record, def.Permission)
 	}
 	if len(def.Steps) != 2 || def.Steps[0].Update == nil || def.Steps[1].Update == nil {
 		t.Fatalf("steps = %#v", def.Steps)
@@ -149,7 +108,7 @@ func TestPOSCloseSessionCommandParse(t *testing.T) {
 	if shift.Record != "Shift" || shift.Name != "$input.shift" || shift.Values["status"] != "Closed" || shift.Values["ended_at"] != "$now" {
 		t.Fatalf("shift update = %#v", shift)
 	}
-	if def.Output["reference"] != "$steps.till.name" && def.Output["reference"] != closeTill.Output["reference"] {
+	if def.Output["reference"] != "$steps.till.name" {
 		t.Fatalf("output = %v", def.Output)
 	}
 }
@@ -160,7 +119,7 @@ func TestPOSCloseSessionCommandParse(t *testing.T) {
 func TestPOSTillCommandsRequireOwnCashier(t *testing.T) {
 	for name, record := range map[string]string{
 		"record_sale": "Till Session", "return_sale": "Till Session", "void_sale": "Till Session",
-		"close_till": "Till Session", "close_shift": "Shift", "close_session": "Till Session",
+		"close_session": "Till Session",
 	} {
 		t.Run(name, func(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join("..", "..", "config", "pos", "commands", name+".yaml"))

@@ -1,5 +1,5 @@
 name: z_report
-for: {operation: pos.close_till, doc: Till Session}
+for: {operation: pos.close_session, doc: Till Session}
 paper: thermal_80
 queries:
   by_method: {query: pos.core/payments_by_method, input: {till_session: doc.name}}

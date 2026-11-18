@@ -231,10 +231,9 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				t.Fatalf("a refused open_session wrote %s shifts", got)
 			}
 
-			// 1. open_shift, open_till.
-			run("open_shift", "k-shift", `{"register":"REG-1"}`)
+			// 1. open_session by the Manager: the till records the Manager as its cashier.
+			runAs("Manager", "open_session", "k-shift", `{"register":"REG-1","location":"LOC-1","opening_float":500}`)
 			shift := one("SELECT name FROM " + tbl("Shift"))
-			run("open_till", "k-till", fmt.Sprintf(`{"shift":%q,"opening_float":500}`, shift))
 			till := one("SELECT name FROM " + tbl("Till Session"))
 
 			// 2. item_search by term, no cost key.
@@ -302,15 +301,14 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				t.Fatalf("Manager stock write leaked: quantity = %s (err %v), want 20", got, err)
 			}
 
-			// 3. #358: this till was opened the old way (no cashier recorded), so
-			// the Cashier is refused on it; the Manager runs sale, return, void
-			// and close_till.
+			// 3. #358: this till belongs to the Manager, so the Cashier is refused
+			// on it; the Manager runs sale, return and void, and the Owner closes it.
 			for name, input := range map[string]string{
-				"record_sale": saleBody(till, 1, intent("pay-old", 180)),
-				"close_till":  fmt.Sprintf(`{"shift":%q,"closing_count":1}`, shift),
+				"record_sale":   saleBody(till, 1, intent("pay-other", 180)),
+				"close_session": fmt.Sprintf(`{"shift":%q,"closing_count":1}`, shift),
 			} {
-				if rec := tryAs("Cashier", name, "k-old-"+name, input); rec.Code != http.StatusOK && rec.Code != http.StatusConflict || strings.Contains(rec.Body.String(), `"completed"`) || !strings.Contains(rec.Body.String(), "belongs to another cashier") {
-					t.Fatalf("Cashier %s on an old-style till: status=%d body=%s", name, rec.Code, rec.Body.String())
+				if refused := tryAs("Cashier", name, "k-other-"+name, input); refused.Code != http.StatusOK && refused.Code != http.StatusConflict || strings.Contains(refused.Body.String(), `"completed"`) || !strings.Contains(refused.Body.String(), "belongs to another cashier") {
+					t.Fatalf("Cashier %s on another cashier's till: status=%d body=%s", name, refused.Code, refused.Body.String())
 				}
 			}
 			runAs("Manager", "record_sale", "k-sale1", saleBody(till, 2, intent("pay-1", 360)))
@@ -380,8 +378,8 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			if got := qty(); !strings.HasPrefix(got, "19") {
 				t.Fatalf("stock after void = %s, want 19", got)
 			}
-			// expected_cash is server-derived (#233): 500 float + 360 - 180 + 180 - 180 = 680; close_till takes only the closing count. The Owner closes it (#396 prints it).
-			ownerClose := runAs("Owner", "close_till", "k-close", fmt.Sprintf(`{"shift":%q,"closing_count":680}`, shift))
+			// expected_cash is server-derived (#233): 500 float + 360 - 180 + 180 - 180 = 680; close_session takes only the closing count. The Owner closes it (#396 prints it).
+			ownerClose := runAs("Owner", "close_session", "k-close", fmt.Sprintf(`{"shift":%q,"closing_count":680}`, shift))
 
 			// 4. Refusals: 403 and nothing written.
 			sales, entries := count("Sale"), count("Stock Entry")
@@ -560,7 +558,7 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				t.Fatalf("closed_session returned an open till: %v", rows)
 			}
 			// 300 float + 180 sale = 480 expected; the cashier counts 475.
-			cashierClose := run("close_till", "k-close-sess", fmt.Sprintf(`{"shift":%q,"closing_count":475}`, rows[0]["shift"]))
+			cashierClose := run("close_session", "k-close-sess", fmt.Sprintf(`{"shift":%q,"closing_count":475}`, rows[0]["shift"]))
 			for _, tc := range []struct {
 				role, name string
 				want       int
@@ -595,9 +593,8 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			}
 
 			// 8. #390: close_session closes the till and its shift in one
-			// operation. close_till above left the shift open, so close it,
-			// open a fresh session, and close that one with close_session.
-			run("close_shift", "k-close-shift", `{"register":"REG-2"}`)
+			// operation, so the register is free: open a fresh session and close
+			// that one with close_session.
 			run("open_session", "k-sess-again", `{"register":"REG-2","location":"LOC-1","opening_float":20}`)
 			rows = mySession("Cashier")
 			if len(rows) != 1 || rows[0]["name"] == session {
@@ -618,18 +615,15 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				t.Fatalf("second close_session succeeded: %s", rec.Body.String())
 			}
 
-			// An Owner till for the close_session print: close the shift
-			// close_till left open on REG-1, open a session there, close it
-			// counting 10 over.
-			runAs("Owner", "close_shift", "k-owner-shift", `{"register":"REG-1"}`)
+			// An Owner till for the close_session print: open a session on REG-1
+			// (the step 3 till is closed), close it counting 10 over.
 			runAs("Owner", "open_session", "k-owner-sess", `{"register":"REG-1","location":"LOC-1","opening_float":40}`)
 			ownerTill := one("SELECT name FROM "+tbl("Till Session")+" WHERE register = ? AND status = ?", "REG-1", "Open")
 			ownerShift := one("SELECT shift FROM "+tbl("Till Session")+" WHERE name = ?", ownerTill)
 			ownerSessionClose := runAs("Owner", "close_session", "k-owner-session", fmt.Sprintf(`{"shift":%q,"closing_count":50}`, ownerShift))
 
-			// 9. #396: the Z report prints for an execution of close_session as
-			// well as close_till, with the same exact figures, for the Owner; a
-			// Cashier is refused (policy).
+			// 9. #396: the Z report prints for an execution of close_session with
+			// the same exact figures, for the Owner; a Cashier is refused (policy).
 			opRef := func(name string) string {
 				t.Helper()
 				for _, o := range cat.Data.PublishedOperations {
@@ -646,21 +640,20 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				status                       int
 				text, html                   []string
 			}{
-				{"owner close_till own till", "Owner", "z_report", "close_till", ownerClose, 200,
+				{"owner close_session own till (shift 1)", "Owner", "z_report", "close_session", ownerClose, 200,
 					[]string{"Z REPORT", "Till: " + till, "SALES Cash 1 360.00 REFUNDS Cash 1 180.00", "Opening float 500.00 Expected cash 680.00 Counted 680.00 VARIANCE 0.00"},
 					[]string{"<h2>SALES</h2>", "<tr><td>Cash</td><td>1</td><td>360.00</td></tr>", "<h2>REFUNDS</h2>", "<tr><td>Cash</td><td>1</td><td>180.00</td></tr>", "<h2>Totals</h2>", `<th scope="row">Opening float</th><td>500.00</td>`, `<th scope="row">Expected cash</th><td>680.00</td>`, `<th scope="row">Counted cash</th><td>680.00</td>`, "<strong>0.00</strong>"}},
-				{"owner close_session own till", "Owner", "z_report_close_session", "close_session", ownerSessionClose, 200,
+				{"owner close_session own till", "Owner", "z_report", "close_session", ownerSessionClose, 200,
 					[]string{"Z REPORT", "Till: " + ownerTill, "SALES REFUNDS ", "Opening float 40.00 Expected cash 40.00 Counted 50.00 VARIANCE 10.00"},
 					[]string{"<h2>SALES</h2>", "<h2>Totals</h2>", `<th scope="row">Opening float</th><td>40.00</td>`, `<th scope="row">Expected cash</th><td>40.00</td>`, `<th scope="row">Counted cash</th><td>50.00</td>`, "<strong>10.00</strong>"}},
-				{"close_session execution under the close_till format", "Owner", "z_report", "close_till", sessionClose, 404, nil, nil},
-				{"close_till format with the close_session ref", "Owner", "z_report", "close_session", ownerClose, 400, nil, nil},
+				{"z_report with another operation ref", "Owner", "z_report", "open_session", ownerClose, 400, nil, nil},
 				// Policy (#396): the per-method Z report is an Owner/Manager/Administrator
 				// document. A Cashier holds no payments_by_method/refunds_by_method grant,
 				// so the print is refused for both operations; they get the server
 				// variance from my_closed_session instead.
-				{"cashier close_till own till", "Cashier", "z_report", "close_till", cashierClose, 403, nil, nil},
-				{"cashier close_session own till", "Cashier", "z_report_close_session", "close_session", sessionClose, 403, nil, nil},
-				{"cashier on the owner's execution", "Cashier", "z_report", "close_till", ownerClose, 404, nil, nil},
+				{"cashier close_session own till", "Cashier", "z_report", "close_session", cashierClose, 403, nil, nil},
+				{"cashier close_session own second till", "Cashier", "z_report", "close_session", sessionClose, 403, nil, nil},
+				{"cashier on the owner's execution", "Cashier", "z_report", "close_session", ownerClose, 404, nil, nil},
 			} {
 				for _, as := range []string{"text", "html"} {
 					rec := serve(tc.role, http.MethodGet, "/print/"+tc.format+"?as="+as+"&operation_ref="+opRef(tc.op)+"&execution_id="+tc.exec, "")
@@ -699,7 +692,7 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				}
 				return rec.Body.String()
 			}
-			for _, tc := range []struct{ format, op string }{{"z_report", "close_till"}, {"z_report_close_session", "close_session"}} {
+			for _, tc := range []struct{ format, op string }{{"z_report", "close_session"}} {
 				if got := listed("Owner", "operation_ref="+opRef(tc.op)); !strings.Contains(got, `"name":"`+tc.format+`"`) || strings.Count(got, `"name":`) != 1 {
 					t.Errorf("Owner list for %s = %s", tc.op, got)
 				}
