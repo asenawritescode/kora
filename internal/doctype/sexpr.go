@@ -36,6 +36,7 @@ func ToSExpr(snapshot *ConfigSnapshot) string {
 	writeViewsSection(&b, snapshot.Views)
 	writeAnalyticsMetricsSection(&b, snapshot.AnalyticsMetrics)
 	writeReportsSection(&b, snapshot.Reports)
+	writeJSONSection(&b, "metrics", "metric-json", snapshot.Metrics)
 	writeCommandsSection(&b, snapshot.Commands)
 	writeJSONSection(&b, "queries", "query-json", snapshot.Queries)
 	writeJSONSection(&b, "print-formats", "print-format-json", snapshot.PrintFormats)
@@ -1098,6 +1099,21 @@ func FromSExpr(sexpr string) (*ConfigSnapshot, error) {
 	return buildSnapshot(node.Children[1:])
 }
 
+// jsonSections are the config sections stored as JSON forms, keyed by section name.
+var jsonSections = map[string]string{"queries": "query-json", "print-formats": "print-format-json", "metrics": "metric-json"}
+
+// setJSONSection stores the decoded items of a JSON-form section on the snapshot.
+func setJSONSection(snapshot *ConfigSnapshot, section string, items []json.RawMessage) {
+	switch section {
+	case "queries":
+		snapshot.Queries = items
+	case "print-formats":
+		snapshot.PrintFormats = items
+	case "metrics":
+		snapshot.Metrics = items
+	}
+}
+
 func buildSnapshot(children []*sNode) (*ConfigSnapshot, error) {
 	snapshot := &ConfigSnapshot{}
 	for i := 0; i < len(children); i++ {
@@ -1145,18 +1161,12 @@ func buildSnapshot(children []*sNode) (*ConfigSnapshot, error) {
 					return nil, err
 				}
 				snapshot.Commands = commands
-			case "queries":
-				items, err := parseJSONForms(child.Children[1:], "query-json")
+			case "queries", "print-formats", "metrics":
+				items, err := parseJSONForms(child.Children[1:], jsonSections[sectionHead])
 				if err != nil {
 					return nil, err
 				}
-				snapshot.Queries = items
-			case "print-formats":
-				items, err := parseJSONForms(child.Children[1:], "print-format-json")
-				if err != nil {
-					return nil, err
-				}
-				snapshot.PrintFormats = items
+				setJSONSection(snapshot, sectionHead, items)
 			case "scripts":
 				scripts, err := parseScriptSnapshots(child.Children[1:])
 				if err != nil {

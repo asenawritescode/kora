@@ -1,0 +1,16 @@
+name: refunds
+label: Refunds
+type: simple
+model: Sale
+measure:
+  agg: sum
+  field: total
+filters:
+  - field: status
+    op: "="
+    value: Return
+time: business_date
+good: down
+format: currency
+description: Total refunded through return sales.
+verified: true
