@@ -503,7 +503,7 @@ func TestGetSessionRejectsCrossSiteCacheHit(t *testing.T) {
 		WithArgs("site-b", "sid-123").
 		WillReturnError(sql.ErrNoRows)
 
-	got, _, err := sm.GetSession("site-b", "sid-123")
+	got, _, err := sm.GetSession(context.Background(), "site-b", "sid-123")
 	if err == nil || got != nil {
 		t.Fatalf("expected cross-site cache hit to be rejected, got user=%+v err=%v", got, err)
 	}
@@ -534,7 +534,7 @@ func TestGetSession_CacheHit(t *testing.T) {
 	sm.cacheMu.Unlock()
 
 	// GetSession from cache should NOT hit the database.
-	got, _, err := sm.GetSession("test-site", "cached-sid")
+	got, _, err := sm.GetSession(context.Background(), "test-site", "cached-sid")
 	if err != nil {
 		t.Fatalf("GetSession error = %v", err)
 	}
@@ -563,12 +563,12 @@ func TestSessionCacheEnforcesByteLimitAndLRUEviction(t *testing.T) {
 	for _, sid := range []string{"sid-a", "sid-b"} {
 		sm.cacheSession(sid, "tenant", user, now, now.Add(time.Hour), now)
 	}
-	cachedUser, _, err := sm.GetSession("tenant", "sid-a")
+	cachedUser, _, err := sm.GetSession(context.Background(), "tenant", "sid-a")
 	if err != nil {
 		t.Fatalf("cache hit: %v", err)
 	}
 	cachedUser.Roles[0] = "MutatedOutsideCache"
-	secondRead, _, err := sm.GetSession("tenant", "sid-a")
+	secondRead, _, err := sm.GetSession(context.Background(), "tenant", "sid-a")
 	if err != nil || secondRead.Roles[0] != "Reader" {
 		t.Fatalf("cache user escaped mutable: user=%+v err=%v", secondRead, err)
 	}

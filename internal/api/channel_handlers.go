@@ -419,7 +419,7 @@ func (h *Handler) HandleChannelSessionRevoke(c *gin.Context) {
 	if reason == "" {
 		reason = "revoked_by_client"
 	}
-	if err := auth.RevokeChannelSession(h.queryDB(c), h.siteDialect(c), req.SessionID, reason); err != nil {
+	if err := auth.RevokeChannelSession(c.Request.Context(), h.queryDB(c), h.siteDialect(c), req.SessionID, reason); err != nil {
 		internalError(c, "revoke channel session", err)
 		return
 	}

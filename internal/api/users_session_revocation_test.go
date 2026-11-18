@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -161,7 +162,7 @@ func TestHandleUserUpdateRevokesSessionsAndGuardsAdministrators(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, _, err := sm.GetSession("site-a", sid); err != nil { // warm the cache
+				if _, _, warmErr := sm.GetSession(context.Background(), "site-a", sid); warmErr != nil { // warm the cache
 					t.Fatal(err)
 				}
 
@@ -206,7 +207,7 @@ func TestHandleUserUpdateRevokesSessionsAndGuardsAdministrators(t *testing.T) {
 					t.Fatalf("stored roles=%q enabled=%v, want roles=%q disabled=%v", roles, enabled, tt.wantRoles, tt.wantDisabled)
 				}
 				// The old cookie must stop working through the same path validateSession uses.
-				_, _, sessionErr := sm.GetSession("site-a", sid)
+				_, _, sessionErr := sm.GetSession(context.Background(), "site-a", sid)
 				if tt.wantRevoked && sessionErr == nil {
 					t.Fatal("old session still valid after the change")
 				}

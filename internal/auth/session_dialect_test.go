@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"regexp"
 	"testing"
 	"time"
@@ -48,7 +49,7 @@ func TestSessionManagerUsesDialectPlaceholders(t *testing.T) {
 				t.Fatal("create session:", err)
 			}
 			reader := newRequestSessionManager(db).SetDialect(tt.dialect)
-			user, _, err := reader.GetSession("site-a", sid)
+			user, _, err := reader.GetSession(context.Background(), "site-a", sid)
 			if err != nil {
 				t.Fatal("read session:", err)
 			}

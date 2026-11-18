@@ -59,7 +59,7 @@ func TestRevokeUserSessionsRemovesOnlyThatUsersSessionsInThatSite(t *testing.T) 
 				}
 				sids[i] = sid
 				// Warm the cache so the test proves cached sessions are dropped too.
-				if _, _, err := sm.GetSession(f.site, sid); err != nil {
+				if _, _, err := sm.GetSession(context.Background(), f.site, sid); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -83,7 +83,7 @@ func TestRevokeUserSessionsRemovesOnlyThatUsersSessionsInThatSite(t *testing.T) 
 				gone[i] = true
 			}
 			for i, f := range fixtures {
-				_, _, err := sm.GetSession(f.site, sids[i])
+				_, _, err := sm.GetSession(context.Background(), f.site, sids[i])
 				if gone[i] && err == nil {
 					t.Errorf("session %d (%s/%s) still valid after revoke", i, f.site, f.user)
 				}
@@ -112,7 +112,7 @@ func TestRevokeUserSessionsRolledBackTransactionKeepsSessions(t *testing.T) {
 	if err := tx.Rollback(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := sm.GetSession("site-a", sid); err != nil {
+	if _, _, err := sm.GetSession(context.Background(), "site-a", sid); err != nil {
 		t.Fatalf("rolled-back revocation must keep the session: %v", err)
 	}
 }

@@ -65,7 +65,7 @@ func TestLivePostgresSessionLifecycle(t *testing.T) {
 
 	// A fresh manager has an empty cache, so validation reads PostgreSQL.
 	reader := newRequestSessionManager(database).SetDialect(dialect)
-	got, _, err := reader.GetSession("site-a", sid)
+	got, _, err := reader.GetSession(context.Background(), "site-a", sid)
 	if err != nil {
 		t.Fatal("validate session:", err)
 	}
@@ -80,7 +80,7 @@ func TestLivePostgresSessionLifecycle(t *testing.T) {
 	}
 
 	reader.DeleteSession(sid)
-	if _, _, err := newRequestSessionManager(database).SetDialect(dialect).GetSession("site-a", sid); err == nil {
+	if _, _, err := newRequestSessionManager(database).SetDialect(dialect).GetSession(context.Background(), "site-a", sid); err == nil {
 		t.Fatal("deleted session still validates")
 	}
 	var remaining int

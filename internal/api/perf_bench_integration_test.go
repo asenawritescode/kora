@@ -19,6 +19,7 @@ import (
 	"time"
 
 	kdb "github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/orm"
 	"github.com/asenawritescode/kora/internal/outbox"
@@ -37,6 +38,8 @@ const (
 	benchLine        = "Perf Line"
 	benchCustomer    = "Perf Customer"
 	benchUser        = "bench@example.test"
+	// benchStatementTimeout is the request-path default from dbaccess.
+	benchStatementTimeout = 30 * time.Second
 )
 
 // benchStatements counts every server round trip the wrapped drivers issue:
@@ -296,7 +299,11 @@ func openBenchDatabase(tb testing.TB, dialect string, cleanups *[]func()) (*sql.
 		}
 		cfg.DBName = name
 		cfg.Params = map[string]string{"parseTime": "true", "charset": "utf8mb4"}
-		database, err = sql.Open("count-mysql", cfg.FormatDSN())
+		tuned, tuneErr := dbaccess.TuneDSN("mysql", cfg.FormatDSN(), benchStatementTimeout)
+		if tuneErr != nil {
+			tb.Fatal("tune MySQL DSN:", tuneErr)
+		}
+		database, err = sql.Open("count-mysql", tuned)
 		if err != nil {
 			tb.Fatal("open counting MySQL:", err)
 		}
@@ -319,7 +326,11 @@ func openBenchDatabase(tb testing.TB, dialect string, cleanups *[]func()) (*sql.
 		query := parsed.Query()
 		query.Set("search_path", schemaName)
 		parsed.RawQuery = query.Encode()
-		database, err = sql.Open("count-postgres", parsed.String())
+		tuned, tuneErr := dbaccess.TuneDSN("postgres", parsed.String(), benchStatementTimeout)
+		if tuneErr != nil {
+			tb.Fatal("tune PostgreSQL DSN:", tuneErr)
+		}
+		database, err = sql.Open("count-postgres", tuned)
 		if err != nil {
 			tb.Fatal("open counting PostgreSQL:", err)
 		}

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -83,16 +84,20 @@ func CreateChannelSession(db *sql.DB, dialect kdb.QueryDialect, params ChannelSe
 	return token, session, nil
 }
 
-func RevokeChannelSession(db *sql.DB, dialect kdb.QueryDialect, id string, reason string) error {
-	_, err := db.Exec(kdb.Rebind(dialect, `UPDATE _kora_channel_session
+// RevokeChannelSession marks a channel session revoked, recording why. It is a
+// no-op for a session that is already revoked.
+func RevokeChannelSession(ctx context.Context, db *sql.DB, dialect kdb.QueryDialect, id string, reason string) error {
+	_, err := db.ExecContext(ctx, kdb.Rebind(dialect, `UPDATE _kora_channel_session
 		SET revoked_at = ?, revoked_reason = ?
 		WHERE id = ? AND revoked_at IS NULL`), time.Now().UTC(), reason, id)
 	return err
 }
 
-func AuthenticateChannelSession(db *sql.DB, dialect kdb.QueryDialect, token string) (*ChannelSession, error) {
+// AuthenticateChannelSession resolves a channel token to its live session and
+// refreshes last_used_at. It returns an error for unknown, revoked or expired tokens.
+func AuthenticateChannelSession(ctx context.Context, db *sql.DB, dialect kdb.QueryDialect, token string) (*ChannelSession, error) {
 	hash := channelTokenHash(token)
-	row := db.QueryRow(kdb.Rebind(dialect, `SELECT id, site, client_name, conversation_key, provider, sender_address, token_hash, api_permissions,
+	row := db.QueryRowContext(ctx, kdb.Rebind(dialect, `SELECT id, site, client_name, conversation_key, provider, sender_address, token_hash, api_permissions,
 		trusted_until, sensitive_until, revoked_at, revoked_reason, created_at, last_used_at
 		FROM _kora_channel_session
 		WHERE token_hash = ?`), hash)
@@ -110,7 +115,7 @@ func AuthenticateChannelSession(db *sql.DB, dialect kdb.QueryDialect, token stri
 	}
 	session.PermissionsRaw = permsRaw
 	session.Permissions = parseExtensionPermissions(permsRaw)
-	_, _ = db.Exec(kdb.Rebind(dialect, `UPDATE _kora_channel_session SET last_used_at = ? WHERE id = ?`), time.Now().UTC(), session.ID)
+	_, _ = db.ExecContext(ctx, kdb.Rebind(dialect, `UPDATE _kora_channel_session SET last_used_at = ? WHERE id = ?`), time.Now().UTC(), session.ID)
 	return &session, nil
 }
 

@@ -91,7 +91,7 @@ func TestMySQLRevokeMemberEndsAccessKeepsRecordsAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := sessions.GetSession(memberTestSite, sid); err != nil {
+	if _, _, err := sessions.GetSession(context.Background(), memberTestSite, sid); err != nil {
 		t.Fatal("session must be valid before the revoke:", err)
 	}
 	for i := 0; i < 2; i++ {
@@ -100,7 +100,7 @@ func TestMySQLRevokeMemberEndsAccessKeepsRecordsAndIsIdempotent(t *testing.T) {
 			t.Fatalf("revoke run %d: %+v %v", i, result, err)
 		}
 	}
-	if _, _, err := sessions.GetSession(memberTestSite, sid); err == nil {
+	if _, _, err := sessions.GetSession(context.Background(), memberTestSite, sid); err == nil {
 		t.Fatal("old session still validates after the revoke")
 	}
 	if _, err := sessions.FindUserByCloudSubject(memberTestSite, "cloud-cashier-1"); !errors.Is(err, auth.ErrDisabledAccount) {
