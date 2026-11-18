@@ -195,7 +195,7 @@
    "cyclomatic": 40
   },
   "internal/analytics::(*Worker).run": {
-   "cognitive": 24
+   "cognitive": 20
   },
   "internal/analytics::(PublishedProjectionSnapshot).Validate": {
    "cognitive": 19,

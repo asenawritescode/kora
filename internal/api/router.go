@@ -174,7 +174,7 @@ func (h *Handler) siteStorage(c *gin.Context) (storage.Backend, error) {
 type analyticsWorker interface {
 	InvalidateMetrics(string)
 	InvalidateAllMetrics()
-	Flush() error
+	RequestFlush()
 }
 
 func (h *Handler) siteAnalyticsWorker(c *gin.Context) analyticsWorker {
@@ -620,10 +620,7 @@ func (h *Handler) HandleCreate(c *gin.Context) {
 	if c.Writer.Status() != http.StatusCreated {
 		return
 	}
-	h.invalidateAnalyticsForDoctype(c, doctypeName)
-	if w := h.siteAnalyticsWorker(c); w != nil {
-		_ = w.Flush() // best-effort: the response is already committed
-	}
+	h.afterAnalyticsWrite(c, doctypeName)
 }
 
 // --- Update Handler ---
@@ -672,10 +669,7 @@ func (h *Handler) HandleUpdate(c *gin.Context) {
 	if c.Writer.Status() != http.StatusOK {
 		return
 	}
-	h.invalidateAnalyticsForDoctype(c, doctypeName)
-	if w := h.siteAnalyticsWorker(c); w != nil {
-		_ = w.Flush() // best-effort: the response is already committed
-	}
+	h.afterAnalyticsWrite(c, doctypeName)
 }
 
 // --- Delete Handler ---
@@ -695,13 +689,19 @@ func (h *Handler) HandleDelete(c *gin.Context) {
 	if c.Writer.Status() != http.StatusOK {
 		return
 	}
-	h.invalidateAnalyticsForDoctype(c, doctypeName)
-	if w := h.siteAnalyticsWorker(c); w != nil {
-		_ = w.Flush() // best-effort: the response is already committed
-	}
+	h.afterAnalyticsWrite(c, doctypeName)
 }
 
 // --- Helpers ---
+
+// afterAnalyticsWrite invalidates analytics for a committed write and asks the
+// worker to flush. It never waits: the response is not held for the flush.
+func (h *Handler) afterAnalyticsWrite(c *gin.Context, doctypeName string) {
+	h.invalidateAnalyticsForDoctype(c, doctypeName)
+	if w := h.siteAnalyticsWorker(c); w != nil {
+		w.RequestFlush()
+	}
+}
 
 // docToMap converts a Document to a map for JSON serialization, including system fields.
 func docToMap(doc *doctype.Document, dt *doctype.DocType, registry *doctype.Registry, requestedFields []string) map[string]any {
