@@ -99,5 +99,6 @@ func initializeSharedRuntime(ctx context.Context, config SharedRuntimeConfig, re
 	}
 	result.NATSProvider = provider
 	resources.NATSProvider = provider
+	go provider.RunStreamUsageSampler(ctx)
 	return result, nil
 }
