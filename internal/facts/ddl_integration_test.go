@@ -41,7 +41,7 @@ func TestFactTablesAcceptMappedRows(t *testing.T) {
 				}
 			}
 			change := Change{
-				RecordID: "SAL-1", LegalEntity: "le1", Owner: "u1", Sequence: 7,
+				RecordID: "SAL-1", Owner: "u1", Sequence: 7,
 				OccurredAt: time.Date(2026, 11, 18, 9, 0, 0, 0, time.UTC),
 				Data: map[string]any{"posting_date": "2026-11-18", "total": "100.50", "status": "Paid", "register": "R1",
 					"items": []any{line("L1", "I1", "40.25"), line("L2", "I2", "60.25")}},

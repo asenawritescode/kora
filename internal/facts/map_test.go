@@ -54,7 +54,7 @@ func summary(r Row) string {
 }
 
 func TestMap(t *testing.T) {
-	base := Change{RecordID: "SAL-1", LegalEntity: "le1", Owner: "u1", Sequence: 7, OccurredAt: time.Date(2026, 11, 18, 9, 0, 0, 0, time.UTC)}
+	base := Change{RecordID: "SAL-1", Owner: "u1", Sequence: 7, OccurredAt: time.Date(2026, 11, 18, 9, 0, 0, 0, time.UTC)}
 	withLines := func(items ...any) map[string]any {
 		return map[string]any{"posting_date": "2026-11-18", "total": "100.50", "status": "Paid", "register": "R1", "items": items}
 	}
@@ -74,10 +74,10 @@ func TestMap(t *testing.T) {
 				c.Data = withLines(line("L1", "I1", "40.25"), line("L2", "I2", "60.25"))
 				return c
 			}(),
-			header: "SAL-1||le1|u1|2026-11-18|Paid|live|line_amount=0,total=100.5|item=,register=R1",
+			header: "SAL-1|||u1|2026-11-18|Paid|live|line_amount=0,total=100.5|item=,register=R1",
 			lines: []string{
-				"SAL-1|L1|le1|u1|2026-11-18|Paid|live|line_amount=40.25,total=0|item=I1,register=R1",
-				"SAL-1|L2|le1|u1|2026-11-18|Paid|live|line_amount=60.25,total=0|item=I2,register=R1",
+				"SAL-1|L1||u1|2026-11-18|Paid|live|line_amount=40.25,total=0|item=I1,register=R1",
+				"SAL-1|L2||u1|2026-11-18|Paid|live|line_amount=60.25,total=0|item=I2,register=R1",
 			},
 		},
 		{
@@ -89,10 +89,10 @@ func TestMap(t *testing.T) {
 				c.OldData = withLines(line("L1", "I1", "40.25"), line("L2", "I2", "60.25"))
 				return c
 			}(),
-			header: "SAL-1||le1|u1|2026-11-18|Paid|live|line_amount=0,total=100.5|item=,register=R1",
+			header: "SAL-1|||u1|2026-11-18|Paid|live|line_amount=0,total=100.5|item=,register=R1",
 			lines: []string{
-				"SAL-1|L1|le1|u1|2026-11-18|Paid|live|line_amount=40.25,total=0|item=I1,register=R1",
-				"SAL-1|L2|le1|u1|2026-11-18|Paid|deleted|line_amount=60.25,total=0|item=I2,register=R1",
+				"SAL-1|L1||u1|2026-11-18|Paid|live|line_amount=40.25,total=0|item=I1,register=R1",
+				"SAL-1|L2||u1|2026-11-18|Paid|deleted|line_amount=60.25,total=0|item=I2,register=R1",
 			},
 		},
 		{
@@ -104,9 +104,9 @@ func TestMap(t *testing.T) {
 				c.OldData = withLines(line("L1", "I1", "40.25"))
 				return c
 			}(),
-			header: "SAL-1||le1|u1|2026-11-18|Paid|deleted|line_amount=0,total=100.5|item=,register=R1",
+			header: "SAL-1|||u1|2026-11-18|Paid|deleted|line_amount=0,total=100.5|item=,register=R1",
 			lines: []string{
-				"SAL-1|L1|le1|u1|2026-11-18|Paid|deleted|line_amount=40.25,total=0|item=I1,register=R1",
+				"SAL-1|L1||u1|2026-11-18|Paid|deleted|line_amount=40.25,total=0|item=I1,register=R1",
 			},
 		},
 		{
@@ -117,7 +117,7 @@ func TestMap(t *testing.T) {
 				c.Data = map[string]any{"posting_date": "2026-11-18", "status": "Draft", "register": "R2"}
 				return c
 			}(),
-			header: "SAL-1||le1|u1|2026-11-18|Draft|live|line_amount=0,total=0|item=,register=R2",
+			header: "SAL-1|||u1|2026-11-18|Draft|live|line_amount=0,total=0|item=,register=R2",
 		},
 		{
 			name: "creation axis uses the clock zone",
@@ -129,7 +129,7 @@ func TestMap(t *testing.T) {
 				return c
 			}(),
 			clock:  tenanttime.Clock{Location: mustZone(t, "Pacific/Kiritimati")},
-			header: "SAL-1||le1|u1|2026-11-18||live|line_amount=0,total=1|item=,register=R1",
+			header: "SAL-1|||u1|2026-11-18||live|line_amount=0,total=1|item=,register=R1",
 		},
 		{
 			name: "creation axis before the cutoff stays on the previous day",
@@ -141,7 +141,7 @@ func TestMap(t *testing.T) {
 				return c
 			}(),
 			clock:  tenanttime.Clock{Location: mustZone(t, "Africa/Nairobi"), Cutoff: 5 * time.Hour},
-			header: "SAL-1||le1|u1|2026-11-17||live|line_amount=0,total=1|item=,register=R1",
+			header: "SAL-1|||u1|2026-11-17||live|line_amount=0,total=1|item=,register=R1",
 		},
 		{
 			name: "update adds a line as live",
@@ -152,10 +152,10 @@ func TestMap(t *testing.T) {
 				c.OldData = withLines(line("L1", "I1", "40.25"))
 				return c
 			}(),
-			header: "SAL-1||le1|u1|2026-11-18|Paid|live|line_amount=0,total=100.5|item=,register=R1",
+			header: "SAL-1|||u1|2026-11-18|Paid|live|line_amount=0,total=100.5|item=,register=R1",
 			lines: []string{
-				"SAL-1|L1|le1|u1|2026-11-18|Paid|live|line_amount=40.25,total=0|item=I1,register=R1",
-				"SAL-1|L2|le1|u1|2026-11-18|Paid|live|line_amount=60.25,total=0|item=I2,register=R1",
+				"SAL-1|L1||u1|2026-11-18|Paid|live|line_amount=40.25,total=0|item=I1,register=R1",
+				"SAL-1|L2||u1|2026-11-18|Paid|live|line_amount=60.25,total=0|item=I2,register=R1",
 			},
 		},
 		{
@@ -167,7 +167,7 @@ func TestMap(t *testing.T) {
 				return c
 			}(),
 			clock:  tenanttime.Clock{Location: mustZone(t, "Africa/Nairobi")},
-			header: "SAL-1||le1|u1|2026-11-18||live|line_amount=0,total=1|item=,register=R1",
+			header: "SAL-1|||u1|2026-11-18||live|line_amount=0,total=1|item=,register=R1",
 		},
 	}
 	for _, tc := range tests {
@@ -228,6 +228,31 @@ func TestMapMissingAxisIsZeroDate(t *testing.T) {
 			head, _ := Map(saleFacts(), Change{RecordID: "SAL-1", Data: map[string]any{"posting_date": tc.posting}}, tenanttime.Default())
 			if head.BusinessDate != (tenanttime.Date{}) {
 				t.Fatalf("business date = %v, want zero", head.BusinessDate)
+			}
+		})
+	}
+}
+
+// TestLegalEntity checks that a row takes its legal entity from the record's entity field only.
+func TestLegalEntity(t *testing.T) {
+	tests := []struct {
+		name       string
+		scopeField string
+		want       string
+	}{
+		{"entity-owned doctype reads its entity field", "branch", "BR-1"},
+		{"tenant-scoped doctype is empty", "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dt := saleFacts()
+			dt.BusinessScopeField = tc.scopeField
+			dt.Fields = append(dt.Fields, doctype.Field{Fieldname: "branch", Fieldtype: "Link"})
+			change := Change{RecordID: "SAL-1", Owner: "u1", Sequence: 7, OccurredAt: time.Date(2026, 11, 18, 9, 0, 0, 0, time.UTC),
+				Data: map[string]any{"posting_date": "2026-11-18", "branch": "BR-1"}}
+			head, _ := Map(dt, change, tenanttime.Clock{})
+			if head.LegalEntity != tc.want {
+				t.Fatalf("LegalEntity = %q, want %q", head.LegalEntity, tc.want)
 			}
 		})
 	}

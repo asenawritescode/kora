@@ -143,13 +143,12 @@ func (b *Builder) decode(event contract.EventEnvelope) (*doctype.DocType, Change
 		return nil, Change{}, fmt.Errorf("facts: parse source sequence: %w", err)
 	}
 	return dt, Change{
-		RecordID:    p.RecordID,
-		LegalEntity: event.BusinessScope.LegalEntityID,
-		Sequence:    seq,
-		OccurredAt:  event.OccurredAt,
-		Deleted:     strings.HasSuffix(event.Type, ".after_delete"),
-		Data:        p.Data,
-		OldData:     p.OldData,
+		RecordID:   p.RecordID,
+		Sequence:   seq,
+		OccurredAt: event.OccurredAt,
+		Deleted:    strings.HasSuffix(event.Type, ".after_delete"),
+		Data:       p.Data,
+		OldData:    p.OldData,
 	}, nil
 }
 

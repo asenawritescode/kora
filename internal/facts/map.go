@@ -15,15 +15,14 @@ import (
 // Change is one decoded record event; the caller fills Owner and Created (not in the payload).
 // A delete has Data nil and Deleted set.
 type Change struct {
-	RecordID    string
-	LegalEntity string
-	Owner       string
-	Created     time.Time
-	Sequence    int64
-	OccurredAt  time.Time
-	Deleted     bool
-	Data        map[string]any
-	OldData     map[string]any
+	RecordID   string
+	Owner      string
+	Created    time.Time
+	Sequence   int64
+	OccurredAt time.Time
+	Deleted    bool
+	Data       map[string]any
+	OldData    map[string]any
 }
 
 // Row is one fact row with a value for every column. Measures and Dimensions are keyed
@@ -89,7 +88,7 @@ func newRow(dt *doctype.DocType, ev Change, src map[string]any, clock tenanttime
 	}
 	return Row{
 		RecordID:       ev.RecordID,
-		LegalEntity:    ev.LegalEntity,
+		LegalEntity:    legalEntity(dt, src),
 		Owner:          ev.Owner,
 		BusinessDate:   businessDate(dt, ev, src, clock),
 		OccurredAt:     ev.OccurredAt.UTC(),
@@ -97,6 +96,15 @@ func newRow(dt *doctype.DocType, ev Change, src map[string]any, clock tenanttime
 		SourceSequence: ev.Sequence,
 		Deleted:        ev.Deleted,
 	}
+}
+
+// legalEntity is the record's own entity field for an entity-owned doctype. A tenant-scoped doctype
+// has none. The event's business scope is the request's context, so it never supplies this value.
+func legalEntity(dt *doctype.DocType, src map[string]any) string {
+	if dt.BusinessScopeField == "" {
+		return ""
+	}
+	return text(src[dt.BusinessScopeField])
 }
 
 // businessDate reads the time axis: creation, a Date day as stored, or a Datetime through the clock.
