@@ -25,16 +25,6 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// Status is the durable state of an outbox row (RFC §8.1).
-type Status string
-
-const (
-	StatusPending    Status = "pending"
-	StatusPublishing Status = "publishing"
-	StatusPublished  Status = "published"
-	StatusFailed     Status = "failed"
-)
-
 const (
 	DefaultBatchSize     = 100
 	MaxBatchSize         = 500
@@ -203,6 +193,8 @@ type Publisher struct {
 	WorkAdmission interface {
 		Acquire(context.Context) (func(), error)
 	}
+	// Failures, when set, counts delivery failures by cause for operator metrics.
+	Failures    *BacklogMetrics
 	LeaseOwner  string
 	LeaseTTL    time.Duration
 	MaxAttempts int
@@ -232,12 +224,11 @@ func (p *Publisher) PublishDue(ctx context.Context, limit int) (int, error) {
 		return 0, err
 	}
 	limit = bounded
-	maxAttempts := p.MaxAttempts
-	if maxAttempts <= 0 {
-		maxAttempts = 8
-	}
 	now := time.Now().UTC()
 	leaseUntil := now.Add(p.LeaseTTL)
+	if promoteErr := p.promoteBlocked(ctx, now); promoteErr != nil {
+		return 0, promoteErr
+	}
 
 	// Select due row IDs first (LIMIT in SELECT is portable across MySQL, LibSQL,
 	// and Postgres), then claim each row by primary key. This avoids LIMIT in an
@@ -293,6 +284,7 @@ func (p *Publisher) PublishDue(ctx context.Context, limit int) (int, error) {
 			batchErr = errors.Join(batchErr, fmt.Errorf("outbox: admit claim for event %s: %w", id, err))
 			continue
 		}
+		// Claims from pending or an expired publishing lease; see transitions.
 		res, err := p.DB.ExecContext(ctx, db.Rebind(p.Dialect,
 			`UPDATE _kora_outbox
 			 SET status = ?, lease_owner = ?, lease_until = ?, attempts = attempts + 1
@@ -332,13 +324,7 @@ func (p *Publisher) PublishDue(ctx context.Context, limit int) (int, error) {
 		}
 
 		if err := p.publishOne(ctx, id); err != nil {
-			var persistErr error
-			if attempts >= maxAttempts {
-				persistErr = p.markFailed(ctx, id, claimOwner, err)
-			} else {
-				persistErr = p.retry(ctx, id, claimOwner, attempts, err)
-			}
-			if persistErr != nil {
+			if persistErr := p.recordDeliveryFailure(ctx, id, claimOwner, attempts, err); persistErr != nil {
 				batchErr = errors.Join(batchErr, fmt.Errorf("outbox: persist delivery failure for event %s: %w", id, persistErr))
 			}
 			continue
@@ -351,6 +337,33 @@ func (p *Publisher) PublishDue(ctx context.Context, limit int) (int, error) {
 	}
 
 	return published, batchErr
+}
+
+// blockedRetryDelay is the fixed wait before a capacity-blocked row is retried,
+// so a full stream is not hammered on every publisher tick.
+const blockedRetryDelay = 30 * time.Second
+
+// attemptLimit is the number of claimed attempts before a row becomes failed.
+func (p *Publisher) attemptLimit() int {
+	if p.MaxAttempts <= 0 {
+		return 8
+	}
+	return p.MaxAttempts
+}
+
+// recordDeliveryFailure counts a failed delivery and moves the claimed row to
+// blocked (capacity), failed (attempts exhausted) or pending (retry).
+func (p *Publisher) recordDeliveryFailure(ctx context.Context, id, claimOwner string, attempts int, cause error) error {
+	full := errors.Is(cause, contract.ErrDestinationFull)
+	p.Failures.RecordPublishFailure(full)
+	switch {
+	case full:
+		return p.markBlocked(ctx, id, claimOwner, cause)
+	case attempts >= p.attemptLimit():
+		return p.markFailed(ctx, id, claimOwner, cause)
+	default:
+		return p.retry(ctx, id, claimOwner, attempts, cause)
+	}
 }
 
 func (p *Publisher) publishOne(ctx context.Context, id string) error {
@@ -379,41 +392,99 @@ func (p *Publisher) publishOne(ctx context.Context, id string) error {
 	return p.Destination.Publish(ctx, event)
 }
 
+// promoteBlocked returns capacity-blocked rows whose retry time has arrived to
+// pending, so the normal claim path picks them up.
+func (p *Publisher) promoteBlocked(ctx context.Context, now time.Time) error {
+	if err := transition(StatusBlocked, StatusPending); err != nil {
+		return err
+	}
+	release, err := p.acquireWork(ctx)
+	if err != nil {
+		return fmt.Errorf("outbox: admit blocked-event promotion: %w", err)
+	}
+	defer release()
+	_, err = p.DB.ExecContext(ctx, db.Rebind(p.Dialect,
+		`UPDATE _kora_outbox SET status = ? WHERE status = ? AND next_attempt_at <= ?`),
+		string(StatusPending), string(StatusBlocked), now)
+	return err
+}
+
 func (p *Publisher) markPublished(ctx context.Context, id, claimOwner string) error {
+	if err := transition(StatusPublishing, StatusPublished); err != nil {
+		return err
+	}
 	release, err := p.acquireWork(ctx)
 	if err != nil {
 		return fmt.Errorf("outbox: admit publication acknowledgment for event %s: %w", id, err)
 	}
 	defer release()
 	res, err := p.DB.ExecContext(ctx, db.Rebind(p.Dialect,
-		`UPDATE _kora_outbox SET status = ?, published_at = ?, lease_owner = '', lease_until = NULL WHERE id = ? AND status = 'publishing' AND lease_owner = ?`),
-		string(StatusPublished), time.Now().UTC(), id, claimOwner)
+		`UPDATE _kora_outbox SET status = ?, published_at = ?, lease_owner = '', lease_until = NULL WHERE id = ? AND status = ? AND lease_owner = ?`),
+		string(StatusPublished), time.Now().UTC(), id, string(StatusPublishing), claimOwner)
 	return requireClaimTransition(res, err, id)
 }
 
 func (p *Publisher) retry(ctx context.Context, id, claimOwner string, attempts int, cause error) error {
+	if err := transition(StatusPublishing, StatusPending); err != nil {
+		return err
+	}
 	release, err := p.acquireWork(ctx)
 	if err != nil {
 		return fmt.Errorf("outbox: admit retry transition for event %s: %w", id, err)
 	}
 	defer release()
 	res, err := p.DB.ExecContext(ctx, db.Rebind(p.Dialect,
-		`UPDATE _kora_outbox SET status = 'pending', last_error = ?, lease_owner = '', lease_until = NULL,
-			next_attempt_at = ? WHERE id = ? AND status = 'publishing' AND lease_owner = ?`),
-		cause.Error(), time.Now().UTC().Add(backoff(attempts)), id, claimOwner)
+		`UPDATE _kora_outbox SET status = ?, last_error = ?, lease_owner = '', lease_until = NULL,
+			next_attempt_at = ? WHERE id = ? AND status = ? AND lease_owner = ?`),
+		string(StatusPending), cause.Error(), time.Now().UTC().Add(backoff(attempts)), id, string(StatusPublishing), claimOwner)
+	return requireClaimTransition(res, err, id)
+}
+
+// markBlocked parks a row refused for capacity. The claim already counted an
+// attempt, so the attempt is returned, and the row retries after blockedRetryDelay.
+func (p *Publisher) markBlocked(ctx context.Context, id, claimOwner string, cause error) error {
+	if err := transition(StatusPublishing, StatusBlocked); err != nil {
+		return err
+	}
+	release, err := p.acquireWork(ctx)
+	if err != nil {
+		return fmt.Errorf("outbox: admit blocked transition for event %s: %w", id, err)
+	}
+	defer release()
+	res, err := p.DB.ExecContext(ctx, db.Rebind(p.Dialect,
+		`UPDATE _kora_outbox SET status = ?, last_error = ?, lease_owner = '', lease_until = NULL,
+			next_attempt_at = ?, attempts = attempts - 1 WHERE id = ? AND status = ? AND lease_owner = ?`),
+		string(StatusBlocked), cause.Error(), time.Now().UTC().Add(blockedRetryDelay), id, string(StatusPublishing), claimOwner)
 	return requireClaimTransition(res, err, id)
 }
 
 func (p *Publisher) markFailed(ctx context.Context, id, claimOwner string, cause error) error {
+	if err := transition(StatusPublishing, StatusFailed); err != nil {
+		return err
+	}
 	release, err := p.acquireWork(ctx)
 	if err != nil {
 		return fmt.Errorf("outbox: admit failed transition for event %s: %w", id, err)
 	}
 	defer release()
 	res, err := p.DB.ExecContext(ctx, db.Rebind(p.Dialect,
-		`UPDATE _kora_outbox SET status = ?, last_error = ?, lease_owner = '', lease_until = NULL WHERE id = ? AND status = 'publishing' AND lease_owner = ?`),
-		string(StatusFailed), cause.Error(), id, claimOwner)
+		`UPDATE _kora_outbox SET status = ?, last_error = ?, lease_owner = '', lease_until = NULL WHERE id = ? AND status = ? AND lease_owner = ?`),
+		string(StatusFailed), cause.Error(), id, string(StatusPublishing), claimOwner)
 	return requireClaimTransition(res, err, id)
+}
+
+// RecordPublishFailure counts one delivery failure. A nil receiver is a no-op.
+func (m *BacklogMetrics) RecordPublishFailure(full bool) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	if full {
+		m.snapshot.PublishFailuresFull++
+	} else {
+		m.snapshot.PublishFailuresOther++
+	}
+	m.mu.Unlock()
 }
 
 func (p *Publisher) acquireWork(ctx context.Context) (func(), error) {
@@ -437,17 +508,21 @@ func requireClaimTransition(result sql.Result, err error, id string) error {
 	return nil
 }
 
-// ReplayFailed resets failed rows to pending so they are retried (operator replay).
+// ReplayFailed is an explicit operator action. It requeues every failed row,
+// including rows that exhausted MaxAttempts, and resets their attempt count.
 func (p *Publisher) ReplayFailed(ctx context.Context) (int, error) {
+	if err := transition(StatusFailed, StatusPending); err != nil {
+		return 0, err
+	}
 	release, err := p.acquireWork(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("outbox: admit failed-event replay: %w", err)
 	}
 	defer release()
 	res, err := p.DB.ExecContext(ctx, db.Rebind(p.Dialect,
-		`UPDATE _kora_outbox SET status = 'pending', next_attempt_at = NULL, last_error = NULL
-		 WHERE status = 'failed' AND attempts < ?`),
-		p.MaxAttempts)
+		`UPDATE _kora_outbox SET status = ?, attempts = 0, next_attempt_at = NULL, last_error = NULL
+		 WHERE status = ?`),
+		string(StatusPending), string(StatusFailed))
 	if err != nil {
 		return 0, err
 	}
@@ -620,6 +695,7 @@ type BacklogSample struct {
 	Pending              int64
 	Failed               int64
 	Publishing           int64
+	Blocked              int64
 	OldestUnpublishedAge time.Duration
 	Saturated            bool
 }
@@ -634,7 +710,7 @@ func (p *Publisher) Backlog(ctx context.Context) (BacklogSample, error) {
 	states := []struct {
 		name  string
 		count *int64
-	}{{"pending", &sample.Pending}, {"failed", &sample.Failed}, {"publishing", &sample.Publishing}}
+	}{{"pending", &sample.Pending}, {"failed", &sample.Failed}, {"publishing", &sample.Publishing}, {"blocked", &sample.Blocked}}
 	for _, state := range states {
 		release, err := p.acquireWork(ctx)
 		if err != nil {
@@ -690,10 +766,15 @@ type BacklogSnapshot struct {
 	Pending              int64
 	Failed               int64
 	Publishing           int64
+	Blocked              int64
 	OldestUnpublishedAge time.Duration
 	Saturated            bool
 	RefreshFailures      int64
 	LeaseLost            int64
+	// PublishFailuresFull counts deliveries refused for destination capacity;
+	// PublishFailuresOther counts every other delivery failure.
+	PublishFailuresFull  int64
+	PublishFailuresOther int64
 	RefreshedAt          time.Time
 }
 
@@ -715,12 +796,13 @@ func (m *BacklogMetrics) Refresh(ctx context.Context, publisher *Publisher) erro
 		m.snapshot.RefreshFailures++
 		return err
 	}
-	failures := m.snapshot.RefreshFailures
-	leaseLost := m.snapshot.LeaseLost
+	previous := m.snapshot
 	m.snapshot = BacklogSnapshot{
-		Pending: metrics.Pending, Failed: metrics.Failed, Publishing: metrics.Publishing,
+		Pending: metrics.Pending, Failed: metrics.Failed, Publishing: metrics.Publishing, Blocked: metrics.Blocked,
 		OldestUnpublishedAge: metrics.OldestUnpublishedAge, Saturated: metrics.Saturated,
-		RefreshFailures: failures, LeaseLost: leaseLost, RefreshedAt: time.Now().UTC(),
+		RefreshFailures: previous.RefreshFailures, LeaseLost: previous.LeaseLost,
+		PublishFailuresFull: previous.PublishFailuresFull, PublishFailuresOther: previous.PublishFailuresOther,
+		RefreshedAt: time.Now().UTC(),
 	}
 	return nil
 }
@@ -792,7 +874,7 @@ func InspectOpenWork(ctx context.Context, database *sql.DB, dialect db.QueryDial
 	if limit == 0 || limit > 20 {
 		limit = 20
 	}
-	rows, err := database.QueryContext(ctx, db.Rebind(dialect, `SELECT id,payload FROM _kora_outbox WHERE site=? AND status IN ('pending','publishing','failed') ORDER BY created_at,id LIMIT 257`), string(tenant))
+	rows, err := database.QueryContext(ctx, db.Rebind(dialect, `SELECT id,payload FROM _kora_outbox WHERE site=? AND status IN ('pending','publishing','failed','blocked') ORDER BY created_at,id LIMIT 257`), string(tenant))
 	if err != nil {
 		return nil, fmt.Errorf("inspect pending outbox events: %w", err)
 	}

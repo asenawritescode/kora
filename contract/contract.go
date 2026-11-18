@@ -16,6 +16,7 @@ package contract
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 	"time"
 )
@@ -302,6 +303,11 @@ type Delivery struct {
 // Handler processes a single Delivery. Returning a nil error acknowledges the
 // message; returning a non-nil error causes redelivery per policy.
 type Handler func(ctx context.Context, d Delivery) error
+
+// ErrDestinationFull reports that a publish was refused for destination capacity
+// (for example a bounded event stream at its limit). Publishers wrap it so
+// callers can retry without counting the attempt as a failure.
+var ErrDestinationFull = errors.New("event destination is full")
 
 // EventPublisher publishes events. Local WAL rotation/replay is not part of this
 // contract; it lives behind LocalProvider.

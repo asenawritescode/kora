@@ -93,6 +93,9 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	backlogMock.ExpectQuery(`SELECT created_at FROM _kora_outbox WHERE status = \? ORDER BY created_at ASC LIMIT \?`).
 		WithArgs("publishing", outbox.BacklogSampleLimit).
 		WillReturnRows(sqlmock.NewRows([]string{"created_at"}))
+	backlogMock.ExpectQuery(`SELECT created_at FROM _kora_outbox WHERE status = \? ORDER BY created_at ASC LIMIT \?`).
+		WithArgs("blocked", outbox.BacklogSampleLimit).
+		WillReturnRows(sqlmock.NewRows([]string{"created_at"}))
 	if err := backlog.Refresh(context.Background(), &outbox.Publisher{DB: backlogDB, Dialect: db.Resolve("mysql")}); err != nil {
 		t.Fatalf("refresh outbox backlog fixture: %v", err)
 	}
