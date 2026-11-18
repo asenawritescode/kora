@@ -36,11 +36,9 @@ func AllocateDocumentName(dbTx *sql.Tx, dialect db.Dialect, dt *doctype.DocType,
 	if err != nil {
 		return "", 0, &doctype.ValidationError{Type: "NamingSeries", Message: err.Error(), DocType: dt.Name}
 	}
-	seed, err := highestSeriesNumber(dbTx, dialect, dt.RawTableName(), prefix)
-	if err != nil {
-		return "", 0, err
-	}
-	n, err := dialect.AllocateSeriesNumber(dbTx, dt.Name, seriesCounterKey(prefix), seed)
+	n, err := dialect.AllocateSeriesNumber(dbTx, dt.Name, seriesCounterKey(prefix), func() (int64, error) {
+		return highestSeriesNumber(dbTx, dialect, dt.RawTableName(), prefix)
+	})
 	if err != nil {
 		return "", 0, err
 	}

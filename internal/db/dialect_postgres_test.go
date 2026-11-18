@@ -403,8 +403,8 @@ func TestPostgres_Placeholder(t *testing.T) {
 
 func TestPostgres_NameGenQuery(t *testing.T) {
 	d := &PostgresDialect{}
-	got := d.NameGenQuery("tabTask", "TASK")
-	expected := `SELECT COALESCE(MAX(CAST(SPLIT_PART(name, '-', 2) AS INTEGER)), 0) FROM "tabTask" WHERE name LIKE 'TASK-%'`
+	got := d.NameGenQuery("tabTask")
+	expected := `SELECT COALESCE(MAX(CAST(SPLIT_PART(name, '-', 2) AS INTEGER)), 0) FROM "tabTask" WHERE name LIKE $1`
 	if got != expected {
 		t.Errorf("NameGenQuery = %q, want %q", got, expected)
 	}
