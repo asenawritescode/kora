@@ -34,7 +34,7 @@ func TestSiteSettingsExposeCurrencyPrecision(t *testing.T) {
 			} else {
 				query.WillReturnRows(sqlmock.NewRows([]string{"setting_value"}).AddRow(*tt.stored))
 			}
-			for _, key := range []string{"time_zone", "business_day_cutoff"} {
+			for _, key := range []string{"time_zone", "business_day_cutoff", "denominations." + tt.currency} {
 				mock.ExpectQuery("SELECT setting_value FROM _kora_site_setting").WithArgs("s1", key).
 					WillReturnRows(sqlmock.NewRows([]string{"setting_value"}))
 			}
