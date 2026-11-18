@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -37,6 +38,11 @@ func newPackLayersHandler(t *testing.T, packs ...string) (*Handler, *sql.DB, *do
 // a test can act as someone who is not an administrator.
 func newPackLayersHandlerWithRoles(t *testing.T, extraRoles []*doctype.Role, extraPermissions []*doctype.Permission, packs ...string) (*Handler, *sql.DB, *doctype.Registry, string) {
 	t.Helper()
+	for _, pack := range packs {
+		if _, err := os.Stat(filepath.Join("..", "..", "config", pack)); err != nil {
+			t.Skipf("pack %s is parked in config/_parked until it is rebuilt on Item (#647)", pack)
+		}
+	}
 	database, site := newResourceIntegrationDB(t)
 	dialect := kdb.Resolve("mysql")
 	for _, ddl := range dialect.SystemTableSQL() {

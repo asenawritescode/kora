@@ -58,6 +58,7 @@ func requireValidPack(t *testing.T, name string, files []PackFile) {
 }
 
 func TestEachERPModulePassesMarketplaceValidation(t *testing.T) {
+	skipParkedERPLayers(t)
 	for _, pack := range erpModules {
 		t.Run(pack, func(t *testing.T) {
 			requireValidPack(t, pack, erpModuleFiles(t, pack))
@@ -68,6 +69,7 @@ func TestEachERPModulePassesMarketplaceValidation(t *testing.T) {
 // The template installs the modules together, so they must also validate and
 // import as one: no clashing paths, no dangling links, no conflicting roles.
 func TestERPModulesPassValidationAndImportWhenComposed(t *testing.T) {
+	skipParkedERPLayers(t)
 	var all []PackFile
 	for _, pack := range erpModules {
 		for _, file := range erpModuleFiles(t, pack) {

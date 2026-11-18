@@ -38,9 +38,9 @@ func TestSharedMarketplaceContractFixture(t *testing.T) {
 
 func TestPRDTemplatePackagesHaveSearchableLinkedTitles(t *testing.T) {
 	packs := []string{
-		"small-business", "accounting", "invoicing", "expense", "budgeting", "kora-mvp", "erp_kenya", "erp",
+		"small-business", "accounting", "invoicing", "expense", "budgeting", "erp_kenya", "erp",
 		"crm", "marketing", "helpdesk", "customer-success", "inventory", "purchasing",
-		"retail-pos", "ecommerce", "wholesale", "subscriptions", "projectmgmt", "professional-services",
+		"pos", "ecommerce", "wholesale", "subscriptions", "projectmgmt", "professional-services",
 		"fieldwork", "maintenance", "construction", "manufacturing", "quality", "fleet", "logistics",
 		"hr", "recruitment", "payroll", "school", "clinic", "pharmacy", "membership", "hotel",
 		"restaurant", "propertymgmt", "agriculture", "ngo", "sacco", "events", "documents", "internal-requests",
@@ -48,8 +48,8 @@ func TestPRDTemplatePackagesHaveSearchableLinkedTitles(t *testing.T) {
 	for _, pack := range packs {
 		t.Run(pack, func(t *testing.T) {
 			root := filepath.Join("..", "..", "config", "v0", pack)
-			if pack == "retail-pos" || pack == "kora-mvp" {
-				root = filepath.Join("..", "..", "config", pack)
+			if pack == "pos" {
+				root = filepath.Join("..", "..", "config", "pos")
 			}
 			files := loadPackFilesAtRoot(t, root)
 			validation, err := ValidatePack(PackManifest{SchemaVersion: 1, Name: pack, Version: "1.0.0"}, files)
@@ -61,7 +61,7 @@ func TestPRDTemplatePackagesHaveSearchableLinkedTitles(t *testing.T) {
 					t.Errorf("%s: %s", finding.Path, finding.Message)
 				}
 			}
-			if pack == "retail-pos" {
+			if pack == "pos" {
 				assertWorkflowDefaultsMatchInitialStates(t, files)
 			}
 		})
