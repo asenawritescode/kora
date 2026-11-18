@@ -45,8 +45,6 @@ func BuildDrill(catalog *SemanticCatalog, registry *doctype.Registry, request Dr
 	if err := (&SemanticRequest{Queries: []ModelQuery{query}, Time: request.Time}).Validate(catalog); err != nil {
 		return nil, err
 	}
-	// Live rows label a category "field=value"; the drill needs the bare value.
-	request.Value = strings.TrimPrefix(request.Value, request.Dimension+"=")
 	filters, err := drillFilters(model, request, measure)
 	if err != nil {
 		return nil, err

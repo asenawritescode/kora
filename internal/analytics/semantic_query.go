@@ -398,11 +398,11 @@ func (qe *QueryEngine) resolveModelQuery(model *SemanticModel, query ModelQuery,
 	merged := map[string]map[string]any{}
 	order := []string{}
 	for _, measureName := range query.Measures {
-		metricResult, err := qe.resolveMeasure(call, measureName, groupBy)
+		measureRows, err := qe.measureRows(call, measureName, groupBy)
 		if err != nil {
 			return nil, err
 		}
-		for _, row := range metricResult.Rows {
+		for _, row := range measureRows {
 			key := semanticRowKey(row)
 			if _, ok := merged[key]; !ok {
 				merged[key] = rowLabels(model, query, row)
@@ -465,6 +465,30 @@ func (qe *QueryEngine) resolveMeasure(call semanticCall, measureName, groupBy st
 	return qe.Resolve(metric, QueryRequest{From: call.time.From, To: call.time.To, GroupBy: groupBy, Dimension: dimension, Filters: query.Filters, Limit: call.limit})
 }
 
+// measureRows resolves one measure's rows with category values as plain values.
+// Related rows are already plain; rollup and live rows carry "field=" prefixes.
+func (qe *QueryEngine) measureRows(call semanticCall, measureName, groupBy string) ([]map[string]any, error) {
+	result, err := qe.resolveMeasure(call, measureName, groupBy)
+	if err != nil {
+		return nil, err
+	}
+	if call.model.Relation == nil && len(call.query.Dimensions) == 1 {
+		plainCategoryValues(result.Rows, call.query.Dimensions[0])
+	}
+	return result.Rows, nil
+}
+
+// plainCategoryValues strips the "field=" prefix that rollup and live rows put on
+// a category value, so grouping, labels and drill all see the stored value.
+func plainCategoryValues(rows []map[string]any, dimension string) {
+	prefix := dimension + "="
+	for _, row := range rows {
+		if value, ok := row["dimension"].(string); ok {
+			row["dimension"] = strings.TrimPrefix(value, prefix)
+		}
+	}
+}
+
 // sortRowsByMeasure orders rows by the measure, highest first, ties by label.
 func sortRowsByMeasure(rows []map[string]any, dimension, measure string) {
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -494,9 +518,6 @@ func filterSemanticRows(rows []map[string]any, dimension string, filters []Seman
 		}
 		if dimensionValue, ok := row["dimension"]; ok {
 			value = fmt.Sprint(dimensionValue)
-			if index := strings.Index(value, "="); index >= 0 {
-				value = value[index+1:]
-			}
 		}
 		matches := true
 		for _, filter := range filters {

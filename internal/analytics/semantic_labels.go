@@ -30,7 +30,7 @@ func (qe *QueryEngine) applyLinkLabels(call semanticCall, rows []map[string]any)
 	}
 	ids := make([]string, len(rows))
 	for i, row := range rows {
-		ids[i] = strings.TrimPrefix(fmt.Sprint(row[name]), name+"=")
+		ids[i] = fmt.Sprint(row[name])
 	}
 	labels, err := qe.linkedLabels(call.registry.Get(dimension.LinkDoctype), dimension.LinkLabelField, ids)
 	if err != nil {

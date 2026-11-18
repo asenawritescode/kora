@@ -108,6 +108,10 @@ func runLiveMeasureIntegration(t *testing.T, dsnVar, driver, dialectName string)
 		}
 	})
 
+	t.Run("non-link category rows hold the plain value", func(t *testing.T) {
+		statusCategoryCheck(t, database, dialect, site)
+	})
+
 	t.Run("time buckets apply the measure filter", func(t *testing.T) {
 		result := run(SemanticRequest{Queries: []ModelQuery{{Model: "task", Measures: []string{"paid_amount"}}}, Time: QueryTime{From: "2026-01-01", To: "2026-02-28", Granularity: "month"}})
 		if got := valueColumn(result.Rows, "paid_amount"); fmt.Sprint(got) != "[450 999]" {
@@ -192,5 +196,37 @@ func insertLiveRollup(t *testing.T, database *sql.DB, dialect db.Dialect, site, 
 	query := "INSERT INTO _kora_analytics_daily (site, scope_kind, legal_entity_id, doctype, metric, dimension, date, value) VALUES (?, 'tenant', '', 'Task', 'task_count_by_customer', ?, ?, ?)"
 	if _, err := database.Exec(db.Rebind(dialect, query), site, dimension, date, value); err != nil {
 		t.Fatal("insert rollup:", err)
+	}
+}
+
+// statusCategoryCheck proves a non-link category returns its plain value from
+// both the live path (filtered measure) and the rollup path.
+func statusCategoryCheck(t *testing.T, database *sql.DB, dialect db.Dialect, site string) {
+	t.Helper()
+	model := taskModel(SemanticFilter{Field: "status", Operator: "=", Values: []string{"Paid"}})
+	model.Dimensions = append(model.Dimensions, SemanticDimension{Name: "status", Field: "status", Type: "category"})
+	engine := &QueryEngine{DB: database, SiteName: site, Dialect: dialect}
+	query := func(measure string) map[string]any {
+		t.Helper()
+		request := SemanticRequest{Queries: []ModelQuery{{Model: "task", Measures: []string{measure}, Dimensions: []string{"status"}}}, Time: QueryTime{From: "2026-01-01", To: "2026-01-31"}}
+		response, err := engine.ResolveSemanticQuery(&SemanticCatalog{Models: []SemanticModel{model}}, request, taskRegistry())
+		if err != nil {
+			t.Fatal("resolve status query:", err)
+		}
+		rows := response.Queries[0].Rows
+		if len(rows) != 1 {
+			t.Fatalf("%s rows = %v, want one", measure, rows)
+		}
+		return rows[0]
+	}
+	if row := query("paid_amount"); row["status"] != "Paid" {
+		t.Fatalf("live status row = %#v, want plain \"Paid\"", row)
+	}
+	insert := "INSERT INTO _kora_analytics_daily (site, scope_kind, legal_entity_id, doctype, metric, dimension, date, value) VALUES (?, 'tenant', '', 'Task', 'task_count_by_status', 'status=Paid', '2026-01-05', 3)"
+	if _, err := database.Exec(db.Rebind(dialect, insert), site); err != nil {
+		t.Fatal("insert status rollup:", err)
+	}
+	if row := query("count"); row["status"] != "Paid" || fmt.Sprint(row["count"]) != "3" {
+		t.Fatalf("rollup status row = %#v, want plain \"Paid\" with count 3", row)
 	}
 }
