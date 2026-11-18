@@ -175,6 +175,51 @@ func (c *CommandResource) validateEnsure(i int, e *StepEnsure) error {
 	return nil
 }
 
+// validateHeader checks the name, namespace, preconditions and steps presence.
+func (c *CommandResource) validateHeader() error {
+	if c.Name == "" {
+		return fmt.Errorf("command definition: missing name")
+	}
+	if len(c.Preconditions) != 0 {
+		return fmt.Errorf("command %q: free-form preconditions are not supported; use require", c.FullName())
+	}
+	if strings.Count(c.Name, ".") == 0 && c.Namespace == "" {
+		return fmt.Errorf("command %q: namespaced name or namespace required", c.Name)
+	}
+	if len(c.Steps) == 0 {
+		return fmt.Errorf("command %q: empty transaction", c.Name)
+	}
+	return nil
+}
+
+// validateInputExtras checks that each extra input declares a scalar type.
+func (c *CommandResource) validateInputExtras() error {
+	for name, extra := range c.Input.Extra {
+		switch extra.Type {
+		case "string", "integer", "number", "boolean":
+		default:
+			return fmt.Errorf("command %q: input.extra.%s type %q must be string, integer, number or boolean", c.Name, name, extra.Type)
+		}
+	}
+	return nil
+}
+
+// validateCreate checks that a create step names a record and sets values.
+func (c *CommandResource) validateCreate(i int, cr *StepCreate) error {
+	if cr.Record == "" || len(cr.Values) == 0 {
+		return fmt.Errorf("command %q: step %d create requires record and values", c.Name, i)
+	}
+	return nil
+}
+
+// validateUpdate checks that an update step names one record and sets values or adjustments.
+func (c *CommandResource) validateUpdate(i int, u *StepUpdate) error {
+	if u.Record == "" || (u.Name == "") == (len(u.Where) == 0) || len(u.Values)+len(u.Adjust) == 0 {
+		return fmt.Errorf("command %q: step %d update requires record, exactly one of name or where, and values or adjust", c.Name, i)
+	}
+	return c.validateAdjustments(i, u)
+}
+
 // validateAdjustments checks that each adjusted field is set only by adjust
 // and that its adjustment is well formed.
 func (c *CommandResource) validateAdjustments(i int, u *StepUpdate) error {
@@ -208,17 +253,8 @@ func ParseCommandResource(raw []byte) (*CommandResource, error) {
 // validateWith checks the definition. With needSchemas false (config YAML) the
 // versioned schema refs may be absent: the pack generator fills them.
 func (c *CommandResource) validateWith(needSchemas bool) error {
-	if c.Name == "" {
-		return fmt.Errorf("command definition: missing name")
-	}
-	if len(c.Preconditions) != 0 {
-		return fmt.Errorf("command %q: free-form preconditions are not supported; use require", c.FullName())
-	}
-	if strings.Count(c.Name, ".") == 0 && c.Namespace == "" {
-		return fmt.Errorf("command %q: namespaced name or namespace required", c.Name)
-	}
-	if len(c.Steps) == 0 {
-		return fmt.Errorf("command %q: empty transaction", c.Name)
+	if err := c.validateHeader(); err != nil {
+		return err
 	}
 	for i, s := range c.Steps {
 		if s.kindCount() > 1 {
@@ -230,14 +266,11 @@ func (c *CommandResource) validateWith(needSchemas bool) error {
 				return err
 			}
 		case s.Create != nil:
-			if s.Create.Record == "" || len(s.Create.Values) == 0 {
-				return fmt.Errorf("command %q: step %d create requires record and values", c.Name, i)
+			if err := c.validateCreate(i, s.Create); err != nil {
+				return err
 			}
 		case s.Update != nil:
-			if s.Update.Record == "" || (s.Update.Name == "") == (len(s.Update.Where) == 0) || len(s.Update.Values)+len(s.Update.Adjust) == 0 {
-				return fmt.Errorf("command %q: step %d update requires record, exactly one of name or where, and values or adjust", c.Name, i)
-			}
-			if err := c.validateAdjustments(i, s.Update); err != nil {
+			if err := c.validateUpdate(i, s.Update); err != nil {
 				return err
 			}
 		default:
@@ -247,12 +280,8 @@ func (c *CommandResource) validateWith(needSchemas bool) error {
 	if c.Input.Record == "" {
 		return fmt.Errorf("command %q: input.record required in this slice", c.Name)
 	}
-	for name, extra := range c.Input.Extra {
-		switch extra.Type {
-		case "string", "integer", "number", "boolean":
-		default:
-			return fmt.Errorf("command %q: input.extra.%s type %q must be string, integer, number or boolean", c.Name, name, extra.Type)
-		}
+	if err := c.validateInputExtras(); err != nil {
+		return err
 	}
 	if err := c.validateCompute(); err != nil {
 		return err

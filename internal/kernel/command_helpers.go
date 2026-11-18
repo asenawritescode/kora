@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/orm"
+	"github.com/asenawritescode/kora/internal/script"
 )
 
 // lockAdjustTarget locks the row an adjusting update changes, so concurrent
@@ -63,4 +65,42 @@ func createDocumentValues(dt *doctype.DocType, values map[string]string, env ref
 		doc.Set(field, v)
 	}
 	return doc, nil
+}
+
+// commandOwner returns the record owner a command writes: the operation's
+// owner when it names one, otherwise the acting user.
+func commandOwner(op Operation, user string) string {
+	if op.Context.Owner != "" {
+		return op.Context.Owner
+	}
+	return user
+}
+
+// captureInsertHooks runs the after-insert and after-save hooks of a new record.
+func captureInsertHooks(ctx context.Context, txMgr *orm.TxManager, dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Document) *contract.Error {
+	if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterInsert, doc, nil}); hookErr != nil {
+		return hookErr
+	}
+	return captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, nil})
+}
+
+// bindStepOperation returns the operation a command step runs as, and binds
+// the transaction to its business scope for cross-entity commands.
+func bindStepOperation(txMgr *orm.TxManager, op Operation, cmd *CommandResource, step CommandStep) (Operation, *contract.Error) {
+	stepOp, scopeErr := operationForCommandStep(op, cmd, step)
+	if scopeErr != nil {
+		return Operation{}, scopeErr
+	}
+	if cmd.CrossEntity != nil {
+		txMgr.BusinessScope = stepOp.Context.BusinessScope
+	}
+	return stepOp, nil
+}
+
+// bindStepName records the record name a step produced under its As alias.
+// A step without an alias binds nothing.
+func bindStepName(stepNames map[string]string, as, name string) {
+	if as != "" {
+		stepNames[as] = name
+	}
 }
