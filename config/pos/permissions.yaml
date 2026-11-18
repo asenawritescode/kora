@@ -428,6 +428,26 @@
 - doctype: module.pos.core.operation.record_cash_movement
   role: Cashier
   write: true
+- doctype: module.pos.core.query.x_report
+  role: Owner
+  read: true
+- doctype: module.pos.core.query.x_report
+  role: Manager
+  read: true
+- doctype: module.pos.core.query.x_report
+  role: Cashier
+  read: true
+  if_owner: true
+- doctype: module.pos.core.query.x_report_session
+  role: Owner
+  read: true
+- doctype: module.pos.core.query.x_report_session
+  role: Manager
+  read: true
+- doctype: module.pos.core.query.x_report_session
+  role: Cashier
+  read: true
+  if_owner: true
 - doctype: Till Count Line
   role: Owner
   read: true

@@ -1,0 +1,23 @@
+# X report: sales so far in one till session, by status (Paid, Return, Void,
+# Held). Held sales are listed apart and never counted as sales. The owner
+# column is in the output so an if_owner grant (Cashier) sees only its own rows.
+name: x_report
+module_owner_id: pos.core
+capability: pos.till
+operation: x_report
+source: Sale
+permission: read
+scope: tenant
+owner_field: owner
+input:
+  till_session: {type: string, max_length: 140}
+filters:
+  - {field: till_session, op: eq, value: $input.till_session}
+  - {field: status, op: in, value: [Paid, Return, Void, Held]}
+fields: [status, owner, sale_count, total]
+group_by: [status, owner]
+aggregates:
+  - {name: sale_count, fn: count}
+  - {name: total, fn: sum, field: total}
+sort: [{field: status, dir: asc}]
+limit: 50

@@ -28,7 +28,7 @@ func TestPOSPackQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"my_session": "Till Session", "closed_session": "Till Session", "last_close": "Till Session", "my_closed_session": "Till Session", "my_registers": "Register", "recent_sales": "Sale", "sale_lines": "Sale Line Balance", "sale_items": "Sale Item", "sale_payments": "Sale Payment", "my_sales": "Sale", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment", "payments_by_account": "Sale Payment", "expected_cash": "Till Session", "held_sales": "Sale"}
+	want := map[string]string{"my_session": "Till Session", "closed_session": "Till Session", "last_close": "Till Session", "my_closed_session": "Till Session", "my_registers": "Register", "recent_sales": "Sale", "sale_lines": "Sale Line Balance", "sale_items": "Sale Item", "sale_payments": "Sale Payment", "my_sales": "Sale", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment", "payments_by_account": "Sale Payment", "expected_cash": "Till Session", "held_sales": "Sale", "x_report": "Sale", "x_report_session": "Till Session"}
 	if len(defs) != len(want) {
 		t.Fatalf("got %d queries, want %d", len(defs), len(want))
 	}
@@ -149,11 +149,11 @@ func TestPOSPackQueriesAcceptEmptyInput(t *testing.T) {
 				}
 				return
 			}
-			if d.Name == "expected_cash" {
+			if d.Name == "expected_cash" || d.Name == "x_report" || d.Name == "x_report_session" {
 				// The breakdown is read for one till: without its name it is refused.
 				var ie *InputError
 				if _, err := Run(context.Background(), conn, db.Resolve("libsql"), d, Request{FullRead: true, Now: now, Input: map[string]any{}}); !errors.As(err, &ie) || ie.Field != "till_session" {
-					t.Fatalf("expected_cash without till_session = %v, want InputError on till_session", err)
+					t.Fatalf("%s without till_session = %v, want InputError on till_session", d.Name, err)
 				}
 				return
 			}
