@@ -86,7 +86,7 @@ func (a *Archiver) ArchiveDue(ctx context.Context, site string) (int, error) {
 // deterministic, so a rerun after a crash overwrites the same object. Rows are
 // deleted only after Put succeeds.
 func (a *Archiver) archiveChunk(ctx context.Context, site string) (int, error) {
-	rows, created, err := a.selectDue(ctx, site, time.Now().UTC().Add(-a.Horizon))
+	rows, created, err := a.selectDue(ctx, site)
 	if err != nil || len(rows) == 0 {
 		return 0, err
 	}
@@ -111,11 +111,11 @@ type archiveRow map[string]any
 // archiveColumns lists the _kora_outbox columns that the archive keeps.
 var archiveColumns = []string{"id", "site", "source_sequence", "event_type", "event_version", "aggregate_type", "aggregate_id", "payload", "status", "attempts", "next_attempt_at", "lease_owner", "lease_until", "created_at", "published_at", "last_error"}
 
-// selectDue returns up to ChunkSize published rows older than cutoff that no
+// selectDue returns up to ChunkSize published rows older than the horizon that no
 // delivery failure references, oldest first, plus the first row's created_at.
-func (a *Archiver) selectDue(ctx context.Context, site string, cutoff time.Time) ([]archiveRow, time.Time, error) {
-	query := `SELECT ` + strings.Join(archiveColumns, ",") + ` FROM _kora_outbox o WHERE o.site = ? AND o.status = ? AND o.created_at < ? AND NOT EXISTS (SELECT 1 FROM _kora_outbox_delivery_failure f WHERE f.site = o.site AND f.event_id = o.id) ORDER BY o.created_at, o.id LIMIT ?`
-	rows, err := a.DB.QueryContext(ctx, db.Rebind(a.Dialect, query), site, string(StatusPublished), cutoff, a.ChunkSize)
+func (a *Archiver) selectDue(ctx context.Context, site string) ([]archiveRow, time.Time, error) {
+	query := `SELECT ` + strings.Join(archiveColumns, ",") + ` FROM _kora_outbox o WHERE o.site = ? AND o.status = ? AND o.created_at < ` + archiveCutoffSQL(a.Dialect) + ` AND NOT EXISTS (SELECT 1 FROM _kora_outbox_delivery_failure f WHERE f.site = o.site AND f.event_id = o.id) ORDER BY o.created_at, o.id LIMIT ?`
+	rows, err := a.DB.QueryContext(ctx, db.Rebind(a.Dialect, query), site, string(StatusPublished), archiveHorizonSeconds(a.Horizon), a.ChunkSize)
 	if err != nil {
 		return nil, time.Time{}, fmt.Errorf("outbox: select archive rows: %w", err)
 	}
@@ -141,6 +141,30 @@ func (a *Archiver) selectDue(ctx context.Context, site string, cutoff time.Time)
 		out = append(out, row)
 	}
 	return out, created, rows.Err()
+}
+
+// archiveCutoffSQL is the instant that rows older than the horizon fall before,
+// read from the database clock. created_at takes its value from the same clock
+// through the column default, in the session time zone, so comparing against
+// it stays correct whatever zone the session runs in. The one placeholder is
+// the horizon in seconds (see archiveHorizonSeconds).
+func archiveCutoffSQL(dialect db.Dialect) string {
+	if dialect.DriverName() == "postgres" {
+		return "(NOW() - (? * INTERVAL '1 second'))"
+	}
+	return "DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL ? SECOND)"
+}
+
+func archiveHorizonSeconds(horizon time.Duration) int64 {
+	return int64(horizon / time.Second)
+}
+
+// ArchiveDueProbe returns a query that selects one row when ArchiveDue would
+// find work for horizon, and its bound arguments. It applies the same filters
+// as the archiver, so a probe never reports rows the archiver keeps.
+func ArchiveDueProbe(dialect db.Dialect, horizon time.Duration) (string, []any) {
+	query := `SELECT 1 FROM _kora_outbox o WHERE o.status = 'published' AND o.created_at < ` + archiveCutoffSQL(dialect) + ` AND NOT EXISTS (SELECT 1 FROM _kora_outbox_delivery_failure f WHERE f.site = o.site AND f.event_id = o.id) LIMIT 1`
+	return db.Rebind(dialect, query), []any{archiveHorizonSeconds(horizon)}
 }
 
 // normalizeArchiveValue turns driver values into JSON-friendly ones: bytes become

@@ -19,6 +19,7 @@ import (
 	"github.com/asenawritescode/kora/internal/kernel"
 	"github.com/asenawritescode/kora/internal/natsprovider"
 	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/outbox"
 	"github.com/asenawritescode/kora/internal/script"
 	"github.com/asenawritescode/kora/internal/site"
 	"github.com/asenawritescode/kora/internal/storage"
@@ -156,6 +157,21 @@ func envPositiveUint64(name string, fallback uint64) (uint64, error) {
 	return value, nil
 }
 
+// outboxArchiveHorizonFromEnv reads KORA_OUTBOX_ARCHIVE_DAYS: whole days, not
+// less than the rebuild window. Unset means the default horizon.
+func outboxArchiveHorizonFromEnv() (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv("KORA_OUTBOX_ARCHIVE_DAYS"))
+	if raw == "" {
+		return outbox.DefaultArchiveHorizon, nil
+	}
+	minDays := int(outbox.MinArchiveHorizon / (24 * time.Hour))
+	days, err := strconv.Atoi(raw)
+	if err != nil || days < minDays {
+		return 0, fmt.Errorf("KORA_OUTBOX_ARCHIVE_DAYS must be a whole number of days, at least %d", minDays)
+	}
+	return time.Duration(days) * 24 * time.Hour, nil
+}
+
 func sessionCacheBudgetFromEnv() (uint64, error) {
 	value, err := envPositiveUint64("KORA_SESSION_CACHE_MAX_BYTES", auth.DefaultSessionCacheBudgetBytes)
 	if err != nil {
@@ -165,6 +181,21 @@ func sessionCacheBudgetFromEnv() (uint64, error) {
 		return 0, fmt.Errorf("KORA_SESSION_CACHE_MAX_BYTES cannot exceed %d", auth.MaxSessionCacheBudgetBytes)
 	}
 	return value, nil
+}
+
+// analyticsOutboxFromEnv reads the analytics queue budget and subscriber limit
+// and the outbox archive horizon.
+func analyticsOutboxFromEnv() (uint64, int, time.Duration, error) {
+	queueBudget, err := analyticsQueueBudgetFromEnv()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	maxSubscribers, err := analyticsSubscriberLimitFromEnv()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	archiveHorizon, err := outboxArchiveHorizonFromEnv()
+	return queueBudget, maxSubscribers, archiveHorizon, err
 }
 
 func analyticsQueueBudgetFromEnv() (uint64, error) {
@@ -349,11 +380,7 @@ func runServe() error {
 	if err != nil {
 		return err
 	}
-	analyticsQueueBudgetBytes, err := analyticsQueueBudgetFromEnv()
-	if err != nil {
-		return err
-	}
-	analyticsMaxSubscribers, err := analyticsSubscriberLimitFromEnv()
+	analyticsQueueBudgetBytes, analyticsMaxSubscribers, outboxArchiveHorizon, err := analyticsOutboxFromEnv()
 	if err != nil {
 		return err
 	}
@@ -424,11 +451,12 @@ func runServe() error {
 		CellURLs: deploymentURLs, DirectoryConsumerID: os.Getenv("KORA_SITE_DIRECTORY_CONSUMER_ID"),
 		NATSConfig: natsConfig, ScriptsEnabled: scriptEnabled == "" || scriptEnabled == "true",
 		KernelCommands: kernelCommands, HTTPAllowlist: httpAllowlist, CloudRelay: cloudRelayConfig, CloudUsage: cloudUsageConfig,
-		CORSAllowedOrigins: splitHTTPOrigins(os.Getenv("KORA_CORS_ALLOWED_ORIGINS")),
-		Workflow:           engine.SelfHostedWorkflowConfig(),
-		Analytics:          analytics.LoadConfig(),
-		OutboxEnabled:      outboxEnabledFromEnv(os.Getenv("KORA_OUTBOX"), natsEnabled()),
-		PlatformDBUser:     common.DBUser, PlatformDBPassword: common.DBPassword,
+		CORSAllowedOrigins:   splitHTTPOrigins(os.Getenv("KORA_CORS_ALLOWED_ORIGINS")),
+		Workflow:             engine.SelfHostedWorkflowConfig(),
+		Analytics:            analytics.LoadConfig(),
+		OutboxEnabled:        outboxEnabledFromEnv(os.Getenv("KORA_OUTBOX"), natsEnabled()),
+		OutboxArchiveHorizon: outboxArchiveHorizon,
+		PlatformDBUser:       common.DBUser, PlatformDBPassword: common.DBPassword,
 		AllowConsoleOnboarding:          sc.AllowConsoleOnboarding,
 		ReloadToken:                     envcompat.IntegrationToken(),
 		ManagementToken:                 envcompat.IntegrationToken(),

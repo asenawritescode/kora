@@ -65,8 +65,8 @@ func TestDurableWorkScannerFindsUnreceiptedTenantWorkAcrossDialects(t *testing.T
 				t.Fatal("ping disposable tenant database:", err)
 			}
 			dialect := db.Resolve(tc.driver)
-			if due, err := hasDueTenantWork(t.Context(), database, dialect); err != nil || due {
-				t.Fatalf("initial disposable durable-work probe = (%t, %v), want (false, nil)", due, err)
+			if due, probeErr := hasDueTenantWork(t.Context(), database, dialect, 0); probeErr != nil || due {
+				t.Fatalf("initial disposable durable-work probe = (%t, %v), want (false, nil)", due, probeErr)
 			}
 			lifecycleStore := &script.Store{DB: database, Dialect: dialect}
 			if err := lifecycleStore.EnsureAsyncHookInvocationSchema(t.Context()); err != nil {
@@ -76,14 +76,14 @@ func TestDurableWorkScannerFindsUnreceiptedTenantWorkAcrossDialects(t *testing.T
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `INSERT INTO _kora_script_invocation (id,tenant_id,source_operation_id,sequence_no,status,payload_json,next_attempt_at,last_error,created_at,updated_at) VALUES (?,?,?,1,'pending',?,CURRENT_TIMESTAMP,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`), invocationID, "scanner-test", contract.NewOperationID(), `{}`); err != nil {
 				t.Fatal("insert due lifecycle hook invocation:", err)
 			}
-			if due, err := hasDueTenantWork(t.Context(), database, dialect); err != nil || !due {
-				t.Fatalf("durable-work probe for pending lifecycle hook = (%t, %v), want (true, nil)", due, err)
+			if due, probeErr := hasDueTenantWork(t.Context(), database, dialect, 0); probeErr != nil || !due {
+				t.Fatalf("durable-work probe for pending lifecycle hook = (%t, %v), want (true, nil)", due, probeErr)
 			}
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `UPDATE _kora_script_invocation SET status='running',lease_until=CURRENT_TIMESTAMP,external_effect_started=TRUE WHERE id=?`), invocationID); err != nil {
 				t.Fatal("expire external lifecycle invocation lease:", err)
 			}
-			if due, err := hasDueTenantWork(t.Context(), database, dialect); err != nil || !due {
-				t.Fatalf("durable-work probe for uncertain lifecycle hook = (%t, %v), want (true, nil)", due, err)
+			if due, probeErr := hasDueTenantWork(t.Context(), database, dialect, 0); probeErr != nil || !due {
+				t.Fatalf("durable-work probe for uncertain lifecycle hook = (%t, %v), want (true, nil)", due, probeErr)
 			}
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `DELETE FROM _kora_script_invocation WHERE id=?`), invocationID); err != nil {
 				t.Fatal("remove lifecycle hook fixture:", err)
@@ -127,14 +127,14 @@ func TestDurableWorkScannerFindsUnreceiptedTenantWorkAcrossDialects(t *testing.T
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `INSERT INTO _kora_outbox (id,site,event_type,status) VALUES (?,?,?,'published')`), eventID, "scanner-test", "kora.invoice.after_save"); err != nil {
 				t.Fatal("insert unreceipted durable webhook event:", err)
 			}
-			due, err := hasDueTenantWork(t.Context(), database, dialect)
+			due, err := hasDueTenantWork(t.Context(), database, dialect, 0)
 			if err != nil || !due {
 				t.Fatalf("hasDueTenantWork without webhook receipt = (%t, %v), want (true, nil)", due, err)
 			}
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `INSERT INTO _kora_outbox_receipt (consumer_name,event_id,site) VALUES (?,?,?)`), "engine-webhooks-v1", eventID, "scanner-test"); err != nil {
 				t.Fatal("insert webhook receipt:", err)
 			}
-			due, err = hasDueTenantWork(t.Context(), database, dialect)
+			due, err = hasDueTenantWork(t.Context(), database, dialect, 0)
 			if err != nil || due {
 				t.Fatalf("hasDueTenantWork after webhook receipt = (%t, %v), want (false, nil)", due, err)
 			}
@@ -153,7 +153,7 @@ func TestDurableWorkScannerFindsUnreceiptedTenantWorkAcrossDialects(t *testing.T
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `INSERT INTO _kora_schedule_definition (tenant_id,job_name,definition_digest,schedule,job_json,next_run_at,updated_at) VALUES (?,?,?,'* * * * *','{}',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`), "scanner-test", "due-job", strings.Repeat("a", 64)); err != nil {
 				t.Fatal("insert due scheduled job:", err)
 			}
-			due, err = hasDueTenantWork(t.Context(), database, dialect)
+			due, err = hasDueTenantWork(t.Context(), database, dialect, 0)
 			if err != nil || !due {
 				t.Fatalf("hasDueTenantWork for persisted due schedule = (%t, %v), want (true, nil)", due, err)
 			}
@@ -163,7 +163,7 @@ func TestDurableWorkScannerFindsUnreceiptedTenantWorkAcrossDialects(t *testing.T
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `INSERT INTO _kora_schedule_occurrence (tenant_id,job_name,scheduled_at,definition_digest,job_json,state,last_error) VALUES (?,?,CURRENT_TIMESTAMP,?,'{}','pending','')`), "scanner-test", "persisted-occurrence", strings.Repeat("b", 64)); err != nil {
 				t.Fatal("insert pending scheduled occurrence:", err)
 			}
-			due, err = hasDueTenantWork(t.Context(), database, dialect)
+			due, err = hasDueTenantWork(t.Context(), database, dialect, 0)
 			if err != nil || !due {
 				t.Fatalf("hasDueTenantWork for persisted scheduled occurrence = (%t, %v), want (true, nil)", due, err)
 			}
@@ -173,7 +173,7 @@ func TestDurableWorkScannerFindsUnreceiptedTenantWorkAcrossDialects(t *testing.T
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `INSERT INTO _kora_schedule_occurrence (tenant_id,job_name,scheduled_at,definition_digest,job_json,state,lease_until,last_error) VALUES (?,?,CURRENT_TIMESTAMP,?,'{}','running',CURRENT_TIMESTAMP,'')`), "scanner-test", "expired-occurrence", strings.Repeat("c", 64)); err != nil {
 				t.Fatal("insert expired scheduled occurrence:", err)
 			}
-			due, err = hasDueTenantWork(t.Context(), database, dialect)
+			due, err = hasDueTenantWork(t.Context(), database, dialect, 0)
 			if err != nil || !due {
 				t.Fatalf("hasDueTenantWork for expired scheduled occurrence = (%t, %v), want (true, nil)", due, err)
 			}
@@ -184,14 +184,14 @@ func TestDurableWorkScannerFindsUnreceiptedTenantWorkAcrossDialects(t *testing.T
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `INSERT INTO _kora_analytics_rebuild_job (id,site,doctype,from_date,status,started_at,updated_at) VALUES (?,?,?,'2026-01-01','queued',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`), jobID, "scanner-test", "Invoice"); err != nil {
 				t.Fatal("insert queued analytics rebuild job:", err)
 			}
-			due, err = hasDueTenantWork(t.Context(), database, dialect)
+			due, err = hasDueTenantWork(t.Context(), database, dialect, 0)
 			if err != nil || !due {
 				t.Fatalf("hasDueTenantWork for queued analytics rebuild = (%t, %v), want (true, nil)", due, err)
 			}
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `INSERT INTO _kora_analytics_rebuild_lease (site,job_id,owner,fencing_token,lease_until) VALUES (?,?,?,1,?)`), "scanner-test", jobID, "active-worker", time.Now().UTC().Add(time.Hour)); err != nil {
 				t.Fatal("insert analytics rebuild lease:", err)
 			}
-			due, err = hasDueTenantWork(t.Context(), database, dialect)
+			due, err = hasDueTenantWork(t.Context(), database, dialect, 0)
 			if err != nil || due {
 				t.Fatalf("hasDueTenantWork for actively leased analytics rebuild = (%t, %v), want (false, nil)", due, err)
 			}
@@ -215,14 +215,14 @@ func TestDurableWorkScannerFindsUnreceiptedTenantWorkAcrossDialects(t *testing.T
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `INSERT INTO _kora_workflow_subscription (tenant_id,event_type,instance_id,step_id,correlation_field,correlation_value,on_event) VALUES (?,?,?,?,'','',?)`), "scanner-test", "invoice.paid", workflowID, "wait-payment", "next-step"); err != nil {
 				t.Fatal("insert workflow event subscription:", err)
 			}
-			due, err = hasDueTenantWork(t.Context(), database, dialect)
+			due, err = hasDueTenantWork(t.Context(), database, dialect, 0)
 			if err != nil || !due {
 				t.Fatalf("hasDueTenantWork for unreceipted waiting workflow signal = (%t, %v), want (true, nil)", due, err)
 			}
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `INSERT INTO _kora_outbox_receipt (consumer_name,event_id,site) VALUES (?,?,?)`), "workflow-signals", workflowEventID, "scanner-test"); err != nil {
 				t.Fatal("insert workflow signal receipt:", err)
 			}
-			due, err = hasDueTenantWork(t.Context(), database, dialect)
+			due, err = hasDueTenantWork(t.Context(), database, dialect, 0)
 			if err != nil || due {
 				t.Fatalf("hasDueTenantWork after workflow signal receipt = (%t, %v), want (false, nil)", due, err)
 			}
@@ -230,7 +230,7 @@ func TestDurableWorkScannerFindsUnreceiptedTenantWorkAcrossDialects(t *testing.T
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `INSERT INTO _kora_workflow_process_timer (tenant_id,instance_id,step_id,generation,due_at) VALUES (?,?,?,1,CURRENT_TIMESTAMP)`), "scanner-test", timerInstance, "wait-timer"); err != nil {
 				t.Fatal("insert due workflow timer:", err)
 			}
-			due, err = hasDueTenantWork(t.Context(), database, dialect)
+			due, err = hasDueTenantWork(t.Context(), database, dialect, 0)
 			if err != nil || !due {
 				t.Fatalf("hasDueTenantWork for due workflow timer = (%t, %v), want (true, nil)", due, err)
 			}
@@ -250,7 +250,7 @@ func TestDurableWorkScannerFindsUnreceiptedTenantWorkAcrossDialects(t *testing.T
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `INSERT INTO _kora_request (id,tenant_id,revision,kind,status,requester_id,title,message,due_at,created_at,updated_at) VALUES (?,?,1,'approval','pending','requester','title','message',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`), requestID, "scanner-test"); err != nil {
 				t.Fatal("insert due request:", err)
 			}
-			due, err = hasDueTenantWork(t.Context(), database, dialect)
+			due, err = hasDueTenantWork(t.Context(), database, dialect, 0)
 			if err != nil || !due {
 				t.Fatalf("hasDueTenantWork for due request = (%t, %v), want (true, nil)", due, err)
 			}
@@ -270,7 +270,7 @@ func TestDurableWorkScannerFindsUnreceiptedTenantWorkAcrossDialects(t *testing.T
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `INSERT INTO _kora_notification_delivery (id,tenant_id,recipient_id,request_id,channel,event_id,status,available_at,created_at,updated_at) VALUES (?,?,?,?,'in_app',?,'pending',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`), deliveryID, "scanner-test", "recipient", "request", contract.NewEventID()); err != nil {
 				t.Fatal("insert due notification delivery:", err)
 			}
-			due, err = hasDueTenantWork(t.Context(), database, dialect)
+			due, err = hasDueTenantWork(t.Context(), database, dialect, 0)
 			if err != nil || !due {
 				t.Fatalf("hasDueTenantWork for due notification delivery = (%t, %v), want (true, nil)", due, err)
 			}
