@@ -57,10 +57,10 @@ fields:
     label: Status
     options: |
       Draft
+      Held
       Paid
       Void
       Return
-      Held
     default: Draft
     in_list_view: true
   - fieldname: held_name
@@ -85,3 +85,5 @@ facts:
     - field: till_session
     - field: items.item
   status_field: status
+  exclude_status:
+    - Held

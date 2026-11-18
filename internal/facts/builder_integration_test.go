@@ -145,7 +145,12 @@ func TestBuilderKeepsFactsCurrent(t *testing.T) {
 
 // saleEvent builds the outbox envelope the orm writes for a Sale change.
 func saleEvent(seq int64, op eventstream.EventOp, data, old map[string]any) contract.EventEnvelope {
-	payload := map[string]any{"data": data, "old_data": old, "table": "Sale", "record_id": "SAL-1"}
+	return saleEventFor("SAL-1", seq, op, data, old)
+}
+
+// saleEventFor is a Sale change event for one record.
+func saleEventFor(record string, seq int64, op eventstream.EventOp, data, old map[string]any) contract.EventEnvelope {
+	payload := map[string]any{"data": data, "old_data": old, "table": "Sale", "record_id": record}
 	return contract.EventEnvelope{
 		ID: fmt.Sprintf("evt-%d", seq), Type: outbox.EventTypeName("Sale", op),
 		Sequence: contract.Revision(strconv.FormatInt(seq, 10)), Site: "test",

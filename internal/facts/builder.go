@@ -237,6 +237,9 @@ func (b *Builder) ensure(ctx context.Context, dt *doctype.DocType) error {
 	if err := b.execDDL(ctx, stmts); err != nil {
 		return err
 	}
+	if err := b.migrateSummary(ctx, dt); err != nil {
+		return err
+	}
 	if b.ready == nil {
 		b.ready = make(map[*doctype.DocType]bool)
 	}

@@ -17,6 +17,9 @@ type FactModel struct {
 	Measures    []FactMeasure   `yaml:"measures" json:"measures"`
 	Dimensions  []FactDimension `yaml:"dimensions,omitempty" json:"dimensions,omitempty"`
 	StatusField string          `yaml:"status_field,omitempty" json:"status_field,omitempty"`
+	// ExcludeStatus lists statuses whose records have no fact rows: they are tombstoned until they
+	// move to a status outside this list. Each value must be an option of StatusField.
+	ExcludeStatus []string `yaml:"exclude_status,omitempty" json:"exclude_status,omitempty"`
 }
 
 // FactMeasure is a number summed by metrics. Field is "name" on the record, or
@@ -197,10 +200,20 @@ func (f *FactModel) checkDimensions(c *factChecks) {
 
 func (f *FactModel) checkStatus(c *factChecks) {
 	if f.StatusField == "" {
+		if len(f.ExcludeStatus) > 0 {
+			c.bad("facts.exclude_status", "facts exclude_status needs a status_field")
+		}
 		return
 	}
-	if sf := c.dt.GetField(f.StatusField); sf == nil || sf.Fieldtype != "Select" {
+	sf := c.dt.GetField(f.StatusField)
+	if sf == nil || sf.Fieldtype != "Select" {
 		c.bad("facts.status_field", fmt.Sprintf("facts status_field %q must be a Select field on %s", f.StatusField, c.dt.Name))
+		return
+	}
+	for _, status := range f.ExcludeStatus {
+		if !selectHasOption(sf, status) {
+			c.bad("facts.exclude_status", fmt.Sprintf("facts exclude_status %q is not an option of %s", status, f.StatusField))
+		}
 	}
 }
 
