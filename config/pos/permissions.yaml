@@ -169,6 +169,9 @@
 - doctype: module.pos.core.operation.record_sale
   role: Owner
   write: true
+- doctype: module.pos.core.operation.reserve_numbers
+  role: Owner
+  write: true
 - doctype: module.pos.core.operation.return_sale
   role: Owner
   write: true
@@ -209,6 +212,9 @@
 - doctype: module.pos.core.operation.record_sale
   role: Manager
   write: true
+- doctype: module.pos.core.operation.reserve_numbers
+  role: Manager
+  write: true
 - doctype: module.pos.core.operation.return_sale
   role: Manager
   write: true
@@ -247,6 +253,9 @@
   role: Cashier
   write: true
 - doctype: module.pos.core.operation.record_sale
+  role: Cashier
+  write: true
+- doctype: module.pos.core.operation.reserve_numbers
   role: Cashier
   write: true
 - doctype: module.pos.core.operation.return_sale

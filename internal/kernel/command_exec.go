@@ -535,6 +535,13 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			}
 		}
 		switch {
+		case step.Reserve != nil:
+			outcome, reserveErr := k.execReserveStep(dbTx, reg, step, env, stepNames)
+			if reserveErr != nil {
+				return nil, reserveErr
+			}
+			outcomes = append(outcomes, outcome)
+
 		case step.createSpec() != nil:
 			create := step.createSpec()
 			dt := reg.Get(create.Record)
@@ -545,18 +552,8 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			if valueErr != nil {
 				return nil, valueErr
 			}
-			if err := dt.BindBusinessScope(doc, txMgr.BusinessScope, true, nil); err != nil {
-				return nil, contract.NewError(contract.CodePermissionDenied, err.Error())
-			}
-			setDefaultValues(dt, doc)
-			if err := txMgr.RunHooksForValidate(dt, doc, nil); err != nil {
-				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
-			}
-			if verrs := validateOperationDocument(txMgr, dt, doc, reg, documentCheck{Old: nil, References: op.Context.BusinessReferenceValidator, Snapshots: op.Context.HistoricalSnapshotValidator}); verrs.HasErrors() { //nolint:contextcheck // the context travels in txMgr.Context
-				return nil, validationContractError(verrs)
-			}
-			if err := txMgr.PrepareInsert(dt, doc); err != nil {
-				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+			if prepErr := prepareCreateDocument(txMgr, reg, op, dt, doc); prepErr != nil { //nolint:contextcheck // the context travels in txMgr.Context
+				return nil, prepErr
 			}
 			if cerr := k.claimFirstWriteReceipt(dbTx, op, def, opID, len(outcomes)); cerr != nil {
 				return nil, cerr
