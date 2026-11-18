@@ -201,7 +201,7 @@ func (g *SiteGuard) authenticateChannelSession(c *gin.Context, token string) boo
 		return false
 	}
 
-	session, err := AuthenticateChannelSession(sqlDB, kdb.Resolve(c.GetString("site_db_type")), token)
+	session, err := AuthenticateChannelSession(c.Request.Context(), sqlDB, kdb.Resolve(c.GetString("site_db_type")), token)
 	if err != nil {
 		return false
 	}
@@ -341,7 +341,7 @@ func RevalidateRealtimeIdentity(c *gin.Context) (bool, error) {
 		return false, nil
 	}
 	manager.InvalidateSession(sid)
-	user, createdAt, err := manager.GetSession(c.GetString("site_name"), sid)
+	user, createdAt, err := manager.GetSession(c.Request.Context(), c.GetString("site_name"), sid)
 	if err != nil {
 		return false, err
 	}

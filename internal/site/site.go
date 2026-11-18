@@ -613,7 +613,7 @@ func CreateDatabaseContext(ctx context.Context, input CreateSiteInput, cfg *Conf
 		return fmt.Errorf("parsing MySQL DSN: %w", err)
 	}
 
-	db, err := dbaccess.Open("mysql", baseDSN)
+	db, err := dbaccess.OpenMaintenance("mysql", baseDSN)
 	if err != nil {
 		return fmt.Errorf("connecting to MySQL server: %w", err)
 	}
@@ -652,7 +652,7 @@ func createPostgresDatabaseContext(ctx context.Context, input CreateSiteInput, c
 			dsn = adminConfig.DSN()
 		}
 		var err error
-		adminDB, err = dbaccess.Open("postgres", dsn)
+		adminDB, err = dbaccess.OpenMaintenance("postgres", dsn)
 		if err != nil {
 			return fmt.Errorf("connecting to PostgreSQL admin database: %w", err)
 		}
@@ -768,7 +768,7 @@ func DeleteSite(input DeleteSiteInput) error {
 		if err != nil {
 			return fmt.Errorf("parsing MySQL DSN: %w", err)
 		}
-		tempDB, err := dbaccess.Open("mysql", dsn)
+		tempDB, err := dbaccess.OpenMaintenance("mysql", dsn)
 		if err != nil {
 			return fmt.Errorf("connecting for teardown: %w", err)
 		}
@@ -796,7 +796,7 @@ func DeleteSite(input DeleteSiteInput) error {
 			if err != nil {
 				return fmt.Errorf("building PostgreSQL admin DSN: %w", err)
 			}
-			adminDB, err = dbaccess.Open("postgres", dsn)
+			adminDB, err = dbaccess.OpenMaintenance("postgres", dsn)
 			if err != nil {
 				return fmt.Errorf("connecting for PostgreSQL teardown: %w", err)
 			}

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,12 +29,36 @@ type budgetEntry struct {
 	pools  int
 }
 
-// Open creates a database/sql pool whose physical driver connections share a
-// bounded process budget with every other pool targeting the same server.
+// defaultStatementTimeout bounds every statement on request-path pools unless
+// KORA_DB_STATEMENT_TIMEOUT_MS overrides it (0 disables the bound).
+const defaultStatementTimeout = 30 * time.Second
+
+// Open creates a request-path database/sql pool whose physical driver
+// connections share a bounded process budget with every other pool targeting
+// the same server. Statements are bounded by KORA_DB_STATEMENT_TIMEOUT_MS.
 func Open(driverName, dsn string) (*sql.DB, error) {
+	timeout, err := statementTimeout()
+	if err != nil {
+		return nil, err
+	}
+	return open(driverName, dsn, timeout)
+}
+
+// OpenMaintenance opens a pool for DDL, migrations and teardown, which may
+// legitimately run longer than the request-path statement timeout.
+func OpenMaintenance(driverName, dsn string) (*sql.DB, error) {
+	return open(driverName, dsn, 0)
+}
+
+func open(driverName, dsn string, timeout time.Duration) (*sql.DB, error) {
 	key := ServerKey(driverName, dsn)
 	budget, releaseBudget, err := acquireBudget(key)
 	if err != nil {
+		return nil, err
+	}
+	dsn, err = TuneDSN(driverName, dsn, timeout)
+	if err != nil {
+		releaseBudget()
 		return nil, err
 	}
 	probe, err := sql.Open(driverName, dsn)
@@ -58,7 +83,77 @@ func Open(driverName, dsn string) (*sql.DB, error) {
 	// tenant or administrative pool, but never inherit an unbounded pool.
 	database.SetMaxOpenConns(min(budget.capacity, 16))
 	database.SetMaxIdleConns(1)
+	database.SetConnMaxIdleTime(2 * time.Minute)
+	database.SetConnMaxLifetime(30 * time.Minute)
 	return database, nil
+}
+
+func statementTimeout() (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv("KORA_DB_STATEMENT_TIMEOUT_MS"))
+	if raw == "" {
+		return defaultStatementTimeout, nil
+	}
+	ms, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || ms < 0 {
+		return 0, fmt.Errorf("KORA_DB_STATEMENT_TIMEOUT_MS must be a non-negative integer of milliseconds, got %q", raw)
+	}
+	return time.Duration(ms) * time.Millisecond, nil
+}
+
+// TuneDSN adds the request-path defaults to a DSN unless the caller set them.
+// MySQL: interpolated parameters (one round trip per statement) with utf8mb4,
+// and max_execution_time, which only bounds SELECT. Postgres: statement_timeout
+// as a connection runtime parameter.
+func TuneDSN(driverName, dsn string, timeout time.Duration) (string, error) {
+	switch strings.ToLower(driverName) {
+	case "mysql":
+		return mysqlTunedDSN(dsn, timeout)
+	case "postgres":
+		return postgresTunedDSN(dsn, timeout)
+	}
+	return dsn, nil
+}
+
+func mysqlTunedDSN(dsn string, timeout time.Duration) (string, error) {
+	cfg, err := mysql.ParseDSN(dsn)
+	if err != nil {
+		return "", fmt.Errorf("parse mysql dsn: %w", err)
+	}
+	explicit := dsnQuery(dsn)
+	if !explicit.Has("interpolateParams") {
+		cfg.InterpolateParams = true
+	}
+	if cfg.Params == nil {
+		cfg.Params = make(map[string]string)
+	}
+	if !explicit.Has("charset") {
+		cfg.Params["charset"] = "utf8mb4"
+	}
+	if timeout > 0 && !explicit.Has("max_execution_time") {
+		cfg.Params["max_execution_time"] = strconv.FormatInt(timeout.Milliseconds(), 10)
+	}
+	return cfg.FormatDSN(), nil
+}
+
+func postgresTunedDSN(dsn string, timeout time.Duration) (string, error) {
+	if timeout <= 0 || strings.Contains(dsn, "statement_timeout=") {
+		return dsn, nil
+	}
+	ms := strconv.FormatInt(timeout.Milliseconds(), 10)
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		sep := "?"
+		if strings.Contains(dsn, "?") {
+			sep = "&"
+		}
+		return dsn + sep + "statement_timeout=" + ms, nil
+	}
+	return dsn + " statement_timeout=" + ms, nil
+}
+
+func dsnQuery(dsn string) url.Values {
+	_, query, _ := strings.Cut(dsn, "?")
+	values, _ := url.ParseQuery(query)
+	return values
 }
 
 // ServerKey groups pools by physical endpoint. Operators sharing one backend

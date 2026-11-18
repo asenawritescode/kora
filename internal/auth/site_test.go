@@ -539,6 +539,7 @@ func TestAuthenticateChannelSession_LoadsPermissions(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/channel", nil)
 	c.Set("site_db", db)
 	c.Set("site_name", "demo")
 	c.Set("site_id", "stable-demo-id")

@@ -333,7 +333,7 @@ func (sm *SessionManager) CreateSession(site string, user *User) (string, error)
 // GetSession validates a session ID for a given site and returns the associated user
 // plus the session creation timestamp.
 // Uses an in-memory TTL cache to avoid hitting the database on every request.
-func (sm *SessionManager) GetSession(site, sid string) (*User, time.Time, error) {
+func (sm *SessionManager) GetSession(ctx context.Context, site, sid string) (*User, time.Time, error) {
 	if sm.DB == nil {
 		return nil, time.Time{}, fmt.Errorf("no database connection available: %w", ErrNoDBConnection)
 	}
@@ -353,14 +353,15 @@ func (sm *SessionManager) GetSession(site, sid string) (*User, time.Time, error)
 		return cloneSessionUser(entry.user), entry.createdAt, nil
 	}
 
-	// Cache miss or expired — query database.
+	// Cache miss or expired — query database. The request context bounds the
+	// lookup, so a client disconnect cancels it.
 	var userJSON string
 	var expiresStr string // scanned as string for SQLite compatibility (TEXT column)
 	var createdStr string
 
-	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
+	queryCtx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
-	err := sm.DB.QueryRowContext(ctx,
+	err := sm.DB.QueryRowContext(queryCtx,
 		sm.sql("SELECT data, expires_at, created_at FROM _kora_session WHERE site = ? AND sid = ?"),
 		site, sid,
 	).Scan(&userJSON, &expiresStr, &createdStr)
@@ -1199,7 +1200,7 @@ func validateSession(c *gin.Context, sm *SessionManager) bool {
 	}
 
 	site := c.GetString("site_name")
-	user, createdAt, err := sessionSM.GetSession(site, sid)
+	user, createdAt, err := sessionSM.GetSession(c.Request.Context(), site, sid)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired session"})
 		c.Abort()
@@ -1305,7 +1306,7 @@ func registerAuthRoutes(router *gin.Engine, sm *SessionManager, db *sql.DB, mail
 				}
 			}
 			site := c.GetString("site_name")
-			user, _, err := meSM.GetSession(site, sid)
+			user, _, err := meSM.GetSession(c.Request.Context(), site, sid)
 			if err != nil {
 				slog.Warn("session validation failed for /me", "error", err)
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired session"})
