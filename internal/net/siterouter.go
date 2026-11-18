@@ -1,11 +1,9 @@
 package net
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -649,14 +647,8 @@ func RegisterPathSiteRoutes(router *gin.Engine, sr *SiteRouter) {
 			// We need to re-enter the router for API routes to match.
 			c.Request.AddCookie(&http.Cookie{Name: "kora_site", Value: snapshot.Name, Path: "/"})
 			c.Request.URL.Path = rest
-			// Buffer the request body for re-dispatch — HandleContext
-			// re-processes the middleware chain, so we need a fresh body reader.
-			if bufferRedispatchBody(c, rest) {
-				return
-			}
-			if c.Request.ContentLength > 0 && c.Request.Body == nil {
-				slog.Warn("body not buffered", "path", rest, "bodyNil", c.Request.Body == nil, "contentLength", c.Request.ContentLength)
-			}
+			// The request body is not read here: the body cap installed before
+			// routing applies to the re-dispatched request.
 			// Manually call HandleContext — but this time site context is already set
 			// and the SiteRouter middleware will skip (checks for existing site_db).
 			router.HandleContext(c)
@@ -672,26 +664,4 @@ func stripPort(host string) string {
 		return h
 	}
 	return host
-}
-
-// bufferRedispatchBody reads the request body once, bounded by the route's
-// cap, so re-dispatch sees a fresh reader. It reports true when the response
-// has been written and the request must stop.
-func bufferRedispatchBody(c *gin.Context, rest string) (aborted bool) {
-	if c.Request.Body == nil || c.Request.ContentLength <= 0 {
-		return false
-	}
-	bodyBytes, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, requestBodyLimit(rest)))
-	var maxErr *http.MaxBytesError
-	if errors.As(err, &maxErr) {
-		abortBodyTooLarge(c)
-		return true
-	}
-	if err == nil {
-		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		slog.Info("body buffered for re-dispatch", "path", rest, "size", len(bodyBytes))
-	} else {
-		slog.Warn("body buffer read failed", "path", rest, "error", err)
-	}
-	return false
 }

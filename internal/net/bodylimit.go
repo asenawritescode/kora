@@ -1,6 +1,9 @@
 package net
 
 import (
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -18,14 +21,15 @@ const (
 	offlineIntentBodyLimit = 20 * ((1 << 20) + 4096)
 )
 
-// requestBodyLimit returns the byte cap for a request body. Upload routes use
-// KORA_MAX_UPLOAD_MB, and offline intent batches keep the larger cap their
+// requestBodyLimit returns the byte cap for a request body, given the route
+// template or rewritten path. Only exact routes get their larger caps: upload
+// routes use KORA_MAX_UPLOAD_MB, and offline intent batches keep the cap their
 // handler enforces. Every other route uses KORA_MAX_REQUEST_MB.
-func requestBodyLimit(path string) int64 {
-	switch {
-	case strings.HasSuffix(path, "/upload"):
+func requestBodyLimit(route string) int64 {
+	switch route {
+	case "/api/upload", "/api/v1/upload":
 		return envMegabytes("KORA_MAX_UPLOAD_MB", defaultMaxUploadMB)
-	case strings.HasSuffix(path, "/offline/intents"):
+	case "/api/v2/offline/intents":
 		return offlineIntentBodyLimit
 	default:
 		return envMegabytes("KORA_MAX_REQUEST_MB", defaultMaxRequestMB)
@@ -40,20 +44,112 @@ func envMegabytes(name string, fallbackMB int64) int64 {
 	return min(mb, maxConfiguredMB) << 20
 }
 
+// routeTemplate is the route the request matched. Path-routed requests
+// (/s/:site/...) match no template, so the site prefix is stripped instead.
+func routeTemplate(c *gin.Context) string {
+	if route := c.FullPath(); route != "" {
+		return route
+	}
+	path := c.Request.URL.Path
+	if rest, ok := strings.CutPrefix(path, "/s/"); ok {
+		if _, after, found := strings.Cut(rest, "/"); found {
+			return "/" + after
+		}
+	}
+	return path
+}
+
+// bodyLimitState records that a body read exceeded the cap.
+type bodyLimitState struct {
+	overflowed bool
+	replaced   bool
+}
+
+// limitedBody reads through http.MaxBytesReader and notes when the cap is hit.
+type limitedBody struct {
+	io.ReadCloser
+	state *bodyLimitState
+}
+
+func (b limitedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		b.state.overflowed = true
+	}
+	return n, err
+}
+
+// limitedWriter turns a response into the 413 envelope once a body read has
+// overflowed, whatever status or body the handler tries to write.
+type limitedWriter struct {
+	gin.ResponseWriter
+	state *bodyLimitState
+}
+
+func (w *limitedWriter) WriteHeader(code int) {
+	if w.state.overflowed {
+		code = http.StatusRequestEntityTooLarge
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *limitedWriter) WriteHeaderNow() {
+	if w.state.overflowed {
+		w.writeEnvelope()
+		return
+	}
+	w.ResponseWriter.WriteHeaderNow()
+}
+
+func (w *limitedWriter) Write(b []byte) (int, error) {
+	if w.state.overflowed {
+		w.writeEnvelope()
+		return len(b), nil
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *limitedWriter) WriteString(s string) (int, error) {
+	return w.Write([]byte(s))
+}
+
+func (w *limitedWriter) writeEnvelope() {
+	if w.state.replaced {
+		return
+	}
+	w.state.replaced = true
+	body, _ := json.Marshal(gin.H{"error": gin.H{"code": "request.body_too_large", "message": "Request body exceeds the size limit."}})
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.ResponseWriter.WriteHeader(http.StatusRequestEntityTooLarge)
+	_, _ = w.ResponseWriter.Write(body)
+}
+
 // RequestBodyLimitMiddleware caps request bodies. A declared length over the
-// cap is refused with 413 before the handler runs; a body that grows past the
-// cap is cut off by http.MaxBytesReader during the read.
+// cap is refused with 413 before the handler runs. A body that is larger than
+// declared, or chunked, is cut off during the read, and the response becomes
+// 413 whatever the handler writes. A request that is already capped (site
+// re-dispatch) is passed through unchanged.
 func RequestBodyLimitMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		limit := requestBodyLimit(c.Request.URL.Path)
+		if _, capped := c.Writer.(*limitedWriter); capped {
+			c.Next()
+			return
+		}
+		limit := requestBodyLimit(routeTemplate(c))
 		if c.Request.ContentLength > limit {
 			abortBodyTooLarge(c)
 			return
 		}
+		state := &bodyLimitState{}
 		if c.Request.Body != nil {
-			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
+			c.Request.Body = limitedBody{ReadCloser: http.MaxBytesReader(c.Writer, c.Request.Body, limit), state: state}
 		}
+		c.Writer = &limitedWriter{ResponseWriter: c.Writer, state: state}
 		c.Next()
+		if state.overflowed {
+			c.Writer.(*limitedWriter).writeEnvelope()
+		}
 	}
 }
 

@@ -12,31 +12,111 @@ import (
 )
 
 func TestRequestBodyLimitByRoute(t *testing.T) {
-	t.Setenv("KORA_MAX_REQUEST_MB", "")
-	t.Setenv("KORA_MAX_UPLOAD_MB", "")
 	tests := []struct {
-		name string
-		path string
-		env  map[string]string
-		want int64
+		name  string
+		route string
+		env   map[string]string
+		want  int64
 	}{
-		{name: "default route cap is 10 MiB", path: "/api/v1/resource/Sale", want: 10 << 20},
-		{name: "request cap is configurable", path: "/api/v1/resource/Sale", env: map[string]string{"KORA_MAX_REQUEST_MB": "2"}, want: 2 << 20},
-		{name: "upload route uses the upload cap", path: "/api/v1/upload", want: 50 << 20},
-		{name: "path-routed upload uses the upload cap", path: "/s/acme/api/v1/upload", env: map[string]string{"KORA_MAX_UPLOAD_MB": "7"}, want: 7 << 20},
-		{name: "offline intents keep the handler cap", path: "/api/v2/offline/intents", want: offlineIntentBodyLimit},
-		{name: "invalid request cap falls back to default", path: "/api/v1/x", env: map[string]string{"KORA_MAX_REQUEST_MB": "nope"}, want: 10 << 20},
-		{name: "request cap is bounded to 1 GiB", path: "/api/v1/x", env: map[string]string{"KORA_MAX_REQUEST_MB": "99999"}, want: 1024 << 20},
+		{name: "default route cap is 10 MiB", route: "/api/v1/resource/Sale", want: 10 << 20},
+		{name: "nested upload path gets the default cap", route: "/api/v1/resource/X/upload", want: 10 << 20},
+		{name: "request cap is configurable", route: "/api/v1/resource/Sale", env: map[string]string{"KORA_MAX_REQUEST_MB": "2"}, want: 2 << 20},
+		{name: "upload route uses the upload cap", route: "/api/v1/upload", want: 50 << 20},
+		{name: "legacy upload route uses the upload cap", route: "/api/upload", env: map[string]string{"KORA_MAX_UPLOAD_MB": "7"}, want: 7 << 20},
+		{name: "offline intents keep the handler cap", route: "/api/v2/offline/intents", want: offlineIntentBodyLimit},
+		{name: "invalid request cap falls back to default", route: "/api/v1/x", env: map[string]string{"KORA_MAX_REQUEST_MB": "nope"}, want: 10 << 20},
+		{name: "request cap is bounded to 1 GiB", route: "/api/v1/x", env: map[string]string{"KORA_MAX_REQUEST_MB": "99999"}, want: 1024 << 20},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("KORA_MAX_REQUEST_MB", "")
+			t.Setenv("KORA_MAX_UPLOAD_MB", "")
 			for name, value := range test.env {
 				t.Setenv(name, value)
 			}
-			if got := requestBodyLimit(test.path); got != test.want {
-				t.Errorf("requestBodyLimit(%q) = %d, want %d", test.path, got, test.want)
+			if got := requestBodyLimit(test.route); got != test.want {
+				t.Errorf("requestBodyLimit(%q) = %d, want %d", test.route, got, test.want)
 			}
 		})
+	}
+}
+
+func TestRouteTemplateStripsSitePrefixForPathRouting(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	var got string
+	r.NoRoute(func(c *gin.Context) { got = routeTemplate(c) })
+	for path, want := range map[string]string{
+		"/s/acme/api/v1/upload": "/api/v1/upload",
+		"/s/acme":               "/s/acme",
+		"/api/v1/x/upload":      "/api/v1/x/upload",
+	} {
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, path, nil))
+		if got != want {
+			t.Errorf("routeTemplate(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestRequestBodyReachesHandlerAndOverflowBecomes413(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("KORA_MAX_REQUEST_MB", "1")
+	r := gin.New()
+	r.Use(RequestBodyLimitMiddleware())
+	r.POST("/api/v1/echo", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unreadable"})
+			return
+		}
+		c.String(http.StatusOK, string(body))
+	})
+
+	small := httptest.NewRecorder()
+	r.ServeHTTP(small, httptest.NewRequest(http.MethodPost, "/api/v1/echo", strings.NewReader("hello")))
+	if small.Code != http.StatusOK || small.Body.String() != "hello" {
+		t.Fatalf("small body: status %d body %q, want 200 hello", small.Code, small.Body.String())
+	}
+
+	chunked := httptest.NewRequest(http.MethodPost, "/api/v1/echo", io.LimitReader(zeroReader{}, 2<<20))
+	chunked.ContentLength = -1
+	overflow := httptest.NewRecorder()
+	r.ServeHTTP(overflow, chunked)
+	if overflow.Code != http.StatusRequestEntityTooLarge || !strings.Contains(overflow.Body.String(), "request.body_too_large") {
+		t.Fatalf("chunked overflow: status %d body %q, want 413 envelope", overflow.Code, overflow.Body.String())
+	}
+}
+
+func TestSiteRedispatchKeepsBodyAndCapsOverflow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("KORA_MAX_REQUEST_MB", "1")
+	r := gin.New()
+	r.Use(RequestBodyLimitMiddleware())
+	r.POST("/api/v1/echo", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unreadable"})
+			return
+		}
+		c.String(http.StatusOK, string(body))
+	})
+	r.NoRoute(func(c *gin.Context) {
+		c.Request.URL.Path = "/api/v1/echo"
+		r.HandleContext(c)
+	})
+
+	ok := httptest.NewRecorder()
+	r.ServeHTTP(ok, httptest.NewRequest(http.MethodPost, "/s/acme/api/v1/echo", strings.NewReader("site body")))
+	if ok.Code != http.StatusOK || ok.Body.String() != "site body" {
+		t.Fatalf("re-dispatched body: status %d body %q, want 200 site body", ok.Code, ok.Body.String())
+	}
+
+	chunked := httptest.NewRequest(http.MethodPost, "/s/acme/api/v1/echo", io.LimitReader(zeroReader{}, 2<<20))
+	chunked.ContentLength = -1
+	overflow := httptest.NewRecorder()
+	r.ServeHTTP(overflow, chunked)
+	if overflow.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("re-dispatched overflow: status %d, want 413", overflow.Code)
 	}
 }
 
