@@ -105,8 +105,8 @@ func TestSummariesFollowFactChanges(t *testing.T) {
 			consume(1, eventstream.EventInsert, v1, nil)
 			refresh(t, refresher, 1)
 			expect(t, "2026-11-18", map[string]string{
-				"//le1": "1|100.5|100.5", "register/R1/le1": "1|100.5|100.5", "item//le1": "1|100.5|0",
-				"item/I1/le1": "0|0|40.25", "item/I2/le1": "0|0|60.25",
+				"Paid///": "1|100.5|100.5", "Paid/register/R1/": "1|100.5|100.5", "Paid/item//": "1|100.5|0",
+				"Paid/item/I1/": "0|0|40.25", "Paid/item/I2/": "0|0|60.25",
 			})
 
 			v2 := sale("2026-11-18", line("L1", "I1", "40.25"), line("L2", "I2", "60.25"))
@@ -114,8 +114,8 @@ func TestSummariesFollowFactChanges(t *testing.T) {
 			consume(2, eventstream.EventUpdate, v2, v1)
 			refresh(t, refresher, 1)
 			expect(t, "2026-11-18", map[string]string{
-				"//le1": "1|120|100.5", "register/R1/le1": "1|120|100.5", "item//le1": "1|120|0",
-				"item/I1/le1": "0|0|40.25", "item/I2/le1": "0|0|60.25",
+				"Paid///": "1|120|100.5", "Paid/register/R1/": "1|120|100.5", "Paid/item//": "1|120|0",
+				"Paid/item/I1/": "0|0|40.25", "Paid/item/I2/": "0|0|60.25",
 			})
 
 			v3 := sale("2026-11-17", line("L1", "I1", "40.25"), line("L2", "I2", "60.25"))
@@ -124,8 +124,8 @@ func TestSummariesFollowFactChanges(t *testing.T) {
 			refresh(t, refresher, 2)
 			expect(t, "2026-11-18", map[string]string{})
 			expect(t, "2026-11-17", map[string]string{
-				"//le1": "1|120|100.5", "register/R1/le1": "1|120|100.5", "item//le1": "1|120|0",
-				"item/I1/le1": "0|0|40.25", "item/I2/le1": "0|0|60.25",
+				"Paid///": "1|120|100.5", "Paid/register/R1/": "1|120|100.5", "Paid/item//": "1|120|0",
+				"Paid/item/I1/": "0|0|40.25", "Paid/item/I2/": "0|0|60.25",
 			})
 
 			consume(4, eventstream.EventDelete, nil, v3)
@@ -148,18 +148,18 @@ func TestSummariesFollowFactChanges(t *testing.T) {
 			}
 			refresh(t, refresher, 1)
 			expect(t, "2026-11-18", map[string]string{
-				"//le1": "1|50|0", "register/R1/le1": "1|50|0", "item//le1": "1|50|0",
+				"Paid///": "1|50|0", "Paid/register/R1/": "1|50|0", "Paid/item//": "1|50|0",
 			})
 		})
 	}
 }
 
-// summaryOf reads one day's summary rows as "grain/grain_value/legal_entity" -> "row_count|total|line_amount".
+// summaryOf reads one day's summary rows as "status/grain/grain_value/legal_entity" -> "row_count|total|line_amount".
 func summaryOf(t *testing.T, conn *sql.DB, dialect db.Dialect, day string) map[string]string {
 	t.Helper()
 	q := dialect.QuoteIdent
-	query := fmt.Sprintf("SELECT %s, %s, %s, %s, %s, %s FROM %s WHERE %s = ?",
-		q("grain"), q("grain_value"), q("legal_entity"), q("row_count"), q("total"), q("line_amount"),
+	query := fmt.Sprintf("SELECT %s, %s, %s, %s, %s, %s, %s FROM %s WHERE %s = ?",
+		q("status"), q("grain"), q("grain_value"), q("legal_entity"), q("row_count"), q("total"), q("line_amount"),
 		q("_kora_fact_summary_sale"), q("business_date"))
 	rows, err := conn.Query(db.Rebind(dialect, query), day)
 	if err != nil {
@@ -168,11 +168,11 @@ func summaryOf(t *testing.T, conn *sql.DB, dialect db.Dialect, day string) map[s
 	defer func() { _ = rows.Close() }()
 	out := map[string]string{}
 	for rows.Next() {
-		var grain, value, entity, count, total, lineAmount string
-		if err := rows.Scan(&grain, &value, &entity, &count, &total, &lineAmount); err != nil {
+		var status, grain, value, entity, count, total, lineAmount string
+		if err := rows.Scan(&status, &grain, &value, &entity, &count, &total, &lineAmount); err != nil {
 			t.Fatal(err)
 		}
-		out[grain+"/"+value+"/"+entity] = count + "|" + norm(t, total) + "|" + norm(t, lineAmount)
+		out[status+"/"+grain+"/"+value+"/"+entity] = count + "|" + norm(t, total) + "|" + norm(t, lineAmount)
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
@@ -180,7 +180,8 @@ func summaryOf(t *testing.T, conn *sql.DB, dialect db.Dialect, day string) map[s
 	return out
 }
 
-// assertMatchesFacts checks the day's total grain against a direct sum of the live header rows.
+// assertMatchesFacts checks the day's total grain, summed over statuses, against a direct sum of the
+// live header rows.
 func assertMatchesFacts(t *testing.T, conn *sql.DB, dialect db.Dialect, day string, summary map[string]string) {
 	t.Helper()
 	q := dialect.QuoteIdent
@@ -191,13 +192,23 @@ func assertMatchesFacts(t *testing.T, conn *sql.DB, dialect db.Dialect, day stri
 	if err := conn.QueryRow(db.Rebind(dialect, query), day, db.BoolParam(dialect, false)).Scan(&n, &total); err != nil {
 		t.Fatalf("aggregate facts: %v", err)
 	}
-	have := summary["//le1"]
-	if have == "" {
-		have = "0|0|0"
+	count, sum := 0, decimal.Zero
+	for key, row := range summary {
+		if parts := strings.SplitN(key, "/", 4); len(parts) == 4 && parts[1] == "" && parts[2] == "" {
+			fields := strings.Split(row, "|")
+			c, err := strconv.Atoi(fields[0])
+			if err != nil {
+				t.Fatalf("row count %q: %v", fields[0], err)
+			}
+			d, err := decimal.NewFromString(fields[1])
+			if err != nil {
+				t.Fatalf("total %q: %v", fields[1], err)
+			}
+			count, sum = count+c, sum.Add(d)
+		}
 	}
-	parts := strings.Split(have, "|")
-	if want := strconv.Itoa(n) + "|" + norm(t, total); parts[0]+"|"+parts[1] != want {
-		t.Fatalf("summary %s total %s, facts say %s", day, parts[0]+"|"+parts[1], want)
+	if want := strconv.Itoa(n) + "|" + norm(t, total); strconv.Itoa(count)+"|"+sum.String() != want {
+		t.Fatalf("summary %s total %d|%s, facts say %s", day, count, sum, want)
 	}
 }
 

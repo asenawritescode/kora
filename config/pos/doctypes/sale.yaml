@@ -57,6 +57,7 @@ fields:
     label: Status
     options: |
       Draft
+      Held
       Paid
       Void
       Return
@@ -74,3 +75,5 @@ facts:
     - field: till_session
     - field: items.item
   status_field: status
+  exclude_status:
+    - Held

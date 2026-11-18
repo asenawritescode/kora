@@ -2,6 +2,7 @@ package facts
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -49,7 +50,10 @@ func Map(dt *doctype.DocType, ev Change, clock tenanttime.Clock) (Row, []Row) {
 	if ev.Deleted || src == nil {
 		src = ev.OldData
 	}
+	// A record in an excluded status is tombstoned like a delete, so it has no live facts.
+	deleted := ev.Deleted || excluded(dt, src)
 	head := newRow(dt, ev, src, clock)
+	head.Deleted = deleted
 	head.Measures = measureValues(f.Measures, src, nil)
 	head.Dimensions = dimensionValues(f.Dimensions, src, nil)
 	if f.Lines == "" {
@@ -59,7 +63,7 @@ func Map(dt *doctype.DocType, ev Change, clock tenanttime.Clock) (Row, []Row) {
 	seen := map[string]bool{}
 	for _, child := range childRows(src, f.Lines) {
 		seen[text(child["name"])] = true
-		rows = append(rows, lineRow(head, f, src, child, ev.Deleted))
+		rows = append(rows, lineRow(head, f, src, child, deleted))
 	}
 	if !ev.Deleted {
 		for _, child := range childRows(ev.OldData, f.Lines) {
@@ -105,6 +109,15 @@ func legalEntity(dt *doctype.DocType, src map[string]any) string {
 		return ""
 	}
 	return text(src[dt.BusinessScopeField])
+}
+
+// excluded reports whether the record's status is one the fact model leaves out.
+func excluded(dt *doctype.DocType, src map[string]any) bool {
+	f := dt.Facts
+	if f.StatusField == "" || len(f.ExcludeStatus) == 0 {
+		return false
+	}
+	return slices.Contains(f.ExcludeStatus, text(src[f.StatusField]))
 }
 
 // businessDate reads the time axis: creation, a Date day as stored, or a Datetime through the clock.

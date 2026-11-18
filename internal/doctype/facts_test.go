@@ -54,6 +54,17 @@ func TestFactModelValidate(t *testing.T) {
 			delete(reg, "Sale Item")
 		}, "has no record type"},
 		{"no measures", func(_ *DocType, _ map[string]*DocType, f *FactModel) { f.Measures = nil }, "at least one measure"},
+		{"excluded status is an option", func(dt *DocType, _ map[string]*DocType, f *FactModel) {
+			dt.GetField("status").Options = "Draft\nPaid\nHeld"
+			f.ExcludeStatus = []string{"Held"}
+		}, ""},
+		{"excluded status must be an option", func(_ *DocType, _ map[string]*DocType, f *FactModel) {
+			f.ExcludeStatus = []string{"Held"}
+		}, "is not an option of status"},
+		{"excluded status needs a status field", func(_ *DocType, _ map[string]*DocType, f *FactModel) {
+			f.StatusField = ""
+			f.ExcludeStatus = []string{"Paid"}
+		}, "needs a status_field"},
 		{"measure is not a number", func(_ *DocType, _ map[string]*DocType, f *FactModel) {
 			f.Measures = []FactMeasure{{Field: "register"}}
 		}, "must be an Int, Float, Currency or Percent field"},

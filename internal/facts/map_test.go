@@ -257,3 +257,56 @@ func TestLegalEntity(t *testing.T) {
 		})
 	}
 }
+
+// TestExcludedStatus checks that a record in an excluded status maps to tombstones, and that the same
+// record in an included status maps to live rows again.
+func TestExcludedStatus(t *testing.T) {
+	held := func(status string) Change {
+		return Change{RecordID: "SAL-1", Owner: "u1", Sequence: 7, OccurredAt: time.Date(2026, 11, 18, 9, 0, 0, 0, time.UTC),
+			Data: map[string]any{"posting_date": "2026-11-18", "status": status, "total": "100.50", "register": "R1",
+				"items": []any{line("L1", "I1", "40.25")}}}
+	}
+	dt := saleFacts()
+	dt.Facts.ExcludeStatus = []string{"Held"}
+	tests := []struct {
+		name   string
+		change Change
+		header string
+		lines  []string
+	}{
+		{
+			name:   "held record is tombstoned",
+			change: held("Held"),
+			header: "SAL-1|||u1|2026-11-18|Held|deleted|line_amount=0,total=100.5|item=,register=R1",
+			lines:  []string{"SAL-1|L1||u1|2026-11-18|Held|deleted|line_amount=40.25,total=0|item=I1,register=R1"},
+		},
+		{
+			name:   "record moving to Paid writes live rows",
+			change: func() Change { c := held("Paid"); c.OldData = held("Held").Data; return c }(),
+			header: "SAL-1|||u1|2026-11-18|Paid|live|line_amount=0,total=100.5|item=,register=R1",
+			lines:  []string{"SAL-1|L1||u1|2026-11-18|Paid|live|line_amount=40.25,total=0|item=I1,register=R1"},
+		},
+		{
+			name:   "paid record moving to Held is tombstoned",
+			change: func() Change { c := held("Held"); c.OldData = held("Paid").Data; return c }(),
+			header: "SAL-1|||u1|2026-11-18|Held|deleted|line_amount=0,total=100.5|item=,register=R1",
+			lines:  []string{"SAL-1|L1||u1|2026-11-18|Held|deleted|line_amount=40.25,total=0|item=I1,register=R1"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			head, lines := Map(dt, tc.change, tenanttime.Clock{})
+			if got := summary(head); got != tc.header {
+				t.Errorf("header = %s\nwant    %s", got, tc.header)
+			}
+			if len(lines) != len(tc.lines) {
+				t.Fatalf("lines = %d, want %d", len(lines), len(tc.lines))
+			}
+			for i, l := range lines {
+				if got := summary(l); got != tc.lines[i] {
+					t.Errorf("line %d = %s\nwant       %s", i, got, tc.lines[i])
+				}
+			}
+		})
+	}
+}
