@@ -99,6 +99,27 @@ func TestFactModelValidate(t *testing.T) {
 	}
 }
 
+func TestFactModelColumnsAndTableNames(t *testing.T) {
+	_, _, f := factFixture()
+	f.Measures = []FactMeasure{{Field: "total"}, {Field: "items.amount", Name: "line_amount"}}
+	want := []FactColumn{
+		{Name: "register", Type: FactColumnText},
+		{Name: "item", Type: FactColumnText},
+		{Name: "total", Type: FactColumnDecimal},
+		{Name: "line_amount", Type: FactColumnDecimal},
+	}
+	if got := f.Columns(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Columns() = %+v, want %+v", got, want)
+	}
+	dt := &DocType{Name: "Stock Entry"}
+	if got := f.TableName(dt); got != "_kora_fact_stock_entry" {
+		t.Fatalf("TableName = %q", got)
+	}
+	if got := f.LineTableName(dt); got != "_kora_fact_stock_entry_line" {
+		t.Fatalf("LineTableName = %q", got)
+	}
+}
+
 func TestFactModelParsesAndRoundTrips(t *testing.T) {
 	src := "name: Sale\nmodule: POS\nfields:\n  - fieldname: posting_date\n    fieldtype: Date\n" +
 		"facts:\n  time: posting_date\n  measures:\n    - field: total\n      name: amount\n  dimensions:\n    - field: register\n"
