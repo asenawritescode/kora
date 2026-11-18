@@ -85,6 +85,9 @@ type ErrorDialect interface {
 	// conflicts so callers can preserve a stable contract without inspecting
 	// driver error strings outside the database boundary.
 	IsWriteConflict(err error) bool
+	// IsAbortedTransaction reports SQLSTATE 25P02: a statement ran after an earlier
+	// statement in the same transaction failed. It is not a dependency outage.
+	IsAbortedTransaction(err error) bool
 }
 
 // Dialect abstracts database-specific SQL generation, schema introspection,

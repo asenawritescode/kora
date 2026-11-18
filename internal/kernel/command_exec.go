@@ -557,7 +557,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 				owner = user
 			}
 			if err := txMgr.InsertInTx(dbTx, dt, doc, owner, user); err != nil {
-				return nil, wrapORMError(err)
+				return nil, wrapORMError(err, k.dialect())
 			}
 			if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterInsert, doc, nil}); hookErr != nil {
 				return nil, hookErr

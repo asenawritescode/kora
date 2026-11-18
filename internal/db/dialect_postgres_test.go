@@ -633,3 +633,25 @@ func TestPostgres_SystemTablesCreateAll(t *testing.T) {
 		}
 	}
 }
+
+func TestPostgresUniqueConstraintFieldName(t *testing.T) {
+	tests := []struct {
+		name       string
+		constraint postgresUniqueConstraint
+		table      string
+		want       string
+	}{
+		{"plain field", "uq_tabTestDoc_serial", "tabTestDoc", "serial"},
+		{"underscored field", "uq_tabTestDoc_customer_code", "tabTestDoc", "customer_code"},
+		{"other table", "uq_tabOther_serial", "tabTestDoc", ""},
+		{"legacy name without table", "uq_serial", "tabTestDoc", ""},
+		{"empty constraint", "", "tabTestDoc", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.constraint.field(tt.table); got != tt.want {
+				t.Fatalf("field(%q) = %q, want %q", tt.table, got, tt.want)
+			}
+		})
+	}
+}

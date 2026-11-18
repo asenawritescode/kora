@@ -22,7 +22,7 @@ var (
 )
 
 // wrapORMError converts ORM sentinel errors into typed contract errors.
-func wrapORMError(err error) *contract.Error {
+func wrapORMError(err error, dialect db.Dialect) *contract.Error {
 	if errors.Is(err, orm.ErrConflict) {
 		return ErrStaleVersion
 	}
@@ -33,6 +33,10 @@ func wrapORMError(err error) *contract.Error {
 		return contract.NewError(contract.CodeValidationFailed, "record validation failed")
 	case errors.Is(err, orm.ErrNotFound):
 		return contract.NewError(contract.CodeNotFound, "document not found or access denied")
+	case dialect.IsAbortedTransaction(err):
+		// An earlier statement in the transaction failed first; that error is the
+		// one to report. This one is not a dependency outage.
+		return contract.NewError(contract.CodeInternal, "record persistence aborted by an earlier failed statement")
 	default:
 		return contract.NewError(contract.CodeDependencyUnavailable, "record persistence failed")
 	}
@@ -42,7 +46,7 @@ func wrapExpectedVersionORMError(err error, op Operation, dialect db.Dialect) *c
 	if expectedVersionFrom(op) != "" && dialect.IsWriteConflict(err) {
 		return ErrStaleVersion
 	}
-	return wrapORMError(err)
+	return wrapORMError(err, dialect)
 }
 
 // sanitize strips SQL driver internals from user-facing messages while keeping

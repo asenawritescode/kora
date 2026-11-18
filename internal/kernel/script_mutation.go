@@ -103,7 +103,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		}
 		if err := txMgr.InsertInTx(dbTx, dt, doc, owner, op.Context.User); err != nil {
 			slog.Error("authorized nested script record create failed", "doctype", dt.Name, "error", err)
-			return nil, wrapORMError(err)
+			return nil, wrapORMError(err, k.dialect())
 		}
 		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterInsert, doc, nil}); hookErr != nil {
 			return nil, hookErr
@@ -155,7 +155,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		}
 		beforeHash, afterHash := CanonicalDocHash(oldDoc.Fields), CanonicalDocHash(doc.Fields)
 		if err := txMgr.SaveInTxWithScope(dbTx, dt, doc, op.Context.User, scope, oldDoc); err != nil {
-			return nil, wrapORMError(err)
+			return nil, wrapORMError(err, k.dialect())
 		}
 		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, oldDoc}); hookErr != nil {
 			return nil, hookErr
@@ -192,7 +192,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
 		if err := txMgr.DeleteInTxWithScope(dbTx, dt, payload.Name, scope, oldDoc); err != nil {
-			return nil, wrapORMError(err)
+			return nil, wrapORMError(err, k.dialect())
 		}
 		if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterDelete, oldDoc, nil}); hookErr != nil {
 			return nil, hookErr

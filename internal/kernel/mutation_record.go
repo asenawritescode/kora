@@ -32,7 +32,7 @@ func (m *mutation) remove(ctx context.Context) *contract.Error {
 	}
 	beforeHash := CanonicalDocHash(oldDoc.Fields)
 	if err := m.run.Mgr.DeleteInTxWithScope(m.run.Tx, m.dt, p.Name, scope, oldDoc); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
-		return wrapORMError(err)
+		return wrapORMError(err, m.k.dialect())
 	}
 	if hookErr := captureLifecycleHooks(ctx, m.run.Mgr, m.run.Tx, m.dt, lifecycleEvent{script.EventAfterDelete, oldDoc, nil}); hookErr != nil {
 		return hookErr
@@ -207,7 +207,7 @@ func (m *mutation) insert(ctx context.Context, doc *doctype.Document) *contract.
 	}
 	afterHash := CanonicalDocHash(doc.Fields)
 	if err := m.run.Mgr.InsertInTx(m.run.Tx, m.dt, doc, m.owner, m.user); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
-		return wrapORMError(err)
+		return wrapORMError(err, m.k.dialect())
 	}
 	if hookErr := captureLifecycleHooks(ctx, m.run.Mgr, m.run.Tx, m.dt, lifecycleEvent{script.EventAfterInsert, doc, nil}); hookErr != nil {
 		return hookErr
