@@ -1,4 +1,4 @@
-package analytics
+package eventbus
 
 import (
 	"sync"
@@ -41,13 +41,13 @@ func TestAnalyticsQueueAdmissionBoundsConcurrentReservations(t *testing.T) {
 }
 
 func TestAnalyticsQueueAdmissionRejectsInvalidCapacity(t *testing.T) {
-	for _, capacity := range []uint64{0, MaxAnalyticsQueueAdmissionBytes + 1} {
+	for _, capacity := range []uint64{0, MaxQueueAdmissionBytes + 1} {
 		if _, err := NewAnalyticsQueueAdmission(capacity); err == nil {
 			t.Fatalf("capacity %d unexpectedly accepted", capacity)
 		}
 	}
-	for _, capacity := range []int{0, -1, MaxAnalyticsProcessListeners + 1} {
-		if _, err := NewAnalyticsQueueAdmissionWithLimits(1024, capacity); err == nil {
+	for _, capacity := range []int{0, -1, MaxProcessListeners + 1} {
+		if _, err := NewQueueAdmissionWithLimits(1024, capacity); err == nil {
 			t.Fatalf("process listener capacity %d unexpectedly accepted", capacity)
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"strings"
 	"sync"
 	"time"
@@ -462,7 +463,7 @@ type Status struct {
 }
 
 // GetStatus returns the current analytics pipeline status.
-func GetStatus(bus EventBus) *Status {
+func GetStatus(bus eventstream.Bus) *Status {
 	s := &Status{Enabled: bus != nil}
 	if bus != nil {
 		s.EventsDropped = bus.Dropped()

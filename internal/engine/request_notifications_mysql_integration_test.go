@@ -8,12 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/eventstream"
 	"github.com/asenawritescode/kora/internal/notifications"
@@ -167,7 +167,7 @@ func TestMySQLRequestOutboxSchedulesAndDeliversRecipientScopedInboxEvent(t *test
 	if _, err := database.ExecContext(ctx, `UPDATE _kora_notification_delivery SET available_at=? WHERE tenant_id=? AND request_id=?`, now, string(tenant), string(requestID)); err != nil {
 		t.Fatal("make persisted notification retry due:", err)
 	}
-	bus := analytics.NewChannelBusWithLimits(2, 2048, 4096, t.TempDir())
+	bus := eventbus.NewChannelBusWithLimits(2, 2048, 4096, t.TempDir())
 	defer bus.Close()
 	events, err := bus.Subscribe()
 	if err != nil {

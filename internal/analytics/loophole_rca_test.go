@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"strings"
 	"testing"
 	"time"
@@ -182,19 +183,19 @@ func TestRCA_Loophole2_FieldRenameOrphansRollupData(t *testing.T) {
 	reg := newReg(customerV1)
 	w := workerForReg(reg, "test.local")
 	today := time.Now().Format("2006-01-02")
-	w.process(ChangeEvent{
+	w.process(eventstream.ChangeEvent{
 		Site: "test.local", Doctype: "Customer", DocName: "CUST-0001",
-		Operation: EventInsert, Timestamp: time.Now(),
+		Operation: eventstream.EventInsert, Timestamp: time.Now(),
 		Data: map[string]any{"status": "Active"},
 	})
-	w.process(ChangeEvent{
+	w.process(eventstream.ChangeEvent{
 		Site: "test.local", Doctype: "Customer", DocName: "CUST-0002",
-		Operation: EventInsert, Timestamp: time.Now(),
+		Operation: eventstream.EventInsert, Timestamp: time.Now(),
 		Data: map[string]any{"status": "Active"},
 	})
-	w.process(ChangeEvent{
+	w.process(eventstream.ChangeEvent{
 		Site: "test.local", Doctype: "Customer", DocName: "CUST-0003",
-		Operation: EventInsert, Timestamp: time.Now(),
+		Operation: eventstream.EventInsert, Timestamp: time.Now(),
 		Data: map[string]any{"status": "Inactive"},
 	})
 
@@ -232,9 +233,9 @@ func TestRCA_Loophole2_FieldRenameOrphansRollupData(t *testing.T) {
 	// -- Step 5: New events after rename go to new metric name in a fresh worker
 	reg2 := newReg(customerV2)
 	w2 := workerForReg(reg2, "test.local")
-	w2.process(ChangeEvent{
+	w2.process(eventstream.ChangeEvent{
 		Site: "test.local", Doctype: "Customer", DocName: "CUST-0004",
-		Operation: EventInsert, Timestamp: time.Now(),
+		Operation: eventstream.EventInsert, Timestamp: time.Now(),
 		Data: map[string]any{"state": "Active"},
 	})
 
@@ -301,9 +302,9 @@ func TestRCA_Loophole3_FieldRemovalStopsCollection(t *testing.T) {
 				t.Errorf("PANIC on event with removed field: %v", r)
 			}
 		}()
-		w.process(ChangeEvent{
+		w.process(eventstream.ChangeEvent{
 			Site: "test.local", Doctype: "Customer", DocName: "CUST-0001",
-			Operation: EventInsert, Timestamp: time.Now(),
+			Operation: eventstream.EventInsert, Timestamp: time.Now(),
 			Data: map[string]any{"status": "Active", "tier": "Gold"},
 		})
 	}()

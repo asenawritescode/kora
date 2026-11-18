@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"log/slog"
 	"os"
 	"strconv"
@@ -208,7 +209,7 @@ func analyticsQueueBudgetFromEnv() (uint64, error) {
 		name = "KORA_ANALYTICS_MAX_QUEUED_BYTES"
 		raw = strings.TrimSpace(os.Getenv(name))
 	}
-	value := analytics.DefaultAnalyticsQueueAdmissionBytes
+	value := eventbus.DefaultQueueAdmissionBytes
 	if raw != "" {
 		parsed, err := strconv.ParseUint(raw, 10, 64)
 		if err != nil || parsed == 0 {
@@ -216,19 +217,19 @@ func analyticsQueueBudgetFromEnv() (uint64, error) {
 		}
 		value = parsed
 	}
-	if value > analytics.MaxAnalyticsQueueAdmissionBytes {
-		return 0, fmt.Errorf("%s cannot exceed %d", name, analytics.MaxAnalyticsQueueAdmissionBytes)
+	if value > eventbus.MaxQueueAdmissionBytes {
+		return 0, fmt.Errorf("%s cannot exceed %d", name, eventbus.MaxQueueAdmissionBytes)
 	}
 	return value, nil
 }
 
 func analyticsSubscriberLimitFromEnv() (int, error) {
-	value, err := envPositiveInt("KORA_ANALYTICS_MAX_SUBSCRIBERS", analytics.DefaultAnalyticsProcessMaxListeners)
+	value, err := envPositiveInt("KORA_ANALYTICS_MAX_SUBSCRIBERS", eventbus.DefaultProcessMaxListeners)
 	if err != nil {
 		return 0, err
 	}
-	if value > analytics.MaxAnalyticsProcessListeners {
-		return 0, fmt.Errorf("KORA_ANALYTICS_MAX_SUBSCRIBERS cannot exceed %d", analytics.MaxAnalyticsProcessListeners)
+	if value > eventbus.MaxProcessListeners {
+		return 0, fmt.Errorf("KORA_ANALYTICS_MAX_SUBSCRIBERS cannot exceed %d", eventbus.MaxProcessListeners)
 	}
 	return value, nil
 }

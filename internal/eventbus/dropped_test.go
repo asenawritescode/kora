@@ -1,24 +1,26 @@
-package analytics
+package eventbus
 
 import (
 	"testing"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/eventstream"
 )
 
 func TestChannelBusDroppedCountsWALFailures(t *testing.T) {
 	bus := &channelBus{
-		ch:             make(chan ChangeEvent, 1),
+		ch:             make(chan eventstream.ChangeEvent, 1),
 		walDir:         "/proc/analytics_test_wal",
 		capacity:       1,
 		maxEventBytes:  DefaultMaxEventBytes,
 		maxQueuedBytes: DefaultMaxQueuedBytes,
 	}
 
-	_ = bus.Publish(ChangeEvent{
+	_ = bus.Publish(eventstream.ChangeEvent{
 		Site:      "test",
 		Doctype:   "Customer",
 		DocName:   "CUST-1",
-		Operation: EventInsert,
+		Operation: eventstream.EventInsert,
 		Timestamp: time.Now().UTC(),
 	})
 

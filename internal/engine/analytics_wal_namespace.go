@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/site"
 )
 
@@ -116,8 +116,8 @@ func migrateAnalyticsWALDirectories(baseDir string, owners []analyticsWALNamespa
 	if err != nil {
 		return fmt.Errorf("inspect analytics WAL root %q: %w", baseDir, err)
 	}
-	if pending, err := analytics.WALHasPending(baseDir); err != nil {
-		return fmt.Errorf("inspect unpartitioned analytics WAL in %q: %w", baseDir, err)
+	if pending, walErr := eventbus.WALHasPending(baseDir); walErr != nil {
+		return fmt.Errorf("inspect unpartitioned analytics WAL in %q: %w", baseDir, walErr)
 	} else if pending {
 		return fmt.Errorf("unpartitioned analytics WAL at %q has pending events and no stable tenant owner; preserve it and reconcile before starting Engine", baseDir)
 	}
@@ -151,16 +151,16 @@ func migrateAnalyticsWALDirectories(baseDir string, owners []analyticsWALNamespa
 		} else if err != nil {
 			return fmt.Errorf("inspect legacy analytics WAL path %q: %w", legacy, err)
 		}
-		pending, err := analytics.WALHasPending(legacy)
-		if err != nil {
-			return fmt.Errorf("inspect legacy analytics WAL for tenant %q at %q: %w", tenantID, legacy, err)
+		pending, pendingErr := eventbus.WALHasPending(legacy)
+		if pendingErr != nil {
+			return fmt.Errorf("inspect legacy analytics WAL for tenant %q at %q: %w", tenantID, legacy, pendingErr)
 		}
 		if !pending {
 			continue
 		}
 		stable := AnalyticsTenantWALDir(baseDir, tenantID)
 		if _, err := os.Stat(stable); err == nil {
-			stablePending, inspectErr := analytics.WALHasPending(stable)
+			stablePending, inspectErr := eventbus.WALHasPending(stable)
 			if inspectErr != nil {
 				return fmt.Errorf("inspect stable analytics WAL for tenant %q at %q: %w", tenantID, stable, inspectErr)
 			}
@@ -196,7 +196,7 @@ func migrateAnalyticsWALDirectories(baseDir string, owners []analyticsWALNamespa
 		if _, ok := legacyOwners[path]; ok {
 			continue // empty or already-acknowledged legacy directory
 		}
-		pending, err := analytics.WALHasPending(path)
+		pending, err := eventbus.WALHasPending(path)
 		if err != nil {
 			return fmt.Errorf("inspect unassigned analytics WAL directory %q: %w", path, err)
 		}

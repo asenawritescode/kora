@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/api"
 	"github.com/asenawritescode/kora/internal/auth"
 	"github.com/asenawritescode/kora/internal/dbaccess"
@@ -34,7 +34,7 @@ type ResourceMetricSources struct {
 	RealtimeStreams         *RealtimeStreamAdmission
 	SessionCache            *auth.SessionCacheBudget
 	Uploads                 *UploadAdmission
-	AnalyticsQueueAdmission *analytics.QueueAdmission
+	AnalyticsQueueAdmission *eventbus.QueueAdmission
 	TenantActivation        interface {
 		AdmissionSnapshot() ActivationAdmissionSnapshot
 	}
@@ -332,7 +332,7 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 					values["kora.session_cache.max_bytes"] += int64(sessionCache.MaxBytes)
 				}
 				if snapshotter, ok := loaded.AnalyticsEventBus.(interface {
-					QueueBudget() analytics.QueueBudgetSnapshot
+					QueueBudget() eventbus.QueueBudgetSnapshot
 				}); ok {
 					queue := snapshotter.QueueBudget()
 					values["kora.analytics.queue.items"] += int64(queue.QueuedItems)
@@ -346,7 +346,7 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 				if loaded.AnalyticsEventBus != nil {
 					values["kora.analytics.events.dropped"] += loaded.AnalyticsEventBus.Dropped()
 					if snapshotter, ok := loaded.AnalyticsEventBus.(interface {
-						DropCauses() analytics.DropCauseSnapshot
+						DropCauses() eventbus.DropCauseSnapshot
 					}); ok {
 						drops := snapshotter.DropCauses()
 						values["kora.analytics.events.payload_rejected"] += drops.PayloadRejected
@@ -356,7 +356,7 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 					}
 				}
 				if snapshotter, ok := loaded.AnalyticsEventBus.(interface {
-					WALBacklog() analytics.WALBacklogSnapshot
+					WALBacklog() eventbus.WALBacklogSnapshot
 				}); ok {
 					backlog := snapshotter.WALBacklog()
 					if backlog.Pending {
@@ -374,7 +374,7 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 					}
 				}
 				if snapshotter, ok := loaded.AnalyticsEventBus.(interface {
-					ListenerQueueBudget() analytics.ListenerQueueSnapshot
+					ListenerQueueBudget() eventbus.ListenerQueueSnapshot
 				}); ok {
 					queue := snapshotter.ListenerQueueBudget()
 					values["kora.analytics.listeners.active"] += int64(queue.Listeners)

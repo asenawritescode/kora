@@ -150,16 +150,6 @@
   "internal/analytics::(*CloudRelay).Start": {
    "cognitive": 20
   },
-  "internal/analytics::(*MultiBus).ListenerQueueBudget": {
-   "cognitive": 16
-  },
-  "internal/analytics::(*MultiBus).Start": {
-   "cognitive": 24
-  },
-  "internal/analytics::(*MultiBus).addListener": {
-   "cognitive": 26,
-   "cyclomatic": 20
-  },
   "internal/analytics::(*QueryEngine).Resolve": {
    "cognitive": 23,
    "cyclomatic": 22
@@ -207,18 +197,6 @@
   "internal/analytics::(*Worker).run": {
    "cognitive": 24
   },
-  "internal/analytics::(*channelBus).AcknowledgeWAL": {
-   "cognitive": 46,
-   "cyclomatic": 28
-  },
-  "internal/analytics::(*channelBus).refreshWALBacklogLocked": {
-   "cognitive": 32,
-   "cyclomatic": 19
-  },
-  "internal/analytics::(*channelBus).writeWAL": {
-   "cognitive": 23,
-   "cyclomatic": 18
-  },
   "internal/analytics::(PublishedProjectionSnapshot).Validate": {
    "cognitive": 19,
    "cyclomatic": 27
@@ -226,9 +204,6 @@
   "internal/analytics::(QueryRequest).Validate": {
    "cognitive": 26,
    "cyclomatic": 28
-  },
-  "internal/analytics::AcknowledgeWAL": {
-   "statements": 65
   },
   "internal/analytics::Backfill": {
    "cognitive": 59,
@@ -270,9 +245,6 @@
    "cyclomatic": 36,
    "statements": 50
   },
-  "internal/analytics::addListener": {
-   "statements": 49
-  },
   "internal/analytics::analyticsPeriodExpression": {
    "cyclomatic": 19
   },
@@ -288,9 +260,6 @@
   "internal/analytics::process": {
    "statements": 79
   },
-  "internal/analytics::refreshWALBacklogLocked": {
-   "statements": 58
-  },
   "internal/analytics::resolveModelQuery": {
    "statements": 42
   },
@@ -302,9 +271,6 @@
   },
   "internal/analytics::rollupTableDDL": {
    "lines": 154
-  },
-  "internal/analytics::writeWAL": {
-   "statements": 52
   },
   "internal/api/ai::EnsureAIRunTables": {
    "lines": 185
@@ -700,9 +666,9 @@
    "cyclomatic": 22
   },
   "internal/api::RegisterAnalyticsRoutes": {
-   "cognitive": 149,
-   "cyclomatic": 79,
-   "lines": 382
+   "cognitive": 143,
+   "cyclomatic": 76,
+   "lines": 370
   },
   "internal/api::RegisterOperations": {
    "statements": 78
@@ -1740,6 +1706,40 @@
   "internal/envcompat::Promote": {
    "cognitive": 20,
    "cyclomatic": 16
+  },
+  "internal/eventbus::(*MultiBus).ListenerQueueBudget": {
+   "cognitive": 16
+  },
+  "internal/eventbus::(*MultiBus).Start": {
+   "cognitive": 24
+  },
+  "internal/eventbus::(*MultiBus).addListener": {
+   "cognitive": 26,
+   "cyclomatic": 20
+  },
+  "internal/eventbus::(*channelBus).AcknowledgeWAL": {
+   "cognitive": 46,
+   "cyclomatic": 28
+  },
+  "internal/eventbus::(*channelBus).refreshWALBacklogLocked": {
+   "cognitive": 32,
+   "cyclomatic": 19
+  },
+  "internal/eventbus::(*channelBus).writeWAL": {
+   "cognitive": 23,
+   "cyclomatic": 18
+  },
+  "internal/eventbus::AcknowledgeWAL": {
+   "statements": 65
+  },
+  "internal/eventbus::addListener": {
+   "statements": 49
+  },
+  "internal/eventbus::refreshWALBacklogLocked": {
+   "statements": 58
+  },
+  "internal/eventbus::writeWAL": {
+   "statements": 52
   },
   "internal/expression::(*TreeEvaluator).eval": {
    "cognitive": 27,

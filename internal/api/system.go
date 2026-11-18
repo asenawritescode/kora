@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"io"
 	"log/slog"
 	"net/http"
@@ -2431,7 +2432,7 @@ func (h *Handler) streamRealtime(c *gin.Context, send func([]byte) error, s real
 	if s.Provider == nil {
 		var ch <-chan eventstream.ChangeEvent
 		var remove func()
-		if multi, ok := s.Bus.(*analytics.MultiBus); ok {
+		if multi, ok := s.Bus.(*eventbus.MultiBus); ok {
 			listener := multi.NewListenerQueue(true)
 			if err := multi.AddRealtimeListener(listener); err != nil {
 				slog.Warn("realtime local subscription rejected", "site", s.Site, "error", err)

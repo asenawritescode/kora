@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/eventstream"
 	knet "github.com/asenawritescode/kora/internal/net"
@@ -48,7 +47,7 @@ func (p requestNotificationPlanner) Plan(ctx context.Context, event contract.Eve
 
 type inboxNotificationSender struct {
 	site string
-	bus  analytics.EventBus
+	bus  eventstream.Bus
 }
 
 func (s inboxNotificationSender) Send(ctx context.Context, delivery notifications.Delivery) (notifications.DeliveryResult, error) {

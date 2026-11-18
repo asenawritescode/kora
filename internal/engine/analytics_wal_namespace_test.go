@@ -3,12 +3,13 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"github.com/asenawritescode/kora/internal/eventbus"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/site"
 )
 
@@ -31,7 +32,7 @@ func TestMigrateAnalyticsWALDirectoriesMovesLegacyTenantDataAtomically(t *testin
 	if err := os.MkdirAll(legacy, 0700); err != nil {
 		t.Fatal("create legacy WAL directory:", err)
 	}
-	event := analytics.ChangeEvent{ID: "legacy-wal-event", Site: "old-route.example", Sequence: "42", Doctype: "Invoice", DocName: "INV-1"}
+	event := eventstream.ChangeEvent{ID: "legacy-wal-event", Site: "old-route.example", Sequence: "42", Doctype: "Invoice", DocName: "INV-1"}
 	record, err := json.Marshal(event)
 	if err != nil {
 		t.Fatal("encode legacy event:", err)
@@ -53,7 +54,7 @@ func TestMigrateAnalyticsWALDirectoriesMovesLegacyTenantDataAtomically(t *testin
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
 		t.Fatalf("legacy directory still exists after atomic move: %v", err)
 	}
-	if pending, err := analytics.WALHasPending(stable); err != nil || !pending {
+	if pending, err := eventbus.WALHasPending(stable); err != nil || !pending {
 		t.Fatalf("stable WAL pending = (%t, %v), want true", pending, err)
 	}
 	if err := migrateAnalyticsWALDirectories(base, owners); err != nil {
@@ -78,7 +79,7 @@ func TestMigrateAnalyticsWALNamespacesResolvesDirectoryNameToStableTenantID(t *t
 	if err := migrateAnalyticsWALNamespaces(context.Background(), base, directory, "", nil); err != nil {
 		t.Fatalf("migrate tenant WAL namespace from authoritative directory identity: %v", err)
 	}
-	if pending, err := analytics.WALHasPending(AnalyticsTenantWALDir(base, tenantID)); err != nil || !pending {
+	if pending, err := eventbus.WALHasPending(AnalyticsTenantWALDir(base, tenantID)); err != nil || !pending {
 		t.Fatalf("stable tenant WAL pending = (%t, %v), want true", pending, err)
 	}
 }

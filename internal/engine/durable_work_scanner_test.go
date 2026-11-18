@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -170,8 +171,8 @@ func TestDurableWorkScannerPublishesColdWALBytesOnlyForCompleteKnownSweep(t *tes
 	t.Run("complete sweep sums bytes", func(t *testing.T) {
 		scanner := &DurableWorkScanner{}
 		scanner.beginColdWALScan("")
-		scanner.recordColdWALBacklog(analytics.WALBacklogSnapshot{Bytes: 17, BytesKnown: true})
-		scanner.recordColdWALBacklog(analytics.WALBacklogSnapshot{Bytes: 23, BytesKnown: true})
+		scanner.recordColdWALBacklog(eventbus.WALBacklogSnapshot{Bytes: 17, BytesKnown: true})
+		scanner.recordColdWALBacklog(eventbus.WALBacklogSnapshot{Bytes: 23, BytesKnown: true})
 		scanner.publishColdWALSnapshot()
 		got := scanner.Snapshot()
 		if !got.ColdWALBytesKnown || got.ColdWALBytes != 40 {
@@ -181,7 +182,7 @@ func TestDurableWorkScannerPublishesColdWALBytesOnlyForCompleteKnownSweep(t *tes
 	t.Run("resumed sweep remains unknown", func(t *testing.T) {
 		scanner := &DurableWorkScanner{}
 		scanner.beginColdWALScan("tenant-previous-page")
-		scanner.recordColdWALBacklog(analytics.WALBacklogSnapshot{Bytes: 23, BytesKnown: true})
+		scanner.recordColdWALBacklog(eventbus.WALBacklogSnapshot{Bytes: 23, BytesKnown: true})
 		scanner.publishColdWALSnapshot()
 		got := scanner.Snapshot()
 		if got.ColdWALBytesKnown {
@@ -191,7 +192,7 @@ func TestDurableWorkScannerPublishesColdWALBytesOnlyForCompleteKnownSweep(t *tes
 	t.Run("failed probe marks sweep unknown", func(t *testing.T) {
 		scanner := &DurableWorkScanner{}
 		scanner.beginColdWALScan("")
-		scanner.recordColdWALBacklog(analytics.WALBacklogSnapshot{Bytes: 17, BytesKnown: true})
+		scanner.recordColdWALBacklog(eventbus.WALBacklogSnapshot{Bytes: 17, BytesKnown: true})
 		scanner.markColdWALBytesUnknown()
 		scanner.publishColdWALSnapshot()
 		got := scanner.Snapshot()
@@ -203,7 +204,7 @@ func TestDurableWorkScannerPublishesColdWALBytesOnlyForCompleteKnownSweep(t *tes
 
 func TestAnalyticsWALHasPendingIncludesCurrentAndRotatedRecords(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "tenant")
-	if pending, err := analytics.WALHasPending(dir); err != nil || pending {
+	if pending, err := eventbus.WALHasPending(dir); err != nil || pending {
 		t.Fatalf("empty WAL state = (%t, %v), want (false, nil)", pending, err)
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -212,7 +213,7 @@ func TestAnalyticsWALHasPendingIncludesCurrentAndRotatedRecords(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "events.jsonl.flushing"), []byte("pending"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if pending, err := analytics.WALHasPending(dir); err != nil || !pending {
+	if pending, err := eventbus.WALHasPending(dir); err != nil || !pending {
 		t.Fatalf("rotated WAL state = (%t, %v), want (true, nil)", pending, err)
 	}
 	if err := os.Remove(filepath.Join(dir, "events.jsonl.flushing")); err != nil {
@@ -221,7 +222,7 @@ func TestAnalyticsWALHasPendingIncludesCurrentAndRotatedRecords(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "events.jsonl"), []byte("pending"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if pending, err := analytics.WALHasPending(dir); err != nil || !pending {
+	if pending, err := eventbus.WALHasPending(dir); err != nil || !pending {
 		t.Fatalf("current WAL state = (%t, %v), want (true, nil)", pending, err)
 	}
 }

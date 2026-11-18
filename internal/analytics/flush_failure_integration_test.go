@@ -7,6 +7,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventbus"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"testing"
 	"time"
 
@@ -20,15 +22,15 @@ import (
 // retry to commit exactly one effect before acknowledging that WAL record.
 func verifyFlushFailureRetry(t *testing.T, database *sql.DB, dialect db.QueryDialect, site string, registry *doctype.Registry, installFailure, removeFailure func() error) {
 	t.Helper()
-	bus := NewChannelBus(8, t.TempDir()+"/analytics-wal")
+	bus := eventbus.NewChannelBus(8, t.TempDir()+"/analytics-wal")
 	t.Cleanup(func() { _ = bus.Close() })
 	worker := NewWorker(bus, database, dialect, registry, site, LoadConfig())
-	event := ChangeEvent{
+	event := eventstream.ChangeEvent{
 		ID:        "flush-retry-" + site,
 		Site:      site,
 		Doctype:   registry.Names()[0],
 		DocName:   "source-1",
-		Operation: EventInsert,
+		Operation: eventstream.EventInsert,
 		Timestamp: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC),
 		Data:      map[string]any{"name": "source-1"},
 	}
@@ -70,7 +72,7 @@ func verifyFlushFailureRetry(t *testing.T, database *sql.DB, dialect db.QueryDia
 		t.Fatalf("receipts after failed flush = %d, want 0", receipts)
 	}
 	var retryable []string
-	if _, err := bus.DrainWAL(func(event ChangeEvent) { retryable = append(retryable, event.ID) }); err != nil {
+	if _, err = bus.DrainWAL(func(event eventstream.ChangeEvent) { retryable = append(retryable, event.ID) }); err != nil {
 		t.Fatal("read WAL after failed flush:", err)
 	}
 	if len(retryable) != 1 || retryable[0] != event.ID {
@@ -110,7 +112,7 @@ func verifyFlushFailureRetry(t *testing.T, database *sql.DB, dialect db.QueryDia
 		t.Fatalf("rollup after duplicate flush = %v, want %v", afterDuplicateFlush, afterRetry)
 	}
 	var remaining []string
-	if _, err := bus.DrainWAL(func(event ChangeEvent) { remaining = append(remaining, event.ID) }); err != nil {
+	if _, err := bus.DrainWAL(func(event eventstream.ChangeEvent) { remaining = append(remaining, event.ID) }); err != nil {
 		t.Fatal("read WAL after successful retry:", err)
 	}
 	if len(remaining) != 0 {

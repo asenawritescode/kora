@@ -3,6 +3,8 @@ package analytics
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/asenawritescode/kora/internal/eventbus"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"io"
 	"log/slog"
 	"net/http"
@@ -41,12 +43,12 @@ func LoadCloudRelayConfig() *CloudRelayConfig {
 }
 
 type CloudRelay struct {
-	Bus                  *MultiBus
+	Bus                  *eventbus.MultiBus
 	Site                 string
 	Config               CloudRelayConfig
 	client               *http.Client
 	closeCh              chan struct{}
-	listenerCh           chan ChangeEvent
+	listenerCh           chan eventstream.ChangeEvent
 	productEvents        chan queuedCloudProductEvent
 	startOnce            sync.Once
 	stopOnce             sync.Once
@@ -73,7 +75,8 @@ type ProductEventQueueSnapshot struct {
 	Dropped  uint64
 }
 
-func NewCloudRelay(bus *MultiBus, site string, cfg CloudRelayConfig) *CloudRelay {
+// NewCloudRelay creates a relay that forwards tenant bus events to the cloud.
+func NewCloudRelay(bus *eventbus.MultiBus, site string, cfg CloudRelayConfig) *CloudRelay {
 	return &CloudRelay{
 		Bus:    bus,
 		Site:   site,
@@ -244,8 +247,8 @@ func (r *CloudRelay) Stop() {
 	<-r.done
 }
 
-func (r *CloudRelay) handleEvent(event ChangeEvent) {
-	if event.Operation != EventInsert {
+func (r *CloudRelay) handleEvent(event eventstream.ChangeEvent) {
+	if event.Operation != eventstream.EventInsert {
 		return
 	}
 	if strings.HasPrefix(event.Doctype, "_kora_") {

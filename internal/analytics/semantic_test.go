@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"encoding/json"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"strings"
 	"testing"
 	"time"
@@ -291,7 +292,7 @@ func TestPreferredTimeFieldUsesConfiguredBusinessDate(t *testing.T) {
 }
 
 func TestEventDateNormalizesBusinessDateAndFallsBack(t *testing.T) {
-	event := ChangeEvent{
+	event := eventstream.ChangeEvent{
 		Timestamp: time.Date(2026, 9, 5, 14, 0, 0, 0, time.UTC),
 		Data:      map[string]any{"order_date": "2026-08-31"},
 	}

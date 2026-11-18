@@ -1,4 +1,4 @@
-package analytics
+package eventbus
 
 import (
 	"errors"
@@ -6,21 +6,23 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/eventstream"
 )
 
 type multiBusStub struct {
-	ch chan ChangeEvent
+	ch chan eventstream.ChangeEvent
 }
 
-func (s *multiBusStub) Publish(event ChangeEvent) error { return nil }
-func (s *multiBusStub) Subscribe() (<-chan ChangeEvent, error) {
-	s.ch = make(chan ChangeEvent, 1)
+func (s *multiBusStub) Publish(event eventstream.ChangeEvent) error { return nil }
+func (s *multiBusStub) Subscribe() (<-chan eventstream.ChangeEvent, error) {
+	s.ch = make(chan eventstream.ChangeEvent, 1)
 	return s.ch, nil
 }
-func (s *multiBusStub) DrainWAL(handler func(ChangeEvent)) (int, error) { return 0, nil }
-func (s *multiBusStub) RotateWAL() (string, error)                      { return "", nil }
-func (s *multiBusStub) CommitWALRotation(string) error                  { return nil }
-func (s *multiBusStub) Dropped() int64                                  { return 0 }
+func (s *multiBusStub) DrainWAL(handler func(eventstream.ChangeEvent)) (int, error) { return 0, nil }
+func (s *multiBusStub) RotateWAL() (string, error)                                  { return "", nil }
+func (s *multiBusStub) CommitWALRotation(string) error                              { return nil }
+func (s *multiBusStub) Dropped() int64                                              { return 0 }
 func (s *multiBusStub) Close() error {
 	close(s.ch)
 	return nil
@@ -34,10 +36,10 @@ func TestMultiBusDroppedCountsSlowListeners(t *testing.T) {
 	}
 	defer mb.Close()
 
-	listener := make(chan ChangeEvent)
+	listener := make(chan eventstream.ChangeEvent)
 	mb.AddListener(listener)
 
-	inner.ch <- ChangeEvent{Site: "test", Doctype: "Customer", Timestamp: time.Now().UTC()}
+	inner.ch <- eventstream.ChangeEvent{Site: "test", Doctype: "Customer", Timestamp: time.Now().UTC()}
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -63,7 +65,7 @@ func TestMultiBusCloseJoinsFanout(t *testing.T) {
 }
 
 func TestMultiBusProcessListenerAdmissionBoundsAndReleasesAcrossTenants(t *testing.T) {
-	budget, err := NewAnalyticsQueueAdmissionWithLimits(4*DefaultMaxEventBytes, 2)
+	budget, err := NewQueueAdmissionWithLimits(4*DefaultMaxEventBytes, 2)
 	if err != nil {
 		t.Fatal("create process listener budget:", err)
 	}
@@ -126,7 +128,7 @@ func TestMultiBusProcessListenerAdmissionBoundsAndReleasesAcrossTenants(t *testi
 
 func TestMultiBusProcessListenerAdmissionSerializesConcurrentRegistrations(t *testing.T) {
 	const limit = 3
-	budget, err := NewAnalyticsQueueAdmissionWithLimits(8*DefaultMaxEventBytes, limit)
+	budget, err := NewQueueAdmissionWithLimits(8*DefaultMaxEventBytes, limit)
 	if err != nil {
 		t.Fatal("create process listener budget:", err)
 	}
@@ -184,7 +186,7 @@ func TestMultiBusSharesProcessWideListenerQueueByteBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	newBus := func() (*MultiBus, *multiBusStub, chan ChangeEvent) {
+	newBus := func() (*MultiBus, *multiBusStub, chan eventstream.ChangeEvent) {
 		inner := &multiBusStub{}
 		bus, err := NewDeferredMultiBus(inner)
 		if err != nil {
@@ -205,7 +207,7 @@ func TestMultiBusSharesProcessWideListenerQueueByteBudget(t *testing.T) {
 	}
 	_, firstInner, firstListener := newBus()
 	_, secondInner, secondListener := newBus()
-	event := ChangeEvent{Site: "tenant", Doctype: "Thing", Timestamp: time.Now().UTC()}
+	event := eventstream.ChangeEvent{Site: "tenant", Doctype: "Thing", Timestamp: time.Now().UTC()}
 	firstInner.ch <- event
 	waitForListenerBudget(t, budget, func(snapshot QueueSnapshot) bool { return snapshot.UsedBytes == DefaultMaxEventBytes })
 	secondInner.ch <- event
@@ -231,7 +233,7 @@ func TestMultiBusProcessBudgetClosesRealtimeListenerAndReleasesBytes(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	newBus := func(realtime bool) (*MultiBus, *multiBusStub, chan ChangeEvent) {
+	newBus := func(realtime bool) (*MultiBus, *multiBusStub, chan eventstream.ChangeEvent) {
 		inner := &multiBusStub{}
 		bus, err := NewDeferredMultiBus(inner)
 		if err != nil {
@@ -257,7 +259,7 @@ func TestMultiBusProcessBudgetClosesRealtimeListenerAndReleasesBytes(t *testing.
 	}
 	_, source, queued := newBus(false)
 	second, realtimeSource, realtime := newBus(true)
-	event := ChangeEvent{Site: "tenant", Doctype: "Thing", Timestamp: time.Now().UTC()}
+	event := eventstream.ChangeEvent{Site: "tenant", Doctype: "Thing", Timestamp: time.Now().UTC()}
 	source.ch <- event
 	waitForListenerBudget(t, budget, func(snapshot QueueSnapshot) bool { return snapshot.UsedBytes == DefaultMaxEventBytes })
 	realtimeSource.ch <- event
@@ -279,7 +281,7 @@ func TestChannelBusWakeupQueuesShareProcessWideByteBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	newBus := func(name string) (*MultiBus, EventBus) {
+	newBus := func(name string) (*MultiBus, eventstream.Bus) {
 		inner := NewChannelBusWithLimits(2, DefaultMaxEventBytes, 2*DefaultMaxEventBytes, filepath.Join(t.TempDir(), name))
 		queueAware := inner.(interface {
 			SetQueueAdmission(*QueueAdmission) error
@@ -299,7 +301,7 @@ func TestChannelBusWakeupQueuesShareProcessWideByteBudget(t *testing.T) {
 	}
 	first, firstInner := newBus("first")
 	second, secondInner := newBus("second")
-	event := ChangeEvent{Site: "tenant", Doctype: "Thing", Timestamp: time.Now().UTC()}
+	event := eventstream.ChangeEvent{Site: "tenant", Doctype: "Thing", Timestamp: time.Now().UTC()}
 	if err := first.Publish(event); err != nil {
 		t.Fatal("publish first durable wake-up:", err)
 	}
@@ -323,8 +325,8 @@ func TestChannelBusWakeupQueuesShareProcessWideByteBudget(t *testing.T) {
 	waitForListenerBudget(t, budget, func(snapshot QueueSnapshot) bool { return snapshot.UsedBytes == 0 })
 	var replayed int
 	count, err := secondInner.(interface {
-		DrainWAL(func(ChangeEvent)) (int, error)
-	}).DrainWAL(func(ChangeEvent) { replayed++ })
+		DrainWAL(func(eventstream.ChangeEvent)) (int, error)
+	}).DrainWAL(func(eventstream.ChangeEvent) { replayed++ })
 	if err != nil || count != 1 || replayed != 1 {
 		t.Fatalf("WAL replay after skipped wake-up = (%d events, %d callbacks, %v), want durable event", count, replayed, err)
 	}
@@ -353,7 +355,7 @@ func TestMultiBusPublishFansOutOnceWhenSourceWakeupsAreConsumed(t *testing.T) {
 	if err := bus.TryAddListener(listener); err != nil {
 		t.Fatal("register listener:", err)
 	}
-	event := ChangeEvent{ID: "duplicate-source-event", Site: "tenant", Doctype: "Thing", Timestamp: time.Now().UTC()}
+	event := eventstream.ChangeEvent{ID: "duplicate-source-event", Site: "tenant", Doctype: "Thing", Timestamp: time.Now().UTC()}
 	for range 2 {
 		if err := bus.Publish(event); err != nil {
 			t.Fatal("publish through MultiBus:", err)
@@ -403,7 +405,7 @@ func TestMultiBusCloseBeforeStartReleasesAllQueueReservations(t *testing.T) {
 	if err := bus.TryAddListener(listener); err != nil {
 		t.Fatal(err)
 	}
-	if err := bus.Publish(ChangeEvent{ID: "pending-close-event", Site: "tenant", Doctype: "Thing"}); err != nil {
+	if err := bus.Publish(eventstream.ChangeEvent{ID: "pending-close-event", Site: "tenant", Doctype: "Thing"}); err != nil {
 		t.Fatal("publish before fanout start:", err)
 	}
 	if got := budget.Snapshot().UsedBytes; got != 2*DefaultMaxEventBytes {
@@ -436,9 +438,9 @@ func TestDeferredMultiBusStartsFanoutOnlyWhenOwnedWorkerStarts(t *testing.T) {
 		t.Fatal("NewDeferredMultiBus:", err)
 	}
 	defer mb.Close()
-	listener := make(chan ChangeEvent, 1)
+	listener := make(chan eventstream.ChangeEvent, 1)
 	mb.AddListener(listener)
-	want := ChangeEvent{Site: "tenant", Doctype: "Invoice", Timestamp: time.Now().UTC()}
+	want := eventstream.ChangeEvent{Site: "tenant", Doctype: "Invoice", Timestamp: time.Now().UTC()}
 	inner.ch <- want
 	select {
 	case event := <-listener:
@@ -467,9 +469,9 @@ func TestMultiBusBoundsListenerCountAndClosesRejectedListener(t *testing.T) {
 	if err := mb.SetMaxListeners(1); err != nil {
 		t.Fatal(err)
 	}
-	first := make(chan ChangeEvent, 1)
+	first := make(chan eventstream.ChangeEvent, 1)
 	mb.AddListener(first)
-	second := make(chan ChangeEvent, 1)
+	second := make(chan eventstream.ChangeEvent, 1)
 	mb.AddListener(second)
 	if _, ok := <-second; ok {
 		t.Fatal("listener beyond limit remained open")
@@ -498,7 +500,7 @@ func TestMultiBusSubscribeReturnsClosedChannelWhenAtCapacity(t *testing.T) {
 	if err := mb.SetMaxListeners(1); err != nil {
 		t.Fatal(err)
 	}
-	mb.AddListener(make(chan ChangeEvent, 1))
+	mb.AddListener(make(chan eventstream.ChangeEvent, 1))
 	if ch, err := mb.Subscribe(); !errors.Is(err, ErrListenerLimit) || ch != nil {
 		t.Fatalf("Subscribe beyond capacity = (%v, %v)", ch, err)
 	}
@@ -512,7 +514,7 @@ func TestMultiBusRejectsListenerQueueOverHardLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer mb.Close()
-	listener := make(chan ChangeEvent, MaxListenerQueueSize+1)
+	listener := make(chan eventstream.ChangeEvent, MaxListenerQueueSize+1)
 	if err := mb.TryAddListener(listener); err == nil {
 		t.Fatal("listener exceeding queue capacity limit was accepted")
 	}
@@ -537,7 +539,7 @@ func TestMultiBusListenerQueueCapacityUsesEventByteLimit(t *testing.T) {
 	if got := mb.ListenerQueueCapacity(true); got != 4 {
 		t.Fatalf("realtime queue capacity = %d, want 4", got)
 	}
-	listener := make(chan ChangeEvent, 5)
+	listener := make(chan eventstream.ChangeEvent, 5)
 	if err := mb.TryAddListener(listener); err == nil {
 		t.Fatal("listener queue exceeding byte-derived limit was accepted")
 	}
@@ -565,14 +567,14 @@ func TestRealtimeListenerClosesAndIsRemovedOnOverflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer mb.Close()
-	listener := make(chan ChangeEvent, 1)
+	listener := make(chan eventstream.ChangeEvent, 1)
 	if err := mb.AddRealtimeListener(listener); err != nil {
 		t.Fatal("add realtime listener:", err)
 	}
 	if err := mb.Start(); err != nil {
 		t.Fatal("start fanout:", err)
 	}
-	inner.ch <- ChangeEvent{ID: "evt-1"}
+	inner.ch <- eventstream.ChangeEvent{ID: "evt-1"}
 	deadline := time.After(time.Second)
 	for len(listener) != 1 {
 		select {
@@ -582,7 +584,7 @@ func TestRealtimeListenerClosesAndIsRemovedOnOverflow(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
-	inner.ch <- ChangeEvent{ID: "evt-2"}
+	inner.ch <- eventstream.ChangeEvent{ID: "evt-2"}
 	deadline = time.After(time.Second)
 	for mb.ListenerCount() != 0 {
 		select {

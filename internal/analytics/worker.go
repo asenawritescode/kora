@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventbus"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -16,7 +18,7 @@ import (
 	"github.com/asenawritescode/kora/internal/doctype"
 )
 
-// Worker consumes ChangeEvents from the EventBus and pre-computes rollups
+// Worker consumes ChangeEvents from the eventstream.Bus and pre-computes rollups
 // into _kora_analytics_daily and _kora_analytics_workflow tables.
 //
 // Design: batch-and-merge. Instead of UPSERTing on every event, the worker
@@ -27,7 +29,7 @@ import (
 // (new transition) are accumulated in memory and flushed in the same transaction
 // as the daily rollup deltas, eliminating 2 extra DB round-trips per transition.
 type Worker struct {
-	bus           EventBus
+	bus           eventstream.Bus
 	db            *sql.DB
 	dialect       db.QueryDialect
 	registry      *doctype.Registry
@@ -153,7 +155,7 @@ type workflowOpenOp struct {
 }
 
 // NewWorker creates an analytics worker for a single site.
-func NewWorker(bus EventBus, database *sql.DB, dialect db.QueryDialect, registry *doctype.Registry, siteName string, cfg *Config) *Worker {
+func NewWorker(bus eventstream.Bus, database *sql.DB, dialect db.QueryDialect, registry *doctype.Registry, siteName string, cfg *Config) *Worker {
 	if cfg == nil {
 		cfg = LoadConfig()
 	}
@@ -265,7 +267,7 @@ func (w *Worker) run(ctx context.Context) {
 	w.rollupMonthly(ctx)
 
 	count := 0
-	_, walDriven := w.bus.(WALBatchDrainer)
+	_, walDriven := w.bus.(eventbus.WALBatchDrainer)
 	for {
 		select {
 		case event, ok := <-ch:
@@ -367,14 +369,14 @@ func (w *Worker) Stop() {
 	}
 }
 
-// process handles a single ChangeEvent, resolving metrics and accumulating deltas.
-func (w *Worker) process(event ChangeEvent) {
+// process handles a single eventstream.ChangeEvent, resolving metrics and accumulating deltas.
+func (w *Worker) process(event eventstream.ChangeEvent) {
 	w.processMu.Lock()
 	defer w.processMu.Unlock()
 	if !w.trackEventID(event.ID, event.Sequence) {
 		return
 	}
-	if event.Operation != EventInsert && event.Operation != EventUpdate && event.Operation != EventDelete && event.Operation != EventSubmit && event.Operation != EventCancel {
+	if event.Operation != eventstream.EventInsert && event.Operation != eventstream.EventUpdate && event.Operation != eventstream.EventDelete && event.Operation != eventstream.EventSubmit && event.Operation != eventstream.EventCancel {
 		return
 	}
 	if event.BusinessScope.TenantID == "" {
@@ -412,7 +414,7 @@ func (w *Worker) process(event ChangeEvent) {
 			contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, dim, date, 1)
 
 			// On update: decrement old dimension if the field changed.
-			if event.Operation == EventUpdate && event.OldData != nil {
+			if event.Operation == eventstream.EventUpdate && event.OldData != nil {
 				oldVal := event.OldData[m.Field]
 				if anyToString(oldVal) != anyToString(val) {
 					oldDim := m.Field + "=" + anyToString(oldVal)
@@ -421,7 +423,7 @@ func (w *Worker) process(event ChangeEvent) {
 			}
 
 		case MetricCountByTime:
-			if event.Operation == EventInsert {
+			if event.Operation == eventstream.EventInsert {
 				contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, "", event.Timestamp.Format("2006-01-02"), 1)
 			}
 
@@ -431,12 +433,12 @@ func (w *Worker) process(event ChangeEvent) {
 			}
 			newVal := toFloat(event.Data[m.Field])
 			var oldVal float64
-			if event.Operation == EventUpdate && event.OldData != nil {
+			if event.Operation == eventstream.EventUpdate && event.OldData != nil {
 				oldVal = toFloat(event.OldData[m.Field])
 			}
 			// Net delta: new value minus old value (old value is 0 for inserts).
 			netDelta := newVal - oldVal
-			if event.Operation == EventDelete {
+			if event.Operation == eventstream.EventDelete {
 				netDelta = -newVal
 			}
 			contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, "", date, netDelta)
@@ -447,15 +449,15 @@ func (w *Worker) process(event ChangeEvent) {
 			}
 			newVal := toFloat(event.Data[m.Field])
 			oldVal := 0.0
-			if event.Operation == EventUpdate && event.OldData != nil {
+			if event.Operation == eventstream.EventUpdate && event.OldData != nil {
 				oldVal = toFloat(event.OldData[m.Field])
 			}
 			netDelta := newVal - oldVal
-			if event.Operation == EventDelete {
+			if event.Operation == eventstream.EventDelete {
 				netDelta = -newVal
 			}
 			contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, m.GroupByField+"="+anyToString(event.Data[m.GroupByField]), date, netDelta)
-			if event.Operation == EventUpdate && event.OldData != nil && anyToString(event.OldData[m.GroupByField]) != anyToString(event.Data[m.GroupByField]) {
+			if event.Operation == eventstream.EventUpdate && event.OldData != nil && anyToString(event.OldData[m.GroupByField]) != anyToString(event.Data[m.GroupByField]) {
 				contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, m.GroupByField+"="+anyToString(event.OldData[m.GroupByField]), eventOldDate(event, m.TimeField), -oldVal)
 			}
 
@@ -465,7 +467,7 @@ func (w *Worker) process(event ChangeEvent) {
 			newDim := "state=" + newState
 			contribution.addDelta(event.BusinessScope, event.Doctype, m.Name, newDim, date, 1)
 
-			if event.Operation == EventUpdate && event.OldData != nil {
+			if event.Operation == eventstream.EventUpdate && event.OldData != nil {
 				oldState := anyToString(event.OldData["doc_status"])
 				if oldState != newState {
 					oldDim := "state=" + oldState
@@ -488,7 +490,7 @@ func (w *Worker) process(event ChangeEvent) {
 	w.recordContribution(event.ID, contribution)
 }
 
-func (c *eventContribution) addWorkflowTransition(event ChangeEvent, oldState, newState string) {
+func (c *eventContribution) addWorkflowTransition(event eventstream.ChangeEvent, oldState, newState string) {
 	c.closes = append(c.closes, workflowCloseOp{Site: event.Site, BusinessScope: event.BusinessScope, Doctype: event.Doctype, DocName: event.DocName, OldState: oldState, Now: event.Timestamp})
 	c.opens = append(c.opens, workflowOpenOp{Site: event.Site, BusinessScope: event.BusinessScope, Doctype: event.Doctype, DocName: event.DocName, FromState: oldState, ToState: newState, Now: event.Timestamp, ModifiedBy: event.ModifiedBy})
 }
@@ -670,7 +672,7 @@ func (w *Worker) flush(ctx context.Context) error {
 	// uses per-event acknowledgment after commit so queued events remain intact.
 	var oldWAL string
 	var err error
-	_, perEventAck := w.bus.(EventWALAcknowledger)
+	_, perEventAck := w.bus.(eventstream.WALAcknowledger)
 	if !perEventAck && w.bus != nil {
 		oldWAL, err = w.bus.RotateWAL()
 		if err != nil {
@@ -757,7 +759,7 @@ func (w *Worker) flush(ctx context.Context) error {
 	// Acknowledge only event IDs included in this committed batch. This avoids
 	// deleting later events that have reached the WAL but are still queued.
 	var ackErr error
-	if ack, ok := w.bus.(EventWALAcknowledger); ok {
+	if ack, ok := w.bus.(eventstream.WALAcknowledger); ok {
 		ackErr = ack.AcknowledgeWAL(eventIDs)
 	} else if w.bus != nil {
 		ackErr = w.bus.CommitWALRotation(oldWAL)
@@ -965,12 +967,12 @@ func toFloat(v any) float64 {
 // drainWAL processes one bounded durable batch. The WAL, rather than the
 // in-memory channel, is authoritative for local analytics delivery.
 func (w *Worker) drainWAL(ctx context.Context) {
-	handler := func(event ChangeEvent) {
+	handler := func(event eventstream.ChangeEvent) {
 		w.process(event)
 	}
 	var count int
 	var err error
-	if drainer, ok := w.bus.(WALBatchDrainer); ok {
+	if drainer, ok := w.bus.(eventbus.WALBatchDrainer); ok {
 		count, err = drainer.DrainWALBatch(w.batchSize, handler)
 	} else {
 		count, err = w.bus.DrainWAL(handler)
@@ -1102,14 +1104,14 @@ func anyToString(v any) string {
 	}
 }
 
-func eventDate(event ChangeEvent, field string) string {
+func eventDate(event eventstream.ChangeEvent, field string) string {
 	if field == "" || field == "creation" {
 		return event.Timestamp.Format("2006-01-02")
 	}
 	return normalizeEventDate(event.Data[field], event.Timestamp)
 }
 
-func eventOldDate(event ChangeEvent, field string) string {
+func eventOldDate(event eventstream.ChangeEvent, field string) string {
 	if field == "" || field == "creation" || event.OldData == nil {
 		return event.Timestamp.Format("2006-01-02")
 	}

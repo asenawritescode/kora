@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"regexp"
 	"testing"
 	"time"
@@ -104,7 +105,7 @@ func TestFlushFailureReturnsErrorAndRetainsBatchAndWAL(t *testing.T) {
 	}
 	defer database.Close()
 	mock.ExpectBegin().WillReturnError(errors.New("database unavailable"))
-	bus := &trackedFlushBus{fakeBus: &fakeBus{ch: make(chan ChangeEvent, 100)}}
+	bus := &trackedFlushBus{fakeBus: &fakeBus{ch: make(chan eventstream.ChangeEvent, 100)}}
 	w := NewWorker(bus, database, db.Resolve("postgres"), doctype.NewRegistry(), "tenant", LoadConfig())
 	admission := &recordingWorkAdmission{}
 	w.SetWorkAdmission(admission)
@@ -165,26 +166,26 @@ func TestWorkerStopsWhenLifecycleContextIsCanceled(t *testing.T) {
 	}
 }
 
-// fakeBus implements EventBus for testing — captures published events in a channel.
+// fakeBus implements eventstream.Bus for testing — captures published events in a channel.
 type fakeBus struct {
-	ch      chan ChangeEvent
+	ch      chan eventstream.ChangeEvent
 	dropped int64
 }
 
 func newFakeBus() *fakeBus {
-	return &fakeBus{ch: make(chan ChangeEvent, 100)}
+	return &fakeBus{ch: make(chan eventstream.ChangeEvent, 100)}
 }
 
-func (b *fakeBus) Publish(event ChangeEvent) error {
+func (b *fakeBus) Publish(event eventstream.ChangeEvent) error {
 	b.ch <- event
 	return nil
 }
-func (b *fakeBus) Subscribe() (<-chan ChangeEvent, error)          { return b.ch, nil }
-func (b *fakeBus) DrainWAL(handler func(ChangeEvent)) (int, error) { return 0, nil }
-func (b *fakeBus) RotateWAL() (string, error)                      { return "", nil }
-func (b *fakeBus) CommitWALRotation(string) error                  { return nil }
-func (b *fakeBus) Dropped() int64                                  { return b.dropped }
-func (b *fakeBus) Close() error                                    { close(b.ch); return nil }
+func (b *fakeBus) Subscribe() (<-chan eventstream.ChangeEvent, error)          { return b.ch, nil }
+func (b *fakeBus) DrainWAL(handler func(eventstream.ChangeEvent)) (int, error) { return 0, nil }
+func (b *fakeBus) RotateWAL() (string, error)                                  { return "", nil }
+func (b *fakeBus) CommitWALRotation(string) error                              { return nil }
+func (b *fakeBus) Dropped() int64                                              { return b.dropped }
+func (b *fakeBus) Close() error                                                { close(b.ch); return nil }
 
 // testWorker creates a Worker for unit testing (no DB).
 // We test the delta accumulation logic, not the flush.
@@ -215,7 +216,7 @@ func testRegistry(dts ...*doctype.DocType) *doctype.Registry {
 
 func TestWorkerSkipsRealtimeNotifications(t *testing.T) {
 	w := &Worker{}
-	w.process(ChangeEvent{Operation: EventNotification})
+	w.process(eventstream.ChangeEvent{Operation: eventstream.EventNotification})
 }
 
 func TestWorker_InsertIncrementsCount(t *testing.T) {
@@ -225,11 +226,11 @@ func TestWorker_InsertIncrementsCount(t *testing.T) {
 	reg := testRegistry(dt)
 	w := testWorker(reg, "test.local")
 
-	event := ChangeEvent{
+	event := eventstream.ChangeEvent{
 		Site:      "test.local",
 		Doctype:   "Customer",
 		DocName:   "CUST-0001",
-		Operation: EventInsert,
+		Operation: eventstream.EventInsert,
 		Timestamp: time.Now(),
 		Data:      map[string]any{"name": "Acme Corp"},
 	}
@@ -253,7 +254,7 @@ func TestWorkerPartitionsEntityFactsAndQueryByExactScope(t *testing.T) {
 	entityB := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-b"}
 	date := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	for _, scope := range []contract.BusinessScope{entityA, entityB} {
-		worker.process(ChangeEvent{Site: "tenant-a", BusinessScope: scope, Doctype: "Invoice", Operation: EventInsert, Timestamp: date})
+		worker.process(eventstream.ChangeEvent{Site: "tenant-a", BusinessScope: scope, Doctype: "Invoice", Operation: eventstream.EventInsert, Timestamp: date})
 	}
 	keyA := deltaKey{BusinessScope: entityA, Doctype: "Invoice", Metric: "invoice_count", Date: "2026-10-01"}
 	keyB := deltaKey{BusinessScope: entityB, Doctype: "Invoice", Metric: "invoice_count", Date: "2026-10-01"}
@@ -278,9 +279,9 @@ func TestWorkerPartitionsEntityFactsAndQueryByExactScope(t *testing.T) {
 func TestWorkerDoesNotAccumulateSameUnacknowledgedEventTwice(t *testing.T) {
 	dt := buildTestDocType("Customer", false, field("name", "Data", "Name", true))
 	w := testWorker(testRegistry(dt), "tenant")
-	event := ChangeEvent{
+	event := eventstream.ChangeEvent{
 		ID: "evt-replayed", Site: "tenant", Doctype: "Customer", DocName: "CUST-1",
-		Operation: EventInsert, Timestamp: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC),
+		Operation: eventstream.EventInsert, Timestamp: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC),
 		Data: map[string]any{"name": "Acme"},
 	}
 	w.process(event)
@@ -318,9 +319,9 @@ func TestFlushSkipsEffectsWhenReplayReceiptAlreadyExists(t *testing.T) {
 	mock.ExpectCommit()
 	bus := &trackedFlushBus{fakeBus: newFakeBus()}
 	w := NewWorker(bus, database, db.Resolve("mysql"), testRegistry(buildTestDocType("Customer", false, field("name", "Data", "Name", true))), "tenant", LoadConfig())
-	event := ChangeEvent{
+	event := eventstream.ChangeEvent{
 		ID: "event-already-committed", Site: "tenant", Doctype: "Customer", DocName: "CUST-1",
-		Sequence: "17", Operation: EventInsert, Timestamp: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC),
+		Sequence: "17", Operation: eventstream.EventInsert, Timestamp: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC),
 		Data: map[string]any{"name": "Acme"},
 	}
 	w.process(event)
@@ -356,9 +357,9 @@ func TestReceiptFailureRetainsEffectsAndDoesNotAcknowledgeWAL(t *testing.T) {
 	mock.ExpectRollback()
 	bus := &trackedFlushBus{fakeBus: newFakeBus()}
 	w := NewWorker(bus, database, db.Resolve("mysql"), testRegistry(buildTestDocType("Customer", false, field("name", "Data", "Name", true))), "tenant", LoadConfig())
-	event := ChangeEvent{
+	event := eventstream.ChangeEvent{
 		ID: "event-retryable", Site: "tenant", Doctype: "Customer", DocName: "CUST-1",
-		Sequence: "18", Operation: EventInsert, Timestamp: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC),
+		Sequence: "18", Operation: eventstream.EventInsert, Timestamp: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC),
 		Data: map[string]any{"name": "Acme"},
 	}
 	w.process(event)
@@ -390,11 +391,11 @@ func TestWorker_InsertSelectField_IncrementsCountByField(t *testing.T) {
 	reg := testRegistry(dt)
 	w := testWorker(reg, "test.local")
 
-	event := ChangeEvent{
+	event := eventstream.ChangeEvent{
 		Site:      "test.local",
 		Doctype:   "Customer",
 		DocName:   "CUST-0001",
-		Operation: EventInsert,
+		Operation: eventstream.EventInsert,
 		Timestamp: time.Now(),
 		Data:      map[string]any{"status": "Active"},
 	}
@@ -417,11 +418,11 @@ func TestWorker_UpdateStatus_NetDeltas(t *testing.T) {
 	reg := testRegistry(dt)
 	w := testWorker(reg, "test.local")
 
-	event := ChangeEvent{
+	event := eventstream.ChangeEvent{
 		Site:      "test.local",
 		Doctype:   "Customer",
 		DocName:   "CUST-0001",
-		Operation: EventUpdate,
+		Operation: eventstream.EventUpdate,
 		Timestamp: time.Now(),
 		Data:      map[string]any{"status": "Inactive"},
 		OldData:   map[string]any{"status": "Active"},
@@ -455,11 +456,11 @@ func TestWorker_UpdateNumericField_NetDelta(t *testing.T) {
 	reg := testRegistry(dt)
 	w := testWorker(reg, "test.local")
 
-	event := ChangeEvent{
+	event := eventstream.ChangeEvent{
 		Site:      "test.local",
 		Doctype:   "Invoice",
 		DocName:   "INV-0001",
-		Operation: EventUpdate,
+		Operation: eventstream.EventUpdate,
 		Timestamp: time.Now(),
 		Data:      map[string]any{"total": 500.0},
 		OldData:   map[string]any{"total": 300.0},
@@ -483,11 +484,11 @@ func TestWorker_Delete_DecrementsCountAndDimensions(t *testing.T) {
 	reg := testRegistry(dt)
 	w := testWorker(reg, "test.local")
 
-	event := ChangeEvent{
+	event := eventstream.ChangeEvent{
 		Site:      "test.local",
 		Doctype:   "Customer",
 		DocName:   "CUST-0001",
-		Operation: EventDelete,
+		Operation: eventstream.EventDelete,
 		Timestamp: time.Now(),
 		Data:      map[string]any{"status": "Active"},
 	}
@@ -519,11 +520,11 @@ func TestWorker_BatchMerge_SameMetricMultipleEvents(t *testing.T) {
 
 	// 3 inserts of the same doctype.
 	for i := 0; i < 3; i++ {
-		w.process(ChangeEvent{
+		w.process(eventstream.ChangeEvent{
 			Site:      "test.local",
 			Doctype:   "Customer",
 			DocName:   "doc",
-			Operation: EventInsert,
+			Operation: eventstream.EventInsert,
 			Timestamp: time.Now(),
 			Data:      map[string]any{"name": "Acme"},
 		})
@@ -549,11 +550,11 @@ func TestWorker_StateDistribution_InsertAndUpdate(t *testing.T) {
 	today := time.Now().Format("2006-01-02")
 
 	// Insert with doc_status=0 (Draft).
-	w.process(ChangeEvent{
+	w.process(eventstream.ChangeEvent{
 		Site:      "test.local",
 		Doctype:   "Work Order",
 		DocName:   "WO-0001",
-		Operation: EventInsert,
+		Operation: eventstream.EventInsert,
 		Timestamp: time.Now(),
 		Data:      map[string]any{"doc_status": 0},
 	})
@@ -564,11 +565,11 @@ func TestWorker_StateDistribution_InsertAndUpdate(t *testing.T) {
 	}
 
 	// Update: Draft → Submitted (doc_status 0 → 1).
-	w.process(ChangeEvent{
+	w.process(eventstream.ChangeEvent{
 		Site:      "test.local",
 		Doctype:   "Work Order",
 		DocName:   "WO-0001",
-		Operation: EventUpdate,
+		Operation: eventstream.EventUpdate,
 		Timestamp: time.Now(),
 		Data:      map[string]any{"doc_status": 1},
 		OldData:   map[string]any{"doc_status": 0},
@@ -589,11 +590,11 @@ func TestWorker_UnknownDoctype_NoPanic(t *testing.T) {
 	w := testWorker(reg, "test.local")
 
 	// Should not panic on unknown doctype.
-	w.process(ChangeEvent{
+	w.process(eventstream.ChangeEvent{
 		Site:      "test.local",
 		Doctype:   "NonExistent",
 		DocName:   "doc",
-		Operation: EventInsert,
+		Operation: eventstream.EventInsert,
 		Timestamp: time.Now(),
 		Data:      map[string]any{},
 	})
@@ -633,11 +634,11 @@ func TestWorker_DeltaOnly_NoDBRequired(t *testing.T) {
 	w := testWorker(reg, "test.local")
 
 	// Should not panic with nil DB.
-	w.process(ChangeEvent{
+	w.process(eventstream.ChangeEvent{
 		Site:      "test.local",
 		Doctype:   "Customer",
 		DocName:   "CUST-0001",
-		Operation: EventInsert,
+		Operation: eventstream.EventInsert,
 		Timestamp: time.Now(),
 		Data:      map[string]any{"name": "Acme Corp"},
 	})

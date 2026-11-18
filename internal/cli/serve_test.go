@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"database/sql"
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/auth"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/engine"
@@ -144,12 +144,12 @@ func TestAnalyticsQueueBudgetEnvironmentValidation(t *testing.T) {
 			t.Fatalf("invalid subscriber queue byte cap %q accepted", raw)
 		}
 	}
-	t.Setenv("KORA_ANALYTICS_PROCESS_MAX_QUEUED_BYTES", strconv.FormatUint(analytics.MaxAnalyticsQueueAdmissionBytes+1, 10))
+	t.Setenv("KORA_ANALYTICS_PROCESS_MAX_QUEUED_BYTES", strconv.FormatUint(eventbus.MaxQueueAdmissionBytes+1, 10))
 	if _, err := analyticsQueueBudgetFromEnv(); err == nil {
 		t.Fatal("process subscriber queue byte cap above hard maximum accepted")
 	}
 	t.Setenv("KORA_ANALYTICS_PROCESS_MAX_QUEUED_BYTES", "")
-	t.Setenv("KORA_ANALYTICS_MAX_QUEUED_BYTES", strconv.FormatUint(analytics.MaxAnalyticsQueueAdmissionBytes+1, 10))
+	t.Setenv("KORA_ANALYTICS_MAX_QUEUED_BYTES", strconv.FormatUint(eventbus.MaxQueueAdmissionBytes+1, 10))
 	if _, err := analyticsQueueBudgetFromEnv(); err == nil {
 		t.Fatal("subscriber queue byte cap above hard maximum accepted")
 	}
@@ -166,7 +166,7 @@ func TestAnalyticsSubscriberLimitEnvironmentValidation(t *testing.T) {
 			t.Fatalf("invalid analytics process subscriber limit %q accepted", raw)
 		}
 	}
-	t.Setenv("KORA_ANALYTICS_MAX_SUBSCRIBERS", strconv.Itoa(analytics.MaxAnalyticsProcessListeners+1))
+	t.Setenv("KORA_ANALYTICS_MAX_SUBSCRIBERS", strconv.Itoa(eventbus.MaxProcessListeners+1))
 	if _, err := analyticsSubscriberLimitFromEnv(); err == nil {
 		t.Fatal("analytics process subscriber limit above hard maximum accepted")
 	}

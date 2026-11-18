@@ -1,24 +1,23 @@
 package outbox
 
 import (
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"testing"
 	"time"
-
-	"github.com/asenawritescode/kora/internal/analytics"
 )
 
 func TestEventTypeName(t *testing.T) {
 	tests := []struct {
 		doctype string
-		op      analytics.EventOp
+		op      eventstream.EventOp
 		want    string
 	}{
-		{"Sales Invoice", analytics.EventInsert, "kora.sales_invoice.after_insert"},
-		{"Sales Invoice", analytics.EventUpdate, "kora.sales_invoice.after_save"},
-		{"Sales Invoice", analytics.EventDelete, "kora.sales_invoice.after_delete"},
-		{"Sales Invoice", analytics.EventSubmit, "kora.sales_invoice.after_submit"},
-		{"Sales Invoice", analytics.EventCancel, "kora.sales_invoice.after_cancel"},
-		{"Work Order", analytics.EventInsert, "kora.work_order.after_insert"},
+		{"Sales Invoice", eventstream.EventInsert, "kora.sales_invoice.after_insert"},
+		{"Sales Invoice", eventstream.EventUpdate, "kora.sales_invoice.after_save"},
+		{"Sales Invoice", eventstream.EventDelete, "kora.sales_invoice.after_delete"},
+		{"Sales Invoice", eventstream.EventSubmit, "kora.sales_invoice.after_submit"},
+		{"Sales Invoice", eventstream.EventCancel, "kora.sales_invoice.after_cancel"},
+		{"Work Order", eventstream.EventInsert, "kora.work_order.after_insert"},
 	}
 	for _, tt := range tests {
 		if got := EventTypeName(tt.doctype, tt.op); got != tt.want {
@@ -65,9 +64,9 @@ func TestBackoff(t *testing.T) {
 
 func TestChangeEventToEnvelope(t *testing.T) {
 	now := time.Now().UTC()
-	e := ChangeEventToEnvelope(analytics.ChangeEvent{
+	e := ChangeEventToEnvelope(eventstream.ChangeEvent{
 		Site: "acme.example.com", Doctype: "Sales Invoice", DocName: "SINV-0001",
-		Operation: analytics.EventInsert, Timestamp: now,
+		Operation: eventstream.EventInsert, Timestamp: now,
 	})
 
 	if e.Type != "kora.sales_invoice.after_insert" {
@@ -88,9 +87,9 @@ func TestChangeEventToEnvelope(t *testing.T) {
 }
 
 func TestEventTypeNameAllOps(t *testing.T) {
-	all := []analytics.EventOp{
-		analytics.EventInsert, analytics.EventUpdate, analytics.EventDelete,
-		analytics.EventSubmit, analytics.EventCancel,
+	all := []eventstream.EventOp{
+		eventstream.EventInsert, eventstream.EventUpdate, eventstream.EventDelete,
+		eventstream.EventSubmit, eventstream.EventCancel,
 	}
 	for _, op := range all {
 		name := EventTypeName("Customer", op)

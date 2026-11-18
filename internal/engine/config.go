@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"net/http"
 	"runtime"
 	"time"
@@ -155,13 +156,13 @@ func newEngine(ctx context.Context, config Config, deps engineAssemblyDependenci
 	resources := &ProcessResources{CancelProcess: cancel}
 	analyticsQueueBudgetBytes := config.AnalyticsQueueBudgetBytes
 	if analyticsQueueBudgetBytes == 0 {
-		analyticsQueueBudgetBytes = analytics.DefaultAnalyticsQueueAdmissionBytes
+		analyticsQueueBudgetBytes = eventbus.DefaultQueueAdmissionBytes
 	}
 	analyticsMaxSubscribers := config.AnalyticsMaxSubscribers
 	if analyticsMaxSubscribers == 0 {
-		analyticsMaxSubscribers = analytics.DefaultAnalyticsProcessMaxListeners
+		analyticsMaxSubscribers = eventbus.DefaultProcessMaxListeners
 	}
-	analyticsQueueAdmission, err := analytics.NewAnalyticsQueueAdmissionWithLimits(analyticsQueueBudgetBytes, analyticsMaxSubscribers)
+	analyticsQueueAdmission, err := eventbus.NewQueueAdmissionWithLimits(analyticsQueueBudgetBytes, analyticsMaxSubscribers)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("configure process analytics subscriber queue budget: %w", err)
