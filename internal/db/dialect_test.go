@@ -632,28 +632,25 @@ func TestNameGenQuery(t *testing.T) {
 		name      string
 		dialect   Dialect
 		tableName string
-		prefix    string
 		want      string
 	}{
 		{
 			name:      "mysql",
 			dialect:   &MySQLDialect{},
 			tableName: "tabTask",
-			prefix:    "TASK",
-			want:      "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(name, '-', -1) AS UNSIGNED)), 0) FROM `tabTask` WHERE name LIKE 'TASK-%'",
+			want:      "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(name, '-', -1) AS UNSIGNED)), 0) FROM `tabTask` WHERE name LIKE ?",
 		},
 		{
 			name:      "libsql",
 			dialect:   &LibSQLDialect{},
 			tableName: "tabTask",
-			prefix:    "TASK",
-			want:      "SELECT COALESCE(MAX(CAST(SUBSTR(name, INSTR(name, '-')+1) AS INTEGER)), 0) FROM \"tabTask\" WHERE name LIKE 'TASK-%'",
+			want:      "SELECT COALESCE(MAX(CAST(SUBSTR(name, INSTR(name, '-')+1) AS INTEGER)), 0) FROM \"tabTask\" WHERE name LIKE ?",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.dialect.NameGenQuery(tt.tableName, tt.prefix)
+			got := tt.dialect.NameGenQuery(tt.tableName)
 			if got != tt.want {
 				t.Errorf("NameGenQuery = %q, want %q", got, tt.want)
 			}

@@ -126,9 +126,10 @@ jobs:
           KORA_SITE_SETTINGS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_TENANT_CLOCK_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_FACTS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+          KORA_DB_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
         run: >-
           go test -tags=integration -p 1
-          ./internal/dbaccess ./internal/api ./internal/tenanttime ./internal/analytics ./internal/outbox ./internal/site ./internal/requests/sqlstore ./internal/workflow/sqlstore
+          ./internal/db ./internal/dbaccess ./internal/api ./internal/tenanttime ./internal/analytics ./internal/outbox ./internal/site ./internal/requests/sqlstore ./internal/workflow/sqlstore
           ./internal/notifications/sqlstore ./internal/management/sqlstore ./internal/facts -count=1 -timeout=15m
 
       - name: Test programmatic module owner command fixture
@@ -156,6 +157,11 @@ jobs:
           KORA_RECON_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
           KORA_RECON_DISPOSABLE_LIBSQL_DSN: "http://127.0.0.1:8080"
         run: go test -tags=integration ./internal/recon -run TestBusinessRunPersistenceAcrossDisposableDialects -count=1 -timeout=5m
+
+      - name: Test naming allocation on disposable PostgreSQL
+        env:
+          KORA_DB_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
+        run: go test -tags=integration ./internal/db -run TestNameAllocationIssuesUniqueNamesUnderConcurrency -count=1 -timeout=5m
 
       - name: Check generated contracts
         run: go run ./contract/gen -check

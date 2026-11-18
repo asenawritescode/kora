@@ -430,12 +430,18 @@ func (d *LibSQLDialect) UpsertIncrementForTable(_ string, conflictCols []string,
 
 func (d *LibSQLDialect) InsertOrIgnorePrefix() string { return "INSERT OR IGNORE" }
 
-func (d *LibSQLDialect) AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed int64) (int64, error) {
+// AllocateSeriesNumber returns the next number for a series key. The counter row is
+// seeded from seed when it is missing; the table scan runs only in that case.
+func (d *LibSQLDialect) AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed func() (int64, error)) (int64, error) {
+	highest, err := seed()
+	if err != nil {
+		return 0, err
+	}
 	if _, err := tx.Exec(
 		`INSERT INTO "_kora_naming_series" ("doctype", "prefix", "current", "modified")
 VALUES (?, ?, ?, STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
 ON CONFLICT("doctype", "prefix") DO NOTHING`,
-		doctypeName, key, seed,
+		doctypeName, key, highest,
 	); err != nil {
 		return 0, fmt.Errorf("initializing series counter: %w", err)
 	}
@@ -455,7 +461,7 @@ RETURNING "current"`,
 
 func (d *LibSQLDialect) AllocateNameNumber(tx *sql.Tx, doctypeName, prefix, tableName string) (int64, error) {
 	var maxNum sql.NullInt64
-	if err := tx.QueryRow(d.NameGenQuery(tableName, prefix)).Scan(&maxNum); err != nil {
+	if err := tx.QueryRow(d.NameGenQuery(tableName), prefix+"-%").Scan(&maxNum); err != nil {
 		return 0, fmt.Errorf("reading max name number: %w", err)
 	}
 	if _, err := tx.Exec(
@@ -480,12 +486,13 @@ RETURNING "current"`,
 	return allocated, nil
 }
 
-func (d *LibSQLDialect) NameGenQuery(tableName, prefix string) string {
+// NameGenQuery returns the query for the highest existing number under a name prefix.
+func (d *LibSQLDialect) NameGenQuery(tableName string) string {
 	// SQLite: SUBSTR(name, INSTR(name, '-')+1) extracts text after the first dash.
 	// CAST AS INTEGER converts to number.
 	return fmt.Sprintf(
-		"SELECT COALESCE(MAX(CAST(SUBSTR(name, INSTR(name, '-')+1) AS INTEGER)), 0) FROM %s WHERE name LIKE '%s-%%'",
-		d.QuoteIdent(tableName), prefix,
+		"SELECT COALESCE(MAX(CAST(SUBSTR(name, INSTR(name, '-')+1) AS INTEGER)), 0) FROM %s WHERE name LIKE ?",
+		d.QuoteIdent(tableName),
 	)
 }
 
