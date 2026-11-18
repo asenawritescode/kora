@@ -13,7 +13,7 @@ import (
 )
 
 // CommandGuard is a precondition checked inside the command transaction before
-// any step writes. Exactly one of Lock, Exists, NotExists, Payment or Equal is set.
+// any step writes. Exactly one of Lock, Exists, NotExists, Payment, Equal or Count is set.
 //
 //   - lock serializes concurrent commands on one record (SELECT ... FOR UPDATE),
 //     so a following not_exists check and create cannot race.
@@ -23,6 +23,8 @@ import (
 //   - not_exists requires that no record matches.
 //   - equal requires two numeric operands (a $computed or $input reference, or a
 //     decimal literal) to be exactly equal, compared as big.Rat.
+//   - count refuses the command once Limit records already match Where. Put a
+//     lock on the parent record first, so two commands cannot both pass it.
 //
 // UnlessRole, valid on exists, not_exists and equal, skips the guard when the
 // verified actor holds any listed role (exact, case-sensitive match). It cannot
@@ -32,6 +34,7 @@ type CommandGuard struct {
 	Exists     *GuardMatch   `yaml:"exists,omitempty" json:"exists,omitempty"`
 	NotExists  *GuardMatch   `yaml:"not_exists,omitempty" json:"not_exists,omitempty"`
 	Payment    *GuardPayment `yaml:"payment,omitempty" json:"payment,omitempty"`
+	Count      *GuardCount   `yaml:"count,omitempty" json:"count,omitempty"`
 	Equal      []string      `yaml:"equal,omitempty" json:"equal,omitempty"`
 	Message    string        `yaml:"message,omitempty" json:"message,omitempty"`
 	As         string        `yaml:"as,omitempty" json:"as,omitempty"`
@@ -54,7 +57,7 @@ func (c *CommandResource) validateUnlessRole(index int, guard CommandGuard) erro
 	if guard.UnlessRole == nil {
 		return nil
 	}
-	if guard.Lock != nil || guard.Payment != nil {
+	if guard.Lock != nil || guard.Payment != nil || guard.Count != nil {
 		return fmt.Errorf("command %q: require %d unless_role is only valid on exists, not_exists and equal", c.FullName(), index)
 	}
 	if guard.As != "" {
@@ -77,6 +80,14 @@ type GuardLock struct {
 	Name   string `yaml:"name" json:"name"`
 }
 
+// GuardCount limits how many records match Where: the command is refused when
+// Limit of them already exist.
+type GuardCount struct {
+	Record string            `yaml:"record" json:"record"`
+	Where  map[string]string `yaml:"where" json:"where"`
+	Limit  int               `yaml:"limit" json:"limit"`
+}
+
 // GuardMatch is an equality match over declared fields. Values may be literals
 // or $input / $steps references.
 type GuardMatch struct {
@@ -90,14 +101,8 @@ func (c *CommandResource) validateGuards(aliases map[string]bool) error {
 		if err := c.validateGuardRefs(i, guard, aliases); err != nil {
 			return err
 		}
-		set := 0
-		for _, present := range []bool{guard.Lock != nil, guard.Exists != nil, guard.NotExists != nil, guard.Payment != nil, len(guard.Equal) > 0} {
-			if present {
-				set++
-			}
-		}
-		if set != 1 {
-			return fmt.Errorf("command %q: require %d must set exactly one of lock, exists, not_exists, payment or equal", c.FullName(), i)
+		if guardKindCount(guard) != 1 {
+			return fmt.Errorf("command %q: require %d must set exactly one of lock, exists, not_exists, payment, equal or count", c.FullName(), i)
 		}
 		if err := c.validateUnlessRole(i, guard); err != nil {
 			return err
@@ -118,6 +123,10 @@ func (c *CommandResource) validateGuards(aliases map[string]bool) error {
 			if err := c.validatePaymentGuard(i, guard.Payment); err != nil {
 				return err
 			}
+		case guard.Count != nil:
+			if err := c.validateGuardCount(i, guard.Count); err != nil {
+				return err
+			}
 		default:
 			match := guard.Exists
 			if match == nil {
@@ -127,39 +136,55 @@ func (c *CommandResource) validateGuards(aliases map[string]bool) error {
 				return fmt.Errorf("command %q: require %d needs record and where", c.FullName(), i)
 			}
 		}
-		if guard.As != "" {
-			if guard.Exists == nil {
-				return fmt.Errorf("command %q: require %d alias is only valid on exists", c.FullName(), i)
-			}
-			if !stepAliasPattern.MatchString(guard.As) || aliases[guard.As] {
-				return fmt.Errorf("command %q: require %d alias %q must be a unique lower-case identifier", c.FullName(), i, guard.As)
-			}
-			aliases[guard.As] = true
+		if err := c.validateGuardAlias(i, guard, aliases); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
+// guardKindCount returns how many guard kinds a require entry sets.
+func guardKindCount(guard CommandGuard) int {
+	set := 0
+	for _, present := range []bool{guard.Lock != nil, guard.Exists != nil, guard.NotExists != nil, guard.Payment != nil, len(guard.Equal) > 0, guard.Count != nil} {
+		if present {
+			set++
+		}
+	}
+	return set
+}
+
+// validateGuardCount checks a count guard's record, where and limit.
+func (c *CommandResource) validateGuardCount(index int, count *GuardCount) error {
+	if count.Record == "" || len(count.Where) == 0 || count.Limit < 1 {
+		return fmt.Errorf("command %q: require %d count needs record, where and a limit of at least 1", c.FullName(), index)
+	}
+	return nil
+}
+
+// validateGuardAlias checks a require entry's alias, which only exists guards may set.
+func (c *CommandResource) validateGuardAlias(index int, guard CommandGuard, aliases map[string]bool) error {
+	if guard.As == "" {
+		return nil
+	}
+	if guard.Exists == nil {
+		return fmt.Errorf("command %q: require %d alias is only valid on exists", c.FullName(), index)
+	}
+	if !stepAliasPattern.MatchString(guard.As) || aliases[guard.As] {
+		return fmt.Errorf("command %q: require %d alias %q must be a unique lower-case identifier", c.FullName(), index, guard.As)
+	}
+	aliases[guard.As] = true
+	return nil
+}
+
 func (k *Kernel) checkCommandGuards(run txRun, op Operation, cmd *CommandResource, env refEnv) *contract.Error {
-	dbTx, opID, txMgr, reg := run.Tx, run.OpID, run.Mgr, run.Reg
+	txMgr, reg := run.Mgr, run.Reg
 	for i, guard := range cmd.Require {
 		if guard.skippedFor(op.Context.Roles) {
 			continue
 		}
-		if guard.Lock != nil {
-			if cerr := k.lockGuardRecord(dbTx, reg, guard, env, i); cerr != nil {
-				return cerr
-			}
-			continue
-		}
-		if len(guard.Equal) > 0 {
-			if cerr := checkEqualGuard(guard, env, i); cerr != nil {
-				return cerr
-			}
-			continue
-		}
-		if guard.Payment != nil {
-			if cerr := k.consumePaymentGuard(dbTx, paymentClaim{Site: op.Context.Site, OpID: opID, Source: cmd.Input.Record}, guard.Payment, env, i); cerr != nil {
+		if guard.isValueGuard() {
+			if cerr := k.checkValueGuard(run, op, cmd, guard, stepEnv{env, i}); cerr != nil {
 				return cerr
 			}
 			continue
@@ -192,6 +217,26 @@ func (k *Kernel) checkCommandGuards(run txRun, op Operation, cmd *CommandResourc
 		}
 	}
 	return nil
+}
+
+// isValueGuard reports whether a guard checks a lock, a payment, a numeric
+// equality or a count instead of matching records with exists or not_exists.
+func (g CommandGuard) isValueGuard() bool {
+	return g.Lock != nil || len(g.Equal) > 0 || g.Payment != nil || g.Count != nil
+}
+
+// checkValueGuard runs one guard that isValueGuard reports.
+func (k *Kernel) checkValueGuard(run txRun, op Operation, cmd *CommandResource, guard CommandGuard, at stepEnv) *contract.Error {
+	switch {
+	case guard.Lock != nil:
+		return k.lockGuardRecord(run.Tx, run.Reg, guard, at.env, at.index)
+	case len(guard.Equal) > 0:
+		return checkEqualGuard(guard, at.env, at.index)
+	case guard.Payment != nil:
+		return k.consumePaymentGuard(run.Tx, paymentClaim{Site: op.Context.Site, OpID: run.OpID, Source: cmd.Input.Record}, guard.Payment, at.env, at.index)
+	default:
+		return checkCountGuard(run, op, guard.Count, at.env, at.index)
+	}
 }
 
 // guardFilters builds the ORM filter list. Field names are checked against the
@@ -247,7 +292,8 @@ func (k *Kernel) lockGuardRecord(dbTx *sql.Tx, reg *doctype.Registry, guard Comm
 	return nil
 }
 
-func (c *CommandResource) validateGuardRefs(index int, guard CommandGuard, aliases map[string]bool) error {
+// guardRefValues returns the reference strings a require entry reads.
+func guardRefValues(guard CommandGuard) []string {
 	var refs []string
 	if guard.Lock != nil {
 		refs = append(refs, guard.Lock.Name)
@@ -259,6 +305,16 @@ func (c *CommandResource) validateGuardRefs(index int, guard CommandGuard, alias
 			}
 		}
 	}
+	if guard.Count != nil {
+		for _, ref := range guard.Count.Where {
+			refs = append(refs, ref)
+		}
+	}
+	return refs
+}
+
+func (c *CommandResource) validateGuardRefs(index int, guard CommandGuard, aliases map[string]bool) error {
+	refs := guardRefValues(guard)
 	for _, ref := range refs {
 		if strings.HasPrefix(ref, "$item.") {
 			return fmt.Errorf("command %q: require %d cannot use %q", c.FullName(), index, ref)
@@ -271,4 +327,25 @@ func (c *CommandResource) validateGuardRefs(index int, guard CommandGuard, alias
 		}
 	}
 	return nil
+}
+
+// checkCountGuard refuses the command when Limit records already match Where.
+// Matching uses the same row scope as exists guards.
+func checkCountGuard(run txRun, op Operation, count *GuardCount, env refEnv, index int) *contract.Error {
+	dt := run.Reg.Get(count.Record)
+	if dt == nil {
+		return contract.NewError(contract.CodeNotFound, fmt.Sprintf("require %d: record %q not found", index, count.Record))
+	}
+	filters, cerr := guardFilters(dt, &GuardMatch{Record: count.Record, Where: count.Where}, env, index)
+	if cerr != nil {
+		return cerr
+	}
+	names, err := run.Mgr.MatchingNamesLocked(dt, filters, scopeForOperation(run.Reg, op, dt.Name, "read"), count.Limit)
+	if err != nil {
+		return contract.NewError(contract.CodeDependencyUnavailable, fmt.Sprintf("require %d: count failed", index))
+	}
+	if len(names) < count.Limit {
+		return nil
+	}
+	return contract.NewError(contract.CodeConflict, fmt.Sprintf("%s limit of %d reached", dt.Name, count.Limit))
 }

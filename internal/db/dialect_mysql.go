@@ -454,6 +454,14 @@ func (d *MySQLDialect) RecordNumberBlock(tx *sql.Tx, row NumberBlockRow) error {
 	return nil
 }
 
+// OpenNumberBlocks returns the open ranges of doctypeName reserved for owner.
+func (d *MySQLDialect) OpenNumberBlocks(tx *sql.Tx, doctypeName, owner string) ([]NumberBlockRow, error) {
+	return scanNumberBlocks(tx.Query(
+		`SELECT doctype, prefix, owner, state, first_number, last_number FROM _kora_number_block WHERE doctype = ? AND owner = ? AND state = 'open'`,
+		doctypeName, owner,
+	))
+}
+
 // NameGenQuery returns the query for the highest existing number under a name prefix.
 func (d *MySQLDialect) NameGenQuery(tableName string) string {
 	return fmt.Sprintf(

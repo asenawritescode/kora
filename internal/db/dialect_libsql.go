@@ -439,6 +439,11 @@ func (d *LibSQLDialect) ReserveSeriesRange(_ *sql.Tx, _, _ string, _ int64, _ fu
 	return 0, 0, errors.New("number blocks need MySQL or Postgres")
 }
 
+// OpenNumberBlocks is not supported on LibSQL, which is being removed.
+func (d *LibSQLDialect) OpenNumberBlocks(_ *sql.Tx, _, _ string) ([]NumberBlockRow, error) {
+	return nil, errors.New("number blocks need MySQL or Postgres")
+}
+
 // RecordNumberBlock is not supported on LibSQL, which is being removed.
 func (d *LibSQLDialect) RecordNumberBlock(_ *sql.Tx, _ NumberBlockRow) error {
 	return errors.New("number blocks need MySQL or Postgres")

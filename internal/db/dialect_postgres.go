@@ -505,6 +505,14 @@ RETURNING "current"`,
 	return last - size + 1, last, nil
 }
 
+// OpenNumberBlocks returns the open ranges of doctypeName reserved for owner.
+func (d *PostgresDialect) OpenNumberBlocks(tx *sql.Tx, doctypeName, owner string) ([]NumberBlockRow, error) {
+	return scanNumberBlocks(tx.Query(
+		`SELECT "doctype", "prefix", "owner", "state", "first_number", "last_number" FROM "_kora_number_block" WHERE "doctype" = $1 AND "owner" = $2 AND "state" = 'open'`,
+		doctypeName, owner,
+	))
+}
+
 // RecordNumberBlock inserts one reserved range into _kora_number_block.
 func (d *PostgresDialect) RecordNumberBlock(tx *sql.Tx, row NumberBlockRow) error {
 	if _, err := tx.Exec(
