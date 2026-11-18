@@ -23,6 +23,7 @@ import (
 	sqlDialect "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/kernel"
+	"github.com/asenawritescode/kora/internal/metrics"
 	"github.com/asenawritescode/kora/internal/policy"
 	"github.com/asenawritescode/kora/internal/print"
 	"github.com/asenawritescode/kora/internal/schema"
@@ -112,13 +113,9 @@ func parsePackSnapshot(configPath string) (*doctype.ConfigSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	reports := make([]json.RawMessage, 0, len(reportDefinitions))
-	for _, report := range reportDefinitions {
-		data, err := json.Marshal(report)
-		if err != nil {
-			return nil, fmt.Errorf("encoding report %s: %w", report.Name, err)
-		}
-		reports = append(reports, data)
+	reports, metricsRaw, err := encodeReportsAndMetrics(reportDefinitions, configPath, doctypes)
+	if err != nil {
+		return nil, err
 	}
 
 	snapshot := &doctype.ConfigSnapshot{
@@ -128,6 +125,7 @@ func parsePackSnapshot(configPath string) (*doctype.ConfigSnapshot, error) {
 		WorkflowDefinitions: workflowDefinitions,
 		Views:               views,
 		Reports:             reports,
+		Metrics:             metricsRaw,
 		Commands:            commands,
 		PrintFormats:        printFormats,
 		Queries:             queries,
@@ -597,7 +595,7 @@ func ParseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 	packNames := map[string]bool{}
 	for _, ns := range namespaces {
 		part := parts[ns]
-		snapshot, partScripts, err := parseConfigPack(packName, part)
+		snapshot, partScripts, err := parsePackPart(packName, part)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -669,12 +667,24 @@ func ImportConfigFromPack(db *sql.DB, registry *doctype.Registry, dbName, siteNa
 }
 
 func ImportConfigFromPackForTenant(db *sql.DB, registry *doctype.Registry, dbName, siteName, tenantID, packName string, files []PackFile, dialect sqlDialect.Dialect) error {
-	snapshot, scriptBodyByHash, err := parseConfigPack(packName, files)
+	snapshot, scriptBodyByHash, err := parsePackPart(packName, files)
 	if err != nil {
 		return err
 	}
 	return ImportConfigFromSnapshotForTenant(db, registry, dbName, siteName, tenantID,
 		fmt.Sprintf("Template pack %q import", packName), snapshot, dialect, scriptBodyByHash)
+}
+
+// parsePackPart parses one pack's files and adds its metric definitions to the snapshot.
+func parsePackPart(packName string, files []PackFile) (*doctype.ConfigSnapshot, map[string]string, error) {
+	snapshot, scripts, err := parseConfigPack(packName, files)
+	if err != nil {
+		return nil, nil, err
+	}
+	if snapshot.Metrics, err = parsePackMetrics(files, snapshot.DocTypes); err != nil {
+		return nil, nil, err
+	}
+	return snapshot, scripts, nil
 }
 
 func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot, map[string]string, error) {
@@ -756,8 +766,8 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 			if !strings.HasPrefix(f.Path, "reports/") {
 				return nil, nil, fmt.Errorf("pack file %q: content_type report requires path under reports/", f.Path)
 			}
-		case "query", "command", "print_format":
-			if dir := map[string]string{"query": "queries/", "command": "commands/", "print_format": "print_formats/"}[f.ContentType]; !strings.HasPrefix(f.Path, dir) {
+		case "query", "command", "print_format", "metric":
+			if dir := map[string]string{"query": "queries/", "command": "commands/", "print_format": "print_formats/", "metric": "metrics/"}[f.ContentType]; !strings.HasPrefix(f.Path, dir) {
 				return nil, nil, fmt.Errorf("pack file %q: content_type %s requires path under %s", f.Path, f.ContentType, dir)
 			}
 		case "script":
@@ -769,7 +779,7 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 				return nil, nil, fmt.Errorf("pack file %q: script files must be .js, got %q", f.Path, ext)
 			}
 		default:
-			return nil, nil, fmt.Errorf("pack file %q: unknown content_type %q (allowed: doctype, roles, permissions, workflow_definition, view, report, query, command, print_format, script)", f.Path, f.ContentType)
+			return nil, nil, fmt.Errorf("pack file %q: unknown content_type %q (allowed: doctype, roles, permissions, workflow_definition, view, report, metric, query, command, print_format, script)", f.Path, f.ContentType)
 		}
 
 		// ── Size limits ────────────────────────────────────────────
@@ -937,4 +947,20 @@ func parsePackTail(doctypes []*doctype.DocType, cmds []*kernel.CommandResource, 
 		return nil, nil, nil, err
 	}
 	return commands, queries, printFormats, nil
+}
+
+// parsePackMetrics decodes the metric files of a package and checks them against its record types.
+func parsePackMetrics(files []PackFile, doctypes []*doctype.DocType) ([]json.RawMessage, error) {
+	var defs []metrics.Metric
+	for _, f := range files {
+		if f.ContentType != "metric" {
+			continue
+		}
+		m, err := metrics.ParseYAML([]byte(f.Content), f.Path)
+		if err != nil {
+			return nil, err
+		}
+		defs = append(defs, m)
+	}
+	return metrics.EncodeValidated(defs, doctypes)
 }

@@ -57,32 +57,8 @@ func mergeManagementPackageSnapshot(current, incoming *doctype.ConfigSnapshot) (
 	for _, dt := range merged.DocTypes {
 		registry.Register(dt)
 	}
-	if merged.Commands, err = mergeRawSnapshotItems(current.Commands, incoming.Commands, func(raw json.RawMessage) (string, error) {
-		def, err := kernel.ParseCommandResourceJSON(raw)
-		if err != nil {
-			return "", err
-		}
-		return def.Namespace + "." + def.Name, nil
-	}); err != nil {
-		return nil, fmt.Errorf("merge package commands: %w", err)
-	}
-	if merged.Queries, err = mergeRawSnapshotItems(current.Queries, incoming.Queries, func(raw json.RawMessage) (string, error) {
-		def, err := query.Parse(raw, registry)
-		if err != nil {
-			return "", err
-		}
-		return def.ModuleOwnerID + "/" + def.Name, nil
-	}); err != nil {
-		return nil, fmt.Errorf("merge package queries: %w", err)
-	}
-	if merged.PrintFormats, err = mergeRawSnapshotItems(current.PrintFormats, incoming.PrintFormats, func(raw json.RawMessage) (string, error) {
-		def, err := print.Decode(raw)
-		if err != nil {
-			return "", err
-		}
-		return def.Name, nil
-	}); err != nil {
-		return nil, fmt.Errorf("merge package print formats: %w", err)
+	if err := mergeRawDefinitions(&merged, current, incoming, registry); err != nil {
+		return nil, err
 	}
 	merged.Reports = append([]json.RawMessage(nil), current.Reports...)
 	merged.ScheduledJobs = mergeScheduledJobs(current.ScheduledJobs, incoming.ScheduledJobs)
@@ -345,4 +321,50 @@ func mergeRawSnapshotItems(current, incoming []json.RawMessage, key func(json.Ra
 		}
 	}
 	return items, nil
+}
+
+// metricName is the key of a metric definition in a config snapshot.
+func metricName(raw json.RawMessage) (string, error) {
+	var m struct {
+		Name string `json:"name"`
+	}
+	err := json.Unmarshal(raw, &m)
+	return m.Name, err
+}
+
+// mergeRawDefinitions merges the definitions a snapshot stores as JSON: commands, queries,
+// print formats and metrics. Each side's items are keyed by their own identity.
+func mergeRawDefinitions(merged *doctype.ConfigSnapshot, current, incoming *doctype.ConfigSnapshot, registry *doctype.Registry) error {
+	var err error
+	if merged.Commands, err = mergeRawSnapshotItems(current.Commands, incoming.Commands, func(raw json.RawMessage) (string, error) {
+		def, parseErr := kernel.ParseCommandResourceJSON(raw)
+		if parseErr != nil {
+			return "", parseErr
+		}
+		return def.Namespace + "." + def.Name, nil
+	}); err != nil {
+		return fmt.Errorf("merge package commands: %w", err)
+	}
+	if merged.Queries, err = mergeRawSnapshotItems(current.Queries, incoming.Queries, func(raw json.RawMessage) (string, error) {
+		def, parseErr := query.Parse(raw, registry)
+		if parseErr != nil {
+			return "", parseErr
+		}
+		return def.ModuleOwnerID + "/" + def.Name, nil
+	}); err != nil {
+		return fmt.Errorf("merge package queries: %w", err)
+	}
+	if merged.PrintFormats, err = mergeRawSnapshotItems(current.PrintFormats, incoming.PrintFormats, func(raw json.RawMessage) (string, error) {
+		def, parseErr := print.Decode(raw)
+		if parseErr != nil {
+			return "", parseErr
+		}
+		return def.Name, nil
+	}); err != nil {
+		return fmt.Errorf("merge package print formats: %w", err)
+	}
+	if merged.Metrics, err = mergeRawSnapshotItems(current.Metrics, incoming.Metrics, metricName); err != nil {
+		return fmt.Errorf("merge package metrics: %w", err)
+	}
+	return nil
 }

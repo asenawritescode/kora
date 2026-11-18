@@ -10,12 +10,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/configstore"
 	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/internal/doctype"
-	"github.com/asenawritescode/kora/internal/metrics"
 	"github.com/asenawritescode/kora/internal/schema"
 	"github.com/asenawritescode/kora/internal/site"
 	"github.com/spf13/cobra"
@@ -184,24 +182,12 @@ func runConfigImport(ctx context.Context, siteName, path, dbName string) (return
 	return runConfigImportForSiteContext(ctx, siteName, path, siteCfg, tenantID)
 }
 
-// loadReportsAndMetrics reads a pack's reports and metric definitions as the JSON documents a config snapshot carries.
+// loadReportsAndMetrics reads a pack's reports and metric definitions, reporting how many reports it found.
 func loadReportsAndMetrics(path string, doctypes []*doctype.DocType) (reports, metricDefs []json.RawMessage, err error) {
-	reportDefinitions, err := analytics.ParseReportsDirectory(path + "/reports")
-	if err != nil {
-		return nil, nil, fmt.Errorf("parsing reports: %w", err)
-	}
-	reports = make([]json.RawMessage, 0, len(reportDefinitions))
-	for _, report := range reportDefinitions {
-		data, marshalErr := json.Marshal(report)
-		if marshalErr != nil {
-			return nil, nil, fmt.Errorf("encoding report %s: %w", report.Name, marshalErr)
-		}
-		reports = append(reports, data)
-	}
+	reports, metricDefs, err = site.LoadPackReportsAndMetrics(path, doctypes)
 	if len(reports) > 0 {
 		fmt.Printf("Found %d reports\n", len(reports))
 	}
-	metricDefs, err = metrics.Load(path+"/metrics", doctypes)
 	return reports, metricDefs, err
 }
 

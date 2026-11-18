@@ -141,8 +141,8 @@
    "cognitive": 17
   },
   "contract::validPackageFileType": {
-   "cognitive": 18,
-   "cyclomatic": 30
+   "cognitive": 16,
+   "cyclomatic": 26
   },
   "contract::validateLocalSchemaReferences": {
    "cognitive": 31
@@ -2629,9 +2629,9 @@
    "statements": 125
   },
   "internal/site::parsePackSnapshot": {
-   "cognitive": 20,
-   "cyclomatic": 19,
-   "statements": 51
+   "cognitive": 18,
+   "cyclomatic": 18,
+   "statements": 48
   },
   "internal/site::publishImportedWorkflows": {
    "cognitive": 20
@@ -2645,7 +2645,7 @@
   },
   "internal/site::validatePackFileSyntax": {
    "cyclomatic": 18,
-   "statements": 43
+   "statements": 42
   },
   "internal/storage::(*localBackend).Delete": {
    "cognitive": 25,

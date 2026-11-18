@@ -40,22 +40,23 @@ func ParseDirectory(dir string) ([]Metric, error) {
 		if err != nil {
 			return nil, err
 		}
-		m, err := parse(body)
+		m, err := ParseYAML(body, path)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+			return nil, err
 		}
 		defs = append(defs, m)
 	}
 	return defs, nil
 }
 
-func parse(body []byte) (Metric, error) {
+// ParseYAML decodes one metric document; source names it in errors.
+func ParseYAML(body []byte, source string) (Metric, error) {
 	var m Metric
 	if err := checkKeys(body); err != nil {
-		return m, err
+		return m, fmt.Errorf("%s: %w", source, err)
 	}
 	if err := goyaml.UnmarshalWithOptions(body, &m, goyaml.DisallowUnknownField()); err != nil {
-		return m, fmt.Errorf("yaml: %w", err)
+		return m, fmt.Errorf("%s: yaml: %w", source, err)
 	}
 	return m, nil
 }
@@ -128,6 +129,12 @@ func Load(dir string, doctypes []*doctype.DocType) ([]json.RawMessage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing metrics: %w", err)
 	}
+	return EncodeValidated(defs, doctypes)
+}
+
+// EncodeValidated checks definitions against the record types of a pack and returns them
+// as the JSON documents a config snapshot carries.
+func EncodeValidated(defs []Metric, doctypes []*doctype.DocType) ([]json.RawMessage, error) {
 	if err := Validate(defs, doctypes); err != nil {
 		return nil, fmt.Errorf("validating metrics: %w", err)
 	}

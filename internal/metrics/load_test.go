@@ -38,11 +38,11 @@ func TestMetricsSurviveSExprSnapshot(t *testing.T) {
 }
 
 func TestParseUnknownKeysWithLineAndSuggestion(t *testing.T) {
-	_, err := parse([]byte("name: sales\nlabel: Sales\ntype: simple\nmodel: Sale\nmesure:\n  agg: count\n"))
+	_, err := ParseYAML([]byte("name: sales\nlabel: Sales\ntype: simple\nmodel: Sale\nmesure:\n  agg: count\n"), "t.yaml")
 	if err == nil || !strings.Contains(err.Error(), "line 5") || !strings.Contains(err.Error(), `did you mean "measure"`) {
 		t.Fatalf("error = %v; want line 5 and a did-you-mean hint", err)
 	}
-	_, err = parse([]byte("name: sales\nlabel: Sales\ntype: simple\nmodel: Sale\nmeasure:\n  agg: count\n  feild: total\n"))
+	_, err = ParseYAML([]byte("name: sales\nlabel: Sales\ntype: simple\nmodel: Sale\nmeasure:\n  agg: count\n  feild: total\n"), "t.yaml")
 	if err == nil || !strings.Contains(err.Error(), `did you mean "field"`) {
 		t.Fatalf("nested error = %v; want did-you-mean for field", err)
 	}
