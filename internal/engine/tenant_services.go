@@ -534,10 +534,8 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	for table := range services.WorkflowApprovalPoliciesByTable {
 		sort.Strings(services.WorkflowApprovalPoliciesByTable[table])
 	}
-	if definitionService != nil && instanceService != nil {
-		if err := registerWorkflowTriggerConsumer(config, loaded, &services, instanceService, dialect); err != nil {
-			return fmt.Errorf("register record-triggered workflow consumer for tenant %s: %w", loaded.Name, err)
-		}
+	if recordErr := registerRecordConsumers(config, loaded, &services, recordTriggerInstances(definitionService, instanceService), dialect); recordErr != nil {
+		return recordErr
 	}
 	if err := registerRequestNotifications(config, loaded, &services, requestStore, dialect); err != nil {
 		return fmt.Errorf("configure request notifications for tenant %s: %w", loaded.Name, err)

@@ -1592,9 +1592,9 @@
    "cognitive": 16
   },
   "internal/engine::installTenantServices": {
-   "cognitive": 166,
-   "cyclomatic": 107,
-   "statements": 325
+   "cognitive": 163,
+   "cyclomatic": 105,
+   "statements": 324
   },
   "internal/engine::loadStartupTenants": {
    "cognitive": 31,

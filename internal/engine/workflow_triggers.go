@@ -15,6 +15,27 @@ import (
 	"github.com/asenawritescode/kora/internal/workflow"
 )
 
+// recordTriggerInstances is the instance service record triggers need, or nil when workflows are not composed.
+func recordTriggerInstances(definitions *workflow.Service, instances *workflow.InstanceService) *workflow.InstanceService {
+	if definitions == nil {
+		return nil
+	}
+	return instances
+}
+
+// registerRecordConsumers registers the tenant's transactional consumers of record events.
+func registerRecordConsumers(config TenantServiceConfig, loaded *knet.LoadedSite, services *tenantruntime.Services, instances *workflow.InstanceService, dialect kdb.Dialect) error {
+	if instances != nil {
+		if err := registerWorkflowTriggerConsumer(config, loaded, services, instances, dialect); err != nil {
+			return fmt.Errorf("register record-triggered workflow consumer for tenant %s: %w", loaded.Name, err)
+		}
+	}
+	if err := registerFactConsumer(config, loaded, services, dialect); err != nil {
+		return fmt.Errorf("register fact consumer for tenant %s: %w", loaded.Name, err)
+	}
+	return nil
+}
+
 func registerWorkflowTriggerConsumer(config TenantServiceConfig, loaded *knet.LoadedSite, services *tenantruntime.Services, instances *workflow.InstanceService, dialect kdb.Dialect) error {
 	if loaded == nil || loaded.DB == nil || services == nil || instances == nil || services.WorkAdmission == nil {
 		return errors.New("record-triggered workflows require a tenant database, instance service and work admission")
