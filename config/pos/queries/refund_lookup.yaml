@@ -1,0 +1,17 @@
+name: refund_lookup
+module_owner_id: pos.core
+capability: pos.sales
+operation: refund_lookup
+source: Sale
+permission: read
+scope: tenant
+input:
+  receipt: {type: string, max_length: 140}
+  location: {type: string, max_length: 140}
+filters:
+  - {field: name, op: eq, value: $input.receipt}
+  - {field: location, op: eq, value: $input.location}
+  - {field: status, op: eq, value: Paid}
+fields: [name, register, customer, total, status, creation, owner, till_session]
+sort: [{field: creation, dir: desc}]
+limit: 1

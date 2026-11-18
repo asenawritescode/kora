@@ -28,7 +28,7 @@ func TestPOSPackQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"my_session": "Till Session", "closed_session": "Till Session", "last_close": "Till Session", "my_closed_session": "Till Session", "my_registers": "Register", "recent_sales": "Sale", "sale_lines": "Sale Line Balance", "sale_items": "Sale Item", "sale_payments": "Sale Payment", "my_sales": "Sale", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment", "payments_by_account": "Sale Payment", "expected_cash": "Till Session", "held_sales": "Sale", "x_report": "Sale", "x_report_session": "Till Session"}
+	want := map[string]string{"my_session": "Till Session", "closed_session": "Till Session", "last_close": "Till Session", "my_closed_session": "Till Session", "my_registers": "Register", "recent_sales": "Sale", "sale_lines": "Sale Line Balance", "sale_items": "Sale Item", "sale_payments": "Sale Payment", "my_sales": "Sale", "today_totals": "Sale", "payments_by_method": "Sale Payment", "refunds_by_method": "Sale Payment", "payments_by_account": "Sale Payment", "expected_cash": "Till Session", "held_sales": "Sale", "x_report": "Sale", "x_report_session": "Till Session", "refund_lookup": "Sale"}
 	if len(defs) != len(want) {
 		t.Fatalf("got %d queries, want %d", len(defs), len(want))
 	}
@@ -154,6 +154,14 @@ func TestPOSPackQueriesAcceptEmptyInput(t *testing.T) {
 				var ie *InputError
 				if _, err := Run(context.Background(), conn, db.Resolve("libsql"), d, Request{FullRead: true, Now: now, Input: map[string]any{}}); !errors.As(err, &ie) || ie.Field != "till_session" {
 					t.Fatalf("%s without till_session = %v, want InputError on till_session", d.Name, err)
+				}
+				return
+			}
+			if d.Name == "refund_lookup" {
+				// A receipt is looked up within one location: without one it is refused, not guessed.
+				var ie *InputError
+				if _, err := Run(context.Background(), conn, db.Resolve("libsql"), d, Request{FullRead: true, Now: now, Input: map[string]any{}}); !errors.As(err, &ie) || ie.Field != "receipt" {
+					t.Fatalf("refund_lookup without receipt = %v, want InputError on receipt", err)
 				}
 				return
 			}
