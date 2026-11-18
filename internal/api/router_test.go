@@ -206,8 +206,8 @@ func TestTenantUserAndSettingsQueriesRebindForPostgres(t *testing.T) {
 		WithArgs("test.local", "currency", "USD").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	// The response re-reads currency, time zone and cutoff, all unset here.
-	for _, key := range []string{"currency", "time_zone", "business_day_cutoff"} {
+	// The response re-reads currency, time zone, cutoff and denominations, all unset here.
+	for _, key := range []string{"currency", "time_zone", "business_day_cutoff", "denominations.KES"} {
 		mock.ExpectQuery(`SELECT setting_value FROM _kora_site_setting WHERE site = \$1 AND setting_key = \$2`).
 			WithArgs("test.local", key).
 			WillReturnRows(sqlmock.NewRows([]string{"setting_value"}))
