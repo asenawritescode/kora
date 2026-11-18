@@ -36,6 +36,7 @@ type DocType struct {
 	DocConstraints        []DocConstraint            `yaml:"doc_constraints" json:"doc_constraints"`
 	PublicAccess          *PublicAccess              `yaml:"public_access" json:"public_access,omitempty"`
 	QuantityEffect        *QuantityEffect            `yaml:"quantity_effect" json:"quantity_effect,omitempty"`
+	Facts                 *FactModel                 `yaml:"facts" json:"facts,omitempty"`
 	// NamingSeries configures generated record names, e.g. "INV-.YYYY.-.#####".
 	NamingSeries string `yaml:"naming_series,omitempty" json:"naming_series,omitempty"`
 

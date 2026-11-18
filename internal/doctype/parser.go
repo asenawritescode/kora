@@ -42,7 +42,7 @@ func (e *YAMLSyntaxError) Error() string {
 // Returns a slice of YAMLSyntaxError if unknown keys are found.
 func strictUnmarshal(data []byte, v interface{}, context string) ([]YAMLSyntaxError, error) {
 	// First, check for unknown keys by parsing the YAML structure.
-	unknownKeys := findUnknownKeys(data, v)
+	unknownKeys := append(findUnknownKeys(data, v), findFactUnknownKeys(data)...)
 	if len(unknownKeys) > 0 {
 		errs := make([]YAMLSyntaxError, len(unknownKeys))
 		for i, uk := range unknownKeys {
@@ -52,6 +52,9 @@ func strictUnmarshal(data []byte, v interface{}, context string) ([]YAMLSyntaxEr
 				Message: fmt.Sprintf("unknown key %q in %s", uk.Key, context),
 				Key:     uk.Key,
 				Context: context,
+			}
+			if uk.Known != nil {
+				errs[i].Detail = suggestionFor(uk.Key, uk.Known)
 			}
 		}
 		return errs, nil
@@ -69,6 +72,7 @@ type unknownKey struct {
 	Key    string
 	Line   int
 	Column int
+	Known  map[string]bool // the keys this node may hold; set for facts, so a typo gets a suggestion
 }
 
 // findUnknownKeys parses the YAML and returns keys that don't match the target struct.
@@ -272,10 +276,12 @@ func ParseYAML(data []byte, source string) (*DocType, error) {
 		return nil, fmt.Errorf("parsing %s: %w", source, err)
 	}
 	if len(unknowns) > 0 {
-		for _, u := range unknowns {
-			// Enhance with "did you mean?" suggestions.
-			if suggestion := suggestField(u.Key, knownDocTypeFields); suggestion != "" {
-				u.Detail = fmt.Sprintf("did you mean %q?", suggestion)
+		for i := range unknowns {
+			// Enhance with "did you mean?" suggestions (facts keys already have theirs).
+			if u := &unknowns[i]; u.Detail == "" {
+				if suggestion := suggestField(u.Key, knownDocTypeFields); suggestion != "" {
+					u.Detail = fmt.Sprintf("did you mean %q?", suggestion)
+				}
 			}
 		}
 		return nil, formatSyntaxErrors(source, unknowns)
@@ -870,6 +876,7 @@ func ValidateAll(doctypes []*DocType) []CrossFileError {
 	}
 
 	errs = append(errs, validateQuantityEffects(doctypes, dtMap)...)
+	errs = append(errs, validateFacts(doctypes, dtMap)...)
 
 	for _, dt := range doctypes {
 		for _, f := range dt.Fields {
@@ -954,6 +961,23 @@ func suggestField(unknown string, knownFields map[string]bool) string {
 		}
 	}
 	return best
+}
+
+// validateFacts checks every record type's fact model against the record types it names.
+func validateFacts(doctypes []*DocType, dtMap map[string]*DocType) []CrossFileError {
+	var errs []CrossFileError
+	for _, dt := range doctypes {
+		errs = append(errs, dt.Facts.Validate(dt, dtMap)...)
+	}
+	return errs
+}
+
+// suggestionFor is the "did you mean" detail for an unknown key, or "" when nothing is close.
+func suggestionFor(unknown string, known map[string]bool) string {
+	if suggestion := suggestField(unknown, known); suggestion != "" {
+		return fmt.Sprintf("did you mean %q?", suggestion)
+	}
+	return ""
 }
 
 func levenshtein(a, b string) int {

@@ -62,3 +62,15 @@ fields:
       Return
     default: Draft
     in_list_view: true
+facts:
+  time: creation
+  lines: items
+  measures:
+    - field: total
+    - field: items.amount
+    - field: items.quantity
+  dimensions:
+    - field: register
+    - field: till_session
+    - field: items.item
+  status_field: status
