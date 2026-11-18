@@ -205,13 +205,13 @@ func (c *CommandResource) validateStepReferences() error {
 		if create := step.createSpec(); create != nil {
 			values = create.Values
 		}
-		if step.Update != nil {
-			values = step.Update.Values
-			refs = append(refs, step.Update.Name)
-			for _, ref := range step.Update.Where {
+		if step.updateSpec() != nil {
+			values = step.updateSpec().Values
+			refs = append(refs, step.updateSpec().Name)
+			for _, ref := range step.updateSpec().Where {
 				refs = append(refs, ref)
 			}
-			for _, change := range step.Update.Adjust {
+			for _, change := range step.updateSpec().Adjust {
 				refs = append(refs, change.Increase, change.Decrease, change.By, change.SignFrom)
 			}
 		}
