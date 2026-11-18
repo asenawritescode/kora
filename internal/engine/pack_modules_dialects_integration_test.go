@@ -178,11 +178,11 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 					t.Errorf("owner catalog lacks operation %s", name)
 				}
 			}
-			// 19 published queries (favourite_items #570 and expected_cash add two the Owner reads); the Owner reads all but my_closed_session and
+			// 20 published queries (favourite_items #570 and expected_cash add two the Owner reads; x_report and x_report_session add two more); the Owner reads all but my_closed_session and
 			// my_sales, the Cashier's own-till and own-sales variants of
 			// closed_session (#384) and recent_sales (#91).
-			if len(ownerQueries) != 18 {
-				t.Errorf("owner queries = %d, want 18: %v", len(ownerQueries), ownerQueries)
+			if len(ownerQueries) != 20 {
+				t.Errorf("owner queries = %d, want 20: %v", len(ownerQueries), ownerQueries)
 			}
 			for _, name := range []string{"sale_items", "sale_payments", "recent_sales"} {
 				if !slices.Contains(ownerQueries, "pos.core/"+name) {
