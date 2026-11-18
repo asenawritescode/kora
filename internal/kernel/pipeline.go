@@ -39,7 +39,7 @@ func (k *Kernel) executeInTx(ctx context.Context, run txRun, op Operation, def C
 	}
 	defer rollback()
 	dbTx, txMgr, reg := run.Tx, run.Mgr, run.Reg
-	if admissionErr := enforceModuleLifecycleAdmissionTx(ctx, dbTx, op, admissionScope{Dialect: k.dialect(), Registry: reg}); admissionErr != nil {
+	if admissionErr := enforceModuleLifecycleAdmissionTx(ctx, dbTx, op, admissionScope{Dialect: k.dialect(), Registry: reg, Snapshots: &k.moduleSnapshots}); admissionErr != nil {
 		return nil, admissionErr
 	}
 	priorMutationExecutor := txMgr.ScriptMutationExecutor

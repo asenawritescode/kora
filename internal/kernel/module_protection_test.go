@@ -31,7 +31,7 @@ func TestModuleLifecycleAdmissionFencesOwnerCommands(t *testing.T) {
 			payload, _ := json.Marshal(RecordCreatePayload{Doctype: "Invoice", Data: json.RawMessage(`{}`)})
 			snapshot, _ := json.Marshal(contract.ModuleSnapshot{TenantID: "tenant-a", Installations: []contract.ModuleInstallation{{TenantID: "tenant-a", ModuleID: "finance.ar", State: state}}})
 			mock.ExpectExec("UPDATE _kora_module_snapshot SET revision = revision WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnResult(sqlmock.NewResult(0, 1))
-			mock.ExpectQuery("SELECT snapshot_json FROM _kora_module_snapshot WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnRows(sqlmock.NewRows([]string{"snapshot_json"}).AddRow(string(snapshot)))
+			mock.ExpectQuery("SELECT revision, snapshot_json FROM _kora_module_snapshot WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnRows(sqlmock.NewRows([]string{"revision", "snapshot_json"}).AddRow(1, string(snapshot)))
 			op := Operation{Command: CommandRecordCreate, Payload: payload, Context: OperationContext{TenantID: "tenant-a", ModuleExecution: &contract.ModuleExecution{}}}
 			got := enforceModuleLifecycleAdmissionTx(context.Background(), tx, op, admissionScope{Dialect: kdb.Resolve("libsql"), Registry: registry})
 			if state == "active" && got != nil {
@@ -69,7 +69,7 @@ func TestModuleLifecycleAdmissionFencesGenericWritesWithoutModuleIdentity(t *tes
 			payload, _ := json.Marshal(RecordCreatePayload{Doctype: "Invoice", Data: json.RawMessage(`{}`)})
 			snapshot, _ := json.Marshal(contract.ModuleSnapshot{TenantID: "tenant-a", Installations: []contract.ModuleInstallation{{TenantID: "tenant-a", ModuleID: "finance.ar", State: test.state}}})
 			mock.ExpectExec("UPDATE _kora_module_snapshot SET revision = revision WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnResult(sqlmock.NewResult(0, 1))
-			mock.ExpectQuery("SELECT snapshot_json FROM _kora_module_snapshot WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnRows(sqlmock.NewRows([]string{"snapshot_json"}).AddRow(string(snapshot)))
+			mock.ExpectQuery("SELECT revision, snapshot_json FROM _kora_module_snapshot WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnRows(sqlmock.NewRows([]string{"revision", "snapshot_json"}).AddRow(1, string(snapshot)))
 			op := Operation{Command: CommandRecordCreate, Payload: payload, Context: OperationContext{TenantID: "tenant-a"}}
 			got := enforceModuleLifecycleAdmissionTx(context.Background(), tx, op, admissionScope{Dialect: kdb.Resolve("libsql"), Registry: registry})
 			if test.denied && (got == nil || got.Type != contract.CodePermissionDenied) {
@@ -100,7 +100,7 @@ func TestDrainingModuleAllowsOnlyPreDrainPinnedWorkflowCommand(t *testing.T) {
 	changedAt := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
 	snapshot, _ := json.Marshal(contract.ModuleSnapshot{TenantID: "tenant-a", Installations: []contract.ModuleInstallation{{TenantID: "tenant-a", ModuleID: "finance.ar", State: string(contract.ModuleDraining), StateChangedAt: changedAt}}})
 	mock.ExpectExec("UPDATE _kora_module_snapshot SET revision = revision WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery("SELECT snapshot_json FROM _kora_module_snapshot WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnRows(sqlmock.NewRows([]string{"snapshot_json"}).AddRow(string(snapshot)))
+	mock.ExpectQuery("SELECT revision, snapshot_json FROM _kora_module_snapshot WHERE tenant_id = \\?").WithArgs("tenant-a").WillReturnRows(sqlmock.NewRows([]string{"revision", "snapshot_json"}).AddRow(1, string(snapshot)))
 	mock.ExpectQuery("SELECT MIN\\(started_at\\) FROM _kora_workflow_attempt").WithArgs("tenant-a", "instance-1", "issue", "workflow-key-1").WillReturnRows(sqlmock.NewRows([]string{"started_at"}).AddRow(changedAt.Add(-time.Minute).Format(time.RFC3339Nano)))
 	registry := doctype.NewRegistry()
 	registry.Register(&doctype.DocType{Name: "Invoice", ModuleOwnerID: "finance.ar"})

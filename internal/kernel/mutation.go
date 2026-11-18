@@ -118,13 +118,14 @@ func (m *mutation) load(name string, scope policy.RowScope) (*doctype.Document, 
 }
 
 // checkVersion rejects the command when the version the caller expects no
-// longer matches the stored row.
-func (m *mutation) checkVersion(name string) *contract.Error {
+// longer matches the stored row. oldDoc was loaded by this transaction (see
+// load), which holds the row, so its modified value is the stored version.
+func (m *mutation) checkVersion(oldDoc *doctype.Document) *contract.Error {
 	expected := expectedVersionFrom(m.op)
 	if expected == "" {
 		return nil
 	}
-	prior, err := readRowVersion(m.run.Tx, m.k.dialect(), m.dt.RawTableName(), name)
+	prior, err := canonicalRowVersion(oldDoc.Get("modified"))
 	if err != nil {
 		return contract.NewError(contract.CodeDependencyUnavailable, "read document version failed")
 	}

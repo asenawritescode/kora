@@ -449,6 +449,9 @@ func (d *PostgresDialect) InsertOrIgnorePrefix() string {
 	return "INSERT"
 }
 
+// SharedRowLock is PostgreSQL's locking read: FOR SHARE.
+func (d *PostgresDialect) SharedRowLock() string { return " FOR SHARE" }
+
 // AllocateNameNumber issues the next PREFIX-NNNN number. The prefix is its own
 // counter key, so it shares the series path.
 func (d *PostgresDialect) AllocateNameNumber(tx *sql.Tx, doctypeName, prefix, tableName string) (int64, error) {

@@ -37,7 +37,7 @@ func (m *mutation) transition(ctx context.Context) *contract.Error {
 		m.auditFailure(ErrStaleVersion.Type)
 		return ErrStaleVersion
 	}
-	if versionErr := m.checkVersion(p.Name); versionErr != nil {
+	if versionErr := m.checkVersion(oldDoc); versionErr != nil {
 		return versionErr
 	}
 	doc, cerr := m.applyAction(statusPolicy, oldDoc, p.Action) //nolint:contextcheck // the context travels in txMgr.Context
