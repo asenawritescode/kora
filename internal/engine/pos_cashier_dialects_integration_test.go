@@ -325,7 +325,7 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Maize") || strings.Contains(rec.Body.String(), "ITM-1") {
 				t.Fatalf("receipt print status=%d body=%s", rec.Code, rec.Body.String())
 			}
-			runAs("Manager", "return_sale", "k-ret", fmt.Sprintf(`{"register":"REG-1","location":"LOC-1","till_session":%q,"return_against":%q,"items":[{"item":"ITM-1","quantity":1,"unit_price":180,"amount":180}],"payments":[{"method":"Cash","amount":180,"currency":"KES","reference":"refund"}]}`, till, sale1))
+			runAs("Manager", "return_sale", "k-ret", fmt.Sprintf(`{"register":"REG-1","location":"LOC-1","till_session":%q,"return_against":%q,"reason":"Damaged","items":[{"item":"ITM-1","quantity":1,"unit_price":180,"amount":180}],"payments":[{"method":"Cash","amount":180,"currency":"KES","reference":"refund"}]}`, till, sale1))
 			if got := qty(); !strings.HasPrefix(got, "19") {
 				t.Fatalf("stock after return = %s, want 19", got)
 			}
