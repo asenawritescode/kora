@@ -1,0 +1,15 @@
+name: receipts
+label: Receipts
+type: simple
+model: Sale
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: Paid
+time: business_date
+good: up
+format: number
+description: Number of paid sales.
+verified: true

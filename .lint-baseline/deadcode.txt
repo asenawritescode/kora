@@ -157,7 +157,6 @@ internal/doctype/diff_sexpr.go::subEntities
 internal/doctype/expr.go::ExprEngine.Evaluate
 internal/doctype/page_runtime_contracts.go::PageActionContracts
 internal/doctype/page_runtime_contracts.go::PageComponentContracts
-internal/doctype/parser.go::KeySuggestion
 internal/doctype/parser.go::ValidateAll
 internal/doctype/parser.go::selectHasOption
 internal/doctype/parser.go::validateFacts
@@ -189,15 +188,6 @@ internal/eventbus/queue_admission.go::NewAnalyticsQueueAdmission
 internal/expression/expression.go::ExprError.Error
 internal/facts/rebuild_job.go::JobStore.Renew
 internal/management/operation.go::Digest
-internal/metrics/metric.go::Filter.validate
-internal/metrics/metric.go::Measure.validate
-internal/metrics/metric.go::Metric.refs
-internal/metrics/metric.go::Metric.validate
-internal/metrics/metric.go::Metric.validateFact
-internal/metrics/metric.go::Metric.validateRefs
-internal/metrics/metric.go::Validate
-internal/metrics/metric.go::catalog.checkCycles
-internal/metrics/metric.go::isDimension
 internal/natsprovider/consumer.go::Consumer.Drain
 internal/natsprovider/consumer.go::drainSubscription
 internal/natsprovider/retry.go::RetryAfter

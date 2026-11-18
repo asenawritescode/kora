@@ -883,32 +883,9 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 	if err != nil {
 		return nil, fmt.Errorf("loading views for snapshot: %w", err)
 	}
-	// Reports and MinKoraVersion currently exist only in versioned snapshot
-	// history. Carry those fields forward from the active head so an additive
-	// package activation cannot silently erase them while collecting live rows.
-	var activeConfig string
-	err = s.DB.QueryRow(db.Rebind(s.Dialect, "SELECT config FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1"), site).Scan(&activeConfig)
-	var reports, queries, printFormats, commands []json.RawMessage
-	var minKoraVersion string
-	var scheduledJobs []contract.ScheduledJobDefinition
-	var modules []contract.ModuleDescriptor
-	var publishedBindings []contract.ConfigurationSurfaceBinding
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("loading active config snapshot metadata: %w", err)
-	}
-	if err == nil {
-		activeSnapshot, parseErr := doctype.ParseConfig(activeConfig)
-		if parseErr != nil {
-			return nil, fmt.Errorf("parsing active config snapshot metadata: %w", parseErr)
-		}
-		reports = append([]json.RawMessage(nil), activeSnapshot.Reports...)
-		queries = append([]json.RawMessage(nil), activeSnapshot.Queries...)
-		commands = append([]json.RawMessage(nil), activeSnapshot.Commands...)
-		printFormats = append([]json.RawMessage(nil), activeSnapshot.PrintFormats...)
-		minKoraVersion = activeSnapshot.MinKoraVersion
-		scheduledJobs = append([]contract.ScheduledJobDefinition(nil), activeSnapshot.ScheduledJobs...)
-		modules = append([]contract.ModuleDescriptor(nil), activeSnapshot.Modules...)
-		publishedBindings = append([]contract.ConfigurationSurfaceBinding(nil), activeSnapshot.PublishedBindings...)
+	head, err := s.activeHead(site)
+	if err != nil {
+		return nil, err
 	}
 	return &doctype.ConfigSnapshot{
 		DocTypes:          doctypes,
@@ -917,15 +894,36 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 		Views:             views,
 		AnalyticsMetrics:  analyticsMetrics,
 		Scripts:           scripts,
-		Reports:           reports,
-		Queries:           queries,
-		Commands:          commands,
-		PrintFormats:      printFormats,
-		MinKoraVersion:    minKoraVersion,
-		ScheduledJobs:     scheduledJobs,
-		Modules:           modules,
-		PublishedBindings: publishedBindings,
+		Reports:           head.Reports,
+		Metrics:           head.Metrics,
+		Queries:           head.Queries,
+		Commands:          head.Commands,
+		PrintFormats:      head.PrintFormats,
+		MinKoraVersion:    head.MinKoraVersion,
+		ScheduledJobs:     head.ScheduledJobs,
+		Modules:           head.Modules,
+		PublishedBindings: head.PublishedBindings,
 	}, nil
+}
+
+// activeHead returns the active snapshot of a site, or an empty one when it has none.
+// Reports, metrics, queries and the other fields that exist only in versioned snapshot
+// history are carried forward from it, so an additive package activation cannot silently
+// erase them while collecting live rows.
+func (s *Store) activeHead(site string) (*doctype.ConfigSnapshot, error) {
+	var activeConfig string
+	err := s.DB.QueryRow(db.Rebind(s.Dialect, "SELECT config FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1"), site).Scan(&activeConfig)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &doctype.ConfigSnapshot{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("loading active config snapshot metadata: %w", err)
+	}
+	head, err := doctype.ParseConfig(activeConfig)
+	if err != nil {
+		return nil, fmt.Errorf("parsing active config snapshot metadata: %w", err)
+	}
+	return head, nil
 }
 
 // LoadAnalyticsMetrics loads all custom analytics metric definitions.
