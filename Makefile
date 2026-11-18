@@ -66,6 +66,10 @@ check-selfhost-backup:                  ## Test self-host backup and restore hel
 check-selfhost-restore-live:            ## Run the opt-in disposable MySQL backup/restore drill
 	python3 scripts/selfhost-restore-drill.py --run
 
+bench-api:                          ## API request benchmarks (list/get/create/update, stmts/op) on disposable MySQL and Postgres
+	@test -n "$$KORA_TEST_DSN" && test -n "$$KORA_API_LIVE_POSTGRES_DSN" || { echo 'set KORA_TEST_DSN and KORA_API_LIVE_POSTGRES_DSN'; exit 1; }
+	go test -tags integration -run '^$$' -bench . -benchtime 200x -timeout 180m ./internal/api/
+
 test:                              ## Run Go and SDK tests
 	go test ./... -v -count=1
 	cd sdk && go test ./... -count=1
