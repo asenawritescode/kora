@@ -32,6 +32,21 @@ type FactDimension struct {
 	Field string `yaml:"field" json:"field"`
 }
 
+// FactColumnType is the logical type of a fact column; the builder maps it to SQL.
+type FactColumnType string
+
+// Logical column types of a fact table.
+const (
+	FactColumnText    FactColumnType = "text"
+	FactColumnDecimal FactColumnType = "decimal"
+)
+
+// FactColumn is one column of a fact table, in the order the builder creates them.
+type FactColumn struct {
+	Name string         `json:"name"`
+	Type FactColumnType `json:"type"`
+}
+
 var (
 	knownFactModelFields     = buildFieldSet(FactModel{})
 	knownFactMeasureFields   = buildFieldSet(FactMeasure{})
@@ -46,16 +61,42 @@ func (p factPath) leaf() string {
 	return string(p)[strings.LastIndex(string(p), ".")+1:]
 }
 
-// columnName is the measure's output column: Name, or the leaf of Field.
-func (m FactMeasure) columnName() string {
+// ColumnName is the measure's output column: Name, or the leaf of Field.
+func (m FactMeasure) ColumnName() string {
 	if m.Name != "" {
 		return m.Name
 	}
 	return factPath(m.Field).leaf()
 }
 
-// columnName is the dimension's output column: the leaf of Field.
-func (d FactDimension) columnName() string { return factPath(d.Field).leaf() }
+// ColumnName is the dimension's output column: the leaf of Field.
+func (d FactDimension) ColumnName() string { return factPath(d.Field).leaf() }
+
+// TableName is the fact table of a record type.
+func (f *FactModel) TableName(dt *DocType) string {
+	return "_kora_fact_" + strings.ToLower(strings.ReplaceAll(dt.Name, " ", "_"))
+}
+
+// LineTableName is the line-level fact table of a record type with Lines set.
+func (f *FactModel) LineTableName(dt *DocType) string {
+	return f.TableName(dt) + "_line"
+}
+
+// Columns lists the per-dimension (text) and per-measure (decimal) columns in order.
+// The fixed columns (record, line, business date, status, sequence) belong to the facts package.
+func (f *FactModel) Columns() []FactColumn {
+	if f == nil {
+		return nil
+	}
+	var cols []FactColumn
+	for _, d := range f.Dimensions {
+		cols = append(cols, FactColumn{Name: d.ColumnName(), Type: FactColumnText})
+	}
+	for _, m := range f.Measures {
+		cols = append(cols, FactColumn{Name: m.ColumnName(), Type: FactColumnDecimal})
+	}
+	return cols
+}
 
 // factChecks collects the problems found in one record type's fact model.
 type factChecks struct {
@@ -69,9 +110,18 @@ func (c *factChecks) bad(field, message string) {
 	c.errs = append(c.errs, CrossFileError{Code: "InvalidFacts", DocType: c.dt.Name, Field: field, Message: message})
 }
 
-// claim records an output column name and reports a second claim on it.
+// reservedFactColumns are the fixed columns of every fact table.
+var reservedFactColumns = map[string]bool{
+	"record_id": true, "line_id": true, "legal_entity": true, "owner": true, "business_date": true,
+	"occurred_at": true, "status": true, "source_sequence": true, "deleted": true,
+}
+
+// claim records a measure or dimension column name. A reserved name or a second claim is a problem.
 func (c *factChecks) claim(field, name string) {
-	if c.names[name] {
+	switch {
+	case reservedFactColumns[name]:
+		c.bad(field, fmt.Sprintf("facts column %q is reserved for the fact table", name))
+	case c.names[name]:
 		c.bad(field, fmt.Sprintf("facts column %q is declared more than once", name))
 	}
 	c.names[name] = true
@@ -98,7 +148,6 @@ func (f *FactModel) checkTime(c *factChecks) {
 			c.bad("facts.time", fmt.Sprintf("facts time %q must be a Date or Datetime field on %s, or creation", f.Time, c.dt.Name))
 		}
 	}
-	c.claim("facts.time", f.Time)
 }
 
 func (f *FactModel) checkLines(c *factChecks, reg map[string]*DocType) {
@@ -128,7 +177,7 @@ func (f *FactModel) checkMeasures(c *factChecks) {
 		if fld == nil || !(fld.Fieldtype == "Int" || fld.Fieldtype == "Float" || fld.Fieldtype == "Currency" || fld.Fieldtype == "Percent") {
 			c.bad("facts.measures", fmt.Sprintf("facts measure %q must be an Int, Float, Currency or Percent field", m.Field))
 		}
-		c.claim("facts.measures", m.columnName())
+		c.claim("facts.measures", m.ColumnName())
 	}
 }
 
@@ -142,7 +191,7 @@ func (f *FactModel) checkDimensions(c *factChecks) {
 		if fld == nil || !(fld.Fieldtype == "Link" || fld.Fieldtype == "Select" || fld.Fieldtype == "Data" || fld.Fieldtype == "Check") {
 			c.bad("facts.dimensions", fmt.Sprintf("facts dimension %q must be a Link, Select, Data or Check field", d.Field))
 		}
-		c.claim("facts.dimensions", d.columnName())
+		c.claim("facts.dimensions", d.ColumnName())
 	}
 }
 
@@ -153,7 +202,6 @@ func (f *FactModel) checkStatus(c *factChecks) {
 	if sf := c.dt.GetField(f.StatusField); sf == nil || sf.Fieldtype != "Select" {
 		c.bad("facts.status_field", fmt.Sprintf("facts status_field %q must be a Select field on %s", f.StatusField, c.dt.Name))
 	}
-	c.claim("facts.status_field", f.StatusField)
 }
 
 // column resolves a record path or a "lines.name" path. It returns a non-empty reason
