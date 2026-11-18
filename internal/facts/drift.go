@@ -9,6 +9,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
 	"go.opentelemetry.io/otel"
@@ -48,7 +49,9 @@ type DriftChecker struct {
 	Admission interface {
 		AcquireMaintenance(context.Context) (func(), error)
 	}
-	Drifted driftCounter // optional
+	Drifted driftCounter     // optional
+	Site    string           // tenant whose clock picks the sampled days
+	Now     func() time.Time // optional; the clock the sample is taken from (default time.Now)
 }
 
 // RunDue checks every model once and reports how many sampled days drifted. A full maintenance lane defers the check.
@@ -61,9 +64,13 @@ func (c *DriftChecker) RunDue(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("facts: admit drift check: %w", err)
 	}
 	defer release()
+	days, err := c.sampleDays(ctx)
+	if err != nil {
+		return 0, err
+	}
 	drifted := 0
 	for _, dt := range c.models() {
-		n, err := c.checkModel(ctx, dt)
+		n, err := c.checkModel(ctx, dt, days)
 		drifted += n
 		if err != nil {
 			return drifted, err
@@ -85,11 +92,7 @@ func (c *DriftChecker) models() []*doctype.DocType {
 }
 
 // checkModel compares the sampled days of one model and marks each drifting day dirty.
-func (c *DriftChecker) checkModel(ctx context.Context, dt *doctype.DocType) (int, error) {
-	days, err := c.recentDays(ctx, dt)
-	if err != nil {
-		return 0, err
-	}
+func (c *DriftChecker) checkModel(ctx context.Context, dt *doctype.DocType, days []tenanttime.Date) (int, error) {
 	drifted := 0
 	for _, day := range days {
 		off, err := c.summaryDrift(ctx, dt, day)
@@ -111,25 +114,30 @@ func (c *DriftChecker) checkModel(ctx context.Context, dt *doctype.DocType) (int
 	return drifted, nil
 }
 
-// recentDays returns the newest business days with fact headers, up to driftDays.
-func (c *DriftChecker) recentDays(ctx context.Context, dt *doctype.DocType) ([]tenanttime.Date, error) {
-	query := fmt.Sprintf("SELECT DISTINCT %s FROM %s ORDER BY %s DESC LIMIT ?",
-		c.Dialect.QuoteIdent("business_date"), c.Dialect.QuoteIdent(dt.Facts.TableName(dt)), c.Dialect.QuoteIdent("business_date"))
-	rows, err := c.DB.QueryContext(ctx, db.Rebind(c.Dialect, query), driftDays)
+// sampleDays returns the last driftDays business days on the tenant clock, newest first. A day is sampled
+// whether or not it has facts, so a day with source rows and no facts is still checked.
+func (c *DriftChecker) sampleDays(ctx context.Context) ([]tenanttime.Date, error) {
+	tx, err := c.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("facts: read recent days: %w", err)
+		return nil, fmt.Errorf("facts: begin day sample: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
-	var days []tenanttime.Date
-	for rows.Next() {
-		var raw any
-		if err = rows.Scan(&raw); err != nil {
-			return nil, fmt.Errorf("facts: scan recent day: %w", err)
-		}
-		t := instant(raw)
-		days = append(days, tenanttime.Date{Year: t.Year(), Month: t.Month(), Day: t.Day()})
+	defer func() { _ = tx.Rollback() }()
+	clock, err := tenanttime.Load(ctx, tx, c.Dialect, c.Site)
+	if err != nil {
+		return nil, fmt.Errorf("facts: load tenant clock: %w", err)
 	}
-	return days, rows.Err()
+	now := time.Now()
+	if c.Now != nil {
+		now = c.Now()
+	}
+	today := clock.BusinessDate(now)
+	base := time.Date(today.Year, today.Month, today.Day, 0, 0, 0, 0, time.UTC)
+	days := make([]tenanttime.Date, driftDays)
+	for i := range days {
+		d := base.AddDate(0, 0, -i)
+		days[i] = tenanttime.Date{Year: d.Year(), Month: d.Month(), Day: d.Day()}
+	}
+	return days, nil
 }
 
 // summaryDrift reports whether the summary rows of day differ from the aggregate of the facts for that day.
