@@ -222,13 +222,13 @@ func analyticsModelReadable(reg *doctype.Registry, execution policy.Execution, m
 	if reg == nil || !execution.Valid() {
 		return false
 	}
+	scope := contract.BusinessScope{TenantID: execution.Tenant(), Kind: contract.ScopeKindTenant}
+	if len(scopes) > 0 {
+		scope = scopes[0]
+	}
 	if model.ProjectionOwner != "" {
 		if model.ProjectionID == "" || model.PublishedQuery == "" || len(model.AllowedFields) == 0 {
 			return false
-		}
-		scope := contract.BusinessScope{TenantID: execution.Tenant(), Kind: contract.ScopeKindTenant}
-		if len(scopes) > 0 {
-			scope = scopes[0]
 		}
 		decision, err := policy.DecideForBusinessScope(execution, reg, "module."+model.ProjectionOwner+".projection."+model.ProjectionID, "read", scope, model.ProjectionScopePolicy == contract.ScopeEntityOwned)
 		if err != nil || decision.OwnerOnly && model.ProjectionOwnerField == "" {
@@ -260,7 +260,7 @@ func analyticsModelReadable(reg *doctype.Registry, execution policy.Execution, m
 			continue
 		}
 		checked[source] = true
-		decision, err := policy.Decide(execution, reg, source, "read")
+		decision, err := sourceDecision(reg, execution, source, scope)
 		if err != nil || decision.OwnerOnly || len(decision.AssignedFields) > 0 {
 			return false
 		}
@@ -476,7 +476,7 @@ func authorizeRelatedAnalytics(reg *doctype.Registry, reports []analytics.Report
 				continue
 			}
 			checked[name] = true
-			decision, err := policy.Decide(execution, reg, name, "read")
+			decision, err := sourceDecision(reg, execution, name, scope)
 			if err != nil {
 				return nil, fmt.Errorf("You do not have permission to read %s records for this report.", name)
 			}
@@ -499,7 +499,7 @@ func executeAnalyticsInsights(tx *orm.TxManager, reg *doctype.Registry, doctypeN
 		return "Analytics not available — no database connection."
 	}
 	if doctypeName != "all" {
-		if err := authorizeAnalyticsInsight(reg, execution, doctypeName); err != nil {
+		if err := authorizeAnalyticsInsight(reg, execution, tx.BusinessScope, doctypeName); err != nil {
 			return err.Error()
 		}
 	}
@@ -509,7 +509,7 @@ func executeAnalyticsInsights(tx *orm.TxManager, reg *doctype.Registry, doctypeN
 			return "Permission denied: verified execution is required for analytics."
 		}
 		for _, candidate := range reg.Names() {
-			if authorizeAnalyticsInsight(reg, execution, candidate) == nil {
+			if authorizeAnalyticsInsight(reg, execution, tx.BusinessScope, candidate) == nil {
 				readable[candidate] = struct{}{}
 			}
 		}
@@ -603,11 +603,24 @@ func executeAnalyticsInsights(tx *orm.TxManager, reg *doctype.Registry, doctypeN
 	return sb.String()
 }
 
-func authorizeAnalyticsInsight(reg *doctype.Registry, execution policy.Execution, doctypeName string) error {
+// sourceDecision authorizes read on one source DocType for the request's
+// business scope. Entity-owned sources need an exact legal-entity grant.
+func sourceDecision(reg *doctype.Registry, execution policy.Execution, source string, scope contract.BusinessScope) (policy.Decision, error) {
+	dt := reg.Get(source)
+	decision, err := policy.DecideForBusinessScope(execution, reg, source, "read", scope, dt != nil && dt.BusinessScopePolicy == contract.ScopeEntityOwned)
+	if err != nil {
+		// Return a plain nil error on success: a nil *contract.Error would
+		// otherwise be a non-nil error interface.
+		return policy.Decision{}, err
+	}
+	return decision, nil
+}
+
+func authorizeAnalyticsInsight(reg *doctype.Registry, execution policy.Execution, scope contract.BusinessScope, doctypeName string) error {
 	if reg == nil || reg.Get(doctypeName) == nil || !execution.Valid() {
 		return fmt.Errorf("Permission denied: verified read access is required for analytics source %q.", doctypeName)
 	}
-	decision, err := policy.Decide(execution, reg, doctypeName, "read")
+	decision, err := sourceDecision(reg, execution, doctypeName, scope)
 	if err != nil {
 		return fmt.Errorf("Permission denied: you cannot read analytics for %s.", doctypeName)
 	}
