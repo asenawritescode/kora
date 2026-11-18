@@ -158,7 +158,6 @@ internal/doctype/expr.go::ExprEngine.Evaluate
 internal/doctype/page_runtime_contracts.go::PageActionContracts
 internal/doctype/page_runtime_contracts.go::PageComponentContracts
 internal/doctype/parser.go::ValidateAll
-internal/doctype/parser.go::selectHasOption
 internal/doctype/parser.go::validateFacts
 internal/doctype/parser.go::validateQuantityEffects
 internal/doctype/rollback.go::GenerateRollbackPlan
@@ -186,6 +185,15 @@ internal/eventbus/bus.go::NewChannelBusWithMaxEventBytes
 internal/eventbus/multibus.go::NewMultiBus
 internal/eventbus/queue_admission.go::NewAnalyticsQueueAdmission
 internal/expression/expression.go::ExprError.Error
+internal/facts/drift.go::DriftChecker.RunDue
+internal/facts/drift.go::DriftChecker.checkModel
+internal/facts/drift.go::DriftChecker.markDirtyDay
+internal/facts/drift.go::DriftChecker.models
+internal/facts/drift.go::DriftChecker.recentDays
+internal/facts/drift.go::DriftChecker.summaryDrift
+internal/facts/drift.go::DriftChecker.summaryRows
+internal/facts/drift.go::NewDriftCounter
+internal/facts/drift.go::normalised
 internal/facts/rebuild.go::JobStore.advance
 internal/facts/rebuild.go::Rebuilder.Run
 internal/facts/rebuild.go::Rebuilder.builder
