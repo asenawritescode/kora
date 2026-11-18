@@ -90,6 +90,8 @@ transaction:
       name: $input.till_session
       adjust:
         expected_cash: { decrease: $item.amount }
+        cash_refund_count: { increase: "1" }
+        cash_refund_total: { increase: $item.amount }
 output:
   reference: $steps.ret.name
   refund: $computed.total

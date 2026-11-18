@@ -61,3 +61,47 @@ fields:
     fieldtype: Data
     label: Opening Note
     description: Why the opening float differs from what the last till left in the drawer.
+  - fieldname: cash_sale_count
+    fieldtype: Int
+    label: Cash Sale Count
+    default: 0
+    read_only: true
+    description: Cash payments taken on this till, kept by record_sale and void_sale.
+  - fieldname: cash_sale_total
+    fieldtype: Currency
+    label: Cash Sales
+    default: 0
+    read_only: true
+  - fieldname: cash_refund_count
+    fieldtype: Int
+    label: Cash Refund Count
+    default: 0
+    read_only: true
+    description: Cash refund payments paid out of this till, kept by return_sale.
+  - fieldname: cash_refund_total
+    fieldtype: Currency
+    label: Cash Refunds
+    default: 0
+    read_only: true
+  - fieldname: payout_count
+    fieldtype: Int
+    label: Pay-out Count
+    default: 0
+    read_only: true
+    description: Cash taken out of the drawer. Stays 0 until cash movements land.
+  - fieldname: payout_total
+    fieldtype: Currency
+    label: Pay-outs
+    default: 0
+    read_only: true
+  - fieldname: payin_count
+    fieldtype: Int
+    label: Pay-in Count
+    default: 0
+    read_only: true
+    description: Cash put into the drawer. Stays 0 until cash movements land.
+  - fieldname: payin_total
+    fieldtype: Currency
+    label: Pay-ins
+    default: 0
+    read_only: true

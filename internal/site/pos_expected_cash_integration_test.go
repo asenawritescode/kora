@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
@@ -200,6 +202,38 @@ func runPOSExpectedCash(t *testing.T, driver string, conn *sql.DB, dbName string
 		t.Fatal(cerr)
 	}
 	want("void cash sale", 700)
+
+	// expected_cash query: the breakdown before close. Cash only: the card sale
+	// is absent. Opening 500 + sales 300 - refunds 100 = expected 700.
+	cashRow := func() map[string]any {
+		t.Helper()
+		defs, loadErr := query.LoadDir(filepath.Join("..", "..", "config", "pos", "queries"), reg)
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		for _, d := range defs {
+			if d.Name != "expected_cash" {
+				continue
+			}
+			pg, runErr := query.Run(ctx, conn, dialect, d, query.Request{FullRead: true, Input: map[string]any{"till_session": till}, Actor: "Administrator", Now: time.Now()})
+			if runErr != nil || len(pg.Rows) != 1 {
+				t.Fatalf("expected_cash rows=%d err=%v", len(pg.Rows), runErr)
+			}
+			return pg.Rows[0]
+		}
+		t.Fatal("expected_cash query missing")
+		return nil
+	}
+	breakdown := cashRow()
+	for field, want := range map[string]string{
+		"opening_float": "500", "cash_sale_count": "1", "cash_sale_total": "300",
+		"cash_refund_count": "1", "cash_refund_total": "100", "payout_count": "0",
+		"payout_total": "0", "payin_count": "0", "payin_total": "0", "expected_cash": "700",
+	} {
+		if got, parseErr := decimal.NewFromString(fmt.Sprint(breakdown[field])); parseErr != nil || !got.Equal(decimal.RequireFromString(want)) {
+			t.Fatalf("expected_cash.%s = %v, want %s", field, breakdown[field], want)
+		}
+	}
 
 	// Close: count 690 against expected 700 -> variance -10; reference is the till name.
 	closeOut := must("pos.close_session", map[string]any{"data": map[string]any{"shift": shift, "closing_count": 690}})

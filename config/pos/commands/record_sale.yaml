@@ -55,6 +55,8 @@ transaction:
       name: $input.till_session
       adjust:
         expected_cash: { increase: $item.amount }
+        cash_sale_count: { increase: "1" }
+        cash_sale_total: { increase: $item.amount }
   - for_each: $input.items
     create:
       record: Sale Line Balance
