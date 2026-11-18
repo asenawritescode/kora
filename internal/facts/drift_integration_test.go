@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel/metric"
 
@@ -44,7 +45,8 @@ func TestDriftCheckerFindsAndRepairsSummaryDrift(t *testing.T) {
 			builder := &Builder{DB: database.DB, Dialect: dialect, Registry: reg}
 			refresher := &Refresher{DB: database.DB, Dialect: dialect, Registry: reg, Admission: openLane{}, Owner: "test-refresher"}
 			counter := &countingDrift{}
-			checker := &DriftChecker{DB: database.DB, Dialect: dialect, Registry: reg, Admission: openLane{}, Drifted: counter}
+			checker := &DriftChecker{DB: database.DB, Dialect: dialect, Registry: reg, Site: "test", Admission: openLane{}, Drifted: counter,
+				Now: func() time.Time { return time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC) }}
 			run := func(want int) {
 				t.Helper()
 				if n, err := checker.RunDue(ctx); err != nil || n != want {
