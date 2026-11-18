@@ -430,6 +430,9 @@ func (d *LibSQLDialect) UpsertIncrementForTable(_ string, conflictCols []string,
 
 func (d *LibSQLDialect) InsertOrIgnorePrefix() string { return "INSERT OR IGNORE" }
 
+// SharedRowLock is empty: SQLite has no row locks and no FOR SHARE.
+func (d *LibSQLDialect) SharedRowLock() string { return "" }
+
 // AllocateSeriesNumber returns the next number for a series key. The counter row is
 // seeded from seed when it is missing; the table scan runs only in that case.
 func (d *LibSQLDialect) AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed func() (int64, error)) (int64, error) {

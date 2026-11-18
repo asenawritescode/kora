@@ -46,6 +46,11 @@ type QueryDialect interface {
 	UpsertClause(conflictCols []string, updateCols []string) string
 	UpsertIncrement(conflictCols []string, incrementCols []string) string
 	InsertOrIgnorePrefix() string
+	// SharedRowLock is the suffix that makes a read take a shared row lock held
+	// to the end of the transaction: writers may share it, UPDATE waits for it.
+	// It is "" where the engine has no row locks (LibSQL); callers then take a
+	// write lock another way.
+	SharedRowLock() string
 	AllocateNameNumber(tx *sql.Tx, doctypeName, prefix, tableName string) (int64, error)
 	// AllocateSeriesNumber atomically increments the counter for one naming
 	// series key. seed is called only when the counter row does not exist yet;

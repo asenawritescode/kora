@@ -23,6 +23,8 @@ type admissionScope struct {
 	Dialect  db.Dialect
 	Registry *doctype.Registry
 	Dynamic  *CommandResource
+	// Snapshots caches decoded module snapshots; nil decodes every time.
+	Snapshots *moduleSnapshotCache
 }
 
 // enforceModuleLifecycleAdmissionTx serializes module-owned command admission
@@ -45,16 +47,9 @@ func enforceModuleLifecycleAdmissionTx(ctx context.Context, tx *sql.Tx, op Opera
 	if dialect == nil {
 		return contract.NewError(contract.CodeDependencyUnavailable, "module lifecycle state is unavailable")
 	}
-	if _, err := tx.ExecContext(ctx, db.Rebind(dialect, `UPDATE _kora_module_snapshot SET revision = revision WHERE tenant_id = ?`), string(op.Context.TenantID)); err != nil {
-		return contract.NewError(contract.CodeDependencyUnavailable, "module lifecycle admission could not be fenced")
-	}
-	var payload string
-	if err := tx.QueryRowContext(ctx, db.Rebind(dialect, `SELECT snapshot_json FROM _kora_module_snapshot WHERE tenant_id = ?`), string(op.Context.TenantID)).Scan(&payload); err != nil {
-		return contract.NewError(contract.CodePermissionDenied, "owning module is not installed or available")
-	}
-	var snapshot contract.ModuleSnapshot
-	if json.Unmarshal([]byte(payload), &snapshot) != nil || snapshot.TenantID != op.Context.TenantID {
-		return contract.NewError(contract.CodeDependencyUnavailable, "module lifecycle snapshot is invalid")
+	snapshot, cerr := readFencedModuleSnapshot(ctx, tx, dialect, op.Context.TenantID, scope.Snapshots)
+	if cerr != nil {
+		return cerr
 	}
 	for owner := range owners {
 		found := false
@@ -73,6 +68,39 @@ func enforceModuleLifecycleAdmissionTx(ctx context.Context, tx *sql.Tx, op Opera
 		}
 	}
 	return nil
+}
+
+// readFencedModuleSnapshot reads the tenant's module snapshot inside tx. Where
+// the engine has row locks, the read takes a shared lock held to the end of tx:
+// writers share it and do not wait for each other, while a lifecycle change
+// (which takes the row exclusively) waits for them and then blocks new ones.
+// Without row locks (LibSQL) the fence is an UPDATE that takes the write lock.
+func readFencedModuleSnapshot(ctx context.Context, tx *sql.Tx, dialect db.Dialect, tenant contract.TenantID, cache *moduleSnapshotCache) (*contract.ModuleSnapshot, *contract.Error) {
+	lock := dialect.SharedRowLock()
+	if lock == "" {
+		if _, err := tx.ExecContext(ctx, db.Rebind(dialect, `UPDATE _kora_module_snapshot SET revision = revision WHERE tenant_id = ?`), string(tenant)); err != nil {
+			return nil, contract.NewError(contract.CodeDependencyUnavailable, "module lifecycle admission could not be fenced")
+		}
+	}
+	var revision int64
+	var payload string
+	query := db.Rebind(dialect, `SELECT revision, snapshot_json FROM _kora_module_snapshot WHERE tenant_id = ?`+lock)
+	if err := tx.QueryRowContext(ctx, query, string(tenant)).Scan(&revision, &payload); err != nil {
+		return nil, contract.NewError(contract.CodePermissionDenied, "owning module is not installed or available")
+	}
+	if cache != nil {
+		if snapshot, ok := cache.lookup(tenant, revision); ok {
+			return snapshot, nil
+		}
+	}
+	var snapshot contract.ModuleSnapshot
+	if json.Unmarshal([]byte(payload), &snapshot) != nil || snapshot.TenantID != tenant {
+		return nil, contract.NewError(contract.CodeDependencyUnavailable, "module lifecycle snapshot is invalid")
+	}
+	if cache != nil {
+		cache.store(tenant, revision, &snapshot)
+	}
+	return &snapshot, nil
 }
 
 func pinnedWorkflowAttemptPredatesDrain(ctx context.Context, tx *sql.Tx, dialect db.Dialect, op Operation, drainingAt time.Time) bool {
@@ -402,7 +430,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 	}
 	defer rollback()
 	dbTx, txMgr, reg, opID, afterCommit := run.Tx, run.Mgr, run.Reg, run.OpID, run.AfterCommit
-	if admissionErr := enforceModuleLifecycleAdmissionTx(ctx, dbTx, op, admissionScope{Dialect: k.dialect(), Registry: reg, Dynamic: cmd}); admissionErr != nil {
+	if admissionErr := enforceModuleLifecycleAdmissionTx(ctx, dbTx, op, admissionScope{Dialect: k.dialect(), Registry: reg, Dynamic: cmd, Snapshots: &k.moduleSnapshots}); admissionErr != nil {
 		return nil, admissionErr
 	}
 	priorMutationExecutor := txMgr.ScriptMutationExecutor
@@ -798,6 +826,11 @@ func readRowVersion(dbTx *sql.Tx, dialect db.Dialect, table, name string) (strin
 	if err := dbTx.QueryRow(db.Rebind(dialect, query), name).Scan(&modified); err != nil {
 		return "", err
 	}
+	return canonicalRowVersion(modified)
+}
+
+// canonicalRowVersion turns a stored modified value into the version token.
+func canonicalRowVersion(modified any) (string, error) {
 	switch value := modified.(type) {
 	case time.Time:
 		return CanonicalVersion(value), nil

@@ -1860,8 +1860,8 @@
    "cyclomatic": 16
   },
   "internal/kernel::enforceModuleLifecycleAdmissionTx": {
-   "cognitive": 25,
-   "cyclomatic": 19
+   "cognitive": 22,
+   "cyclomatic": 16
   },
   "internal/kernel::execDefinedCommand": {
    "statements": 244

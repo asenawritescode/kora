@@ -221,6 +221,9 @@ type Kernel struct {
 	// module-owned commands. The same validator is applied for provider and
 	// direct command entry paths before transactional effects can commit.
 	CommandSchemas CommandSchemaRegistry
+
+	// moduleSnapshots caches decoded module snapshots per tenant revision.
+	moduleSnapshots moduleSnapshotCache
 }
 
 // New returns a Kernel. Outbox may be nil only in tests that do not assert

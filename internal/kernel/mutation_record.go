@@ -68,7 +68,7 @@ func (m *mutation) update(ctx context.Context) *contract.Error {
 	}
 	// Compare the caller's canonical modified-time token while the row is
 	// protected by this transaction; Revision is a separate internal counter.
-	if versionErr := m.checkVersion(p.Name); versionErr != nil {
+	if versionErr := m.checkVersion(oldDoc); versionErr != nil {
 		return versionErr
 	}
 	doc, cerr := m.prepareUpdate(ctx, oldDoc, p.Data)
