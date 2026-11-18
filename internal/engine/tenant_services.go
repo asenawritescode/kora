@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/asenawritescode/kora/internal/eventbus"
 	"log/slog"
+	"math/rand/v2"
 	"sort"
 	"time"
 
@@ -65,6 +66,7 @@ type TenantServiceConfig struct {
 		Acquire(context.Context, uint64) (func(), error)
 	}
 	OutboxEnabled                     bool
+	ArchiveHorizon                    time.Duration
 	Workflow                          *WorkflowTenantConfig
 	RequestAuthorizer                 RequestAuthorizerFactory
 	WorkflowApprovals                 map[string]process.WorkflowApproval
@@ -582,38 +584,8 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 			return fmt.Errorf("register analytics rebuild notification consumer for tenant %s: %w", loaded.Name, err)
 		}
 	}
-	if config.OutboxEnabled {
-		services.Outbox = outbox.NewSQLWriter(dialect)
-		services.OutboxBacklog = &outbox.BacklogMetrics{}
-		var destination contract.EventPublisher
-		if config.NATS != nil {
-			destination = config.NATS
-		} else {
-			destination = eventbus.NewLocalProvider(services.EventBus)
-		}
-		publisher := outbox.NewPublisher(loaded.DB, destination, dialect)
-		if err := registerTenantWorkerStart(config, func() error {
-			if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
-				RunOutboxPublisher(ctx, publisher, services.WorkAdmission, services.OutboxBacklog)
-			}) {
-				return fmt.Errorf("tenant runtime is stopping")
-			}
-			return nil
-		}); err != nil {
-			return fmt.Errorf("register outbox publisher for tenant %s: %w", loaded.Name, err)
-		}
-		if config.NATS != nil && services.EventBus != nil {
-			if err := registerTenantWorkerStart(config, func() error {
-				if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
-					RunNATSOutboxSideEffects(ctx, loaded.Name, config.NATS, services.EventBus)
-				}) {
-					return fmt.Errorf("tenant runtime is stopping")
-				}
-				return nil
-			}); err != nil {
-				return fmt.Errorf("register outbox side effects for tenant %s: %w", loaded.Name, err)
-			}
-		}
+	if outboxErr := registerOutboxWorkers(config, loaded, &services, dialect); outboxErr != nil {
+		return outboxErr
 	}
 	activeConfigCtx, cancelActiveConfig := context.WithTimeout(config.ProcessContext, 30*time.Second)
 	var activeConfig *doctype.ConfigSnapshot
@@ -978,6 +950,74 @@ func registerCloudWorkers(config TenantServiceConfig, loaded *knet.LoadedSite, s
 		return fmt.Errorf("register Cloud usage reporter for tenant %s: %w", loaded.Name, err)
 	}
 	return nil
+}
+
+// registerOutboxWorkers starts the outbox publisher when it is enabled, and the
+// daily archive for the tenant.
+func registerOutboxWorkers(config TenantServiceConfig, loaded *knet.LoadedSite, services *tenantruntime.Services, dialect kdb.Dialect) error {
+	if config.OutboxEnabled {
+		if err := registerOutboxPublisher(config, loaded, services, dialect); err != nil {
+			return err
+		}
+	}
+	return registerOutboxArchiver(config, loaded, services, dialect)
+}
+
+// registerOutboxPublisher starts the publisher and, with NATS, the side-effect bridge.
+func registerOutboxPublisher(config TenantServiceConfig, loaded *knet.LoadedSite, services *tenantruntime.Services, dialect kdb.Dialect) error {
+	services.Outbox = outbox.NewSQLWriter(dialect)
+	services.OutboxBacklog = &outbox.BacklogMetrics{}
+	var destination contract.EventPublisher
+	if config.NATS != nil {
+		destination = config.NATS
+	} else {
+		destination = eventbus.NewLocalProvider(services.EventBus)
+	}
+	publisher := outbox.NewPublisher(loaded.DB, destination, dialect)
+	if err := registerTenantWorkerStart(config, func() error {
+		if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
+			RunOutboxPublisher(ctx, publisher, services.WorkAdmission, services.OutboxBacklog)
+		}) {
+			return fmt.Errorf("tenant runtime is stopping")
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("register outbox publisher for tenant %s: %w", loaded.Name, err)
+	}
+	if config.NATS != nil && services.EventBus != nil {
+		if err := registerTenantWorkerStart(config, func() error {
+			if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
+				RunNATSOutboxSideEffects(ctx, loaded.Name, config.NATS, services.EventBus)
+			}) {
+				return fmt.Errorf("tenant runtime is stopping")
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("register outbox side effects for tenant %s: %w", loaded.Name, err)
+		}
+	}
+	return nil
+}
+
+// registerOutboxArchiver runs the tenant's outbox archive daily. Without a
+// storage backend it is skipped, and published rows stay in the table.
+func registerOutboxArchiver(config TenantServiceConfig, loaded *knet.LoadedSite, services *tenantruntime.Services, dialect kdb.Dialect) error {
+	if services.Storage == nil {
+		slog.Warn("outbox archive skipped: tenant has no storage backend", "tenant", loaded.Name)
+		return nil
+	}
+	archiver, err := outbox.NewArchiver(outbox.Archiver{DB: loaded.DB, Dialect: dialect, Store: outboxArchiveStore{backend: services.Storage}, Horizon: config.ArchiveHorizon, Metrics: services.OutboxBacklog})
+	if err != nil {
+		return fmt.Errorf("construct outbox archiver for tenant %s: %w", loaded.Name, err)
+	}
+	return registerTenantWorkerStart(config, func() error {
+		if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
+			RunOutboxArchiver(ctx, loaded.Name, archiver, services.WorkAdmission, rand.N[time.Duration])
+		}) {
+			return fmt.Errorf("tenant runtime is stopping")
+		}
+		return nil
+	})
 }
 
 func registerTenantWorkerStart(config TenantServiceConfig, start func() error) error {

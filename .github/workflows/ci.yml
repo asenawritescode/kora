@@ -123,9 +123,11 @@ jobs:
           KORA_CONFIG_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_DBACCESS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/kora_dbaccess_test?parseTime=true&multiStatements=true"
           KORA_RECON_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/kora_dbaccess_test?parseTime=true&multiStatements=true"
+          KORA_SITE_SETTINGS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+          KORA_TENANT_CLOCK_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
         run: >-
           go test -tags=integration -p 1
-          ./internal/dbaccess ./internal/api ./internal/analytics ./internal/outbox ./internal/site ./internal/requests/sqlstore ./internal/workflow/sqlstore
+          ./internal/dbaccess ./internal/api ./internal/tenanttime ./internal/analytics ./internal/outbox ./internal/site ./internal/requests/sqlstore ./internal/workflow/sqlstore
           ./internal/notifications/sqlstore ./internal/management/sqlstore -count=1 -timeout=15m
 
       - name: Test programmatic module owner command fixture

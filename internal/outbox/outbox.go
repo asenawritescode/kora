@@ -775,7 +775,11 @@ type BacklogSnapshot struct {
 	// PublishFailuresOther counts every other delivery failure.
 	PublishFailuresFull  int64
 	PublishFailuresOther int64
-	RefreshedAt          time.Time
+	// ArchivedRows counts published rows moved to the archive; ArchiveFailures
+	// counts archive chunks that failed before their rows were deleted.
+	ArchivedRows    int64
+	ArchiveFailures int64
+	RefreshedAt     time.Time
 }
 
 // BacklogMetrics stores the last admission-protected outbox SQL sample. Metric
@@ -802,9 +806,30 @@ func (m *BacklogMetrics) Refresh(ctx context.Context, publisher *Publisher) erro
 		OldestUnpublishedAge: metrics.OldestUnpublishedAge, Saturated: metrics.Saturated,
 		RefreshFailures: previous.RefreshFailures, LeaseLost: previous.LeaseLost,
 		PublishFailuresFull: previous.PublishFailuresFull, PublishFailuresOther: previous.PublishFailuresOther,
+		ArchivedRows: previous.ArchivedRows, ArchiveFailures: previous.ArchiveFailures,
 		RefreshedAt: time.Now().UTC(),
 	}
 	return nil
+}
+
+// RecordArchived adds n archived rows. A nil receiver is a no-op.
+func (m *BacklogMetrics) RecordArchived(n int64) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.snapshot.ArchivedRows += n
+	m.mu.Unlock()
+}
+
+// RecordArchiveFailure counts one failed archive chunk. A nil receiver is a no-op.
+func (m *BacklogMetrics) RecordArchiveFailure() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.snapshot.ArchiveFailures++
+	m.mu.Unlock()
 }
 
 // RecordLeaseLost records a publisher claim fenced by a newer owner.

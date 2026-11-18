@@ -201,9 +201,17 @@ func TestTenantUserAndSettingsQueriesRebindForPostgres(t *testing.T) {
 	injectContext(settingsContext)
 	injectDB(settingsContext, database, reg)
 	settingsContext.Set("site_db_type", "postgres")
+	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO _kora_site_setting .*VALUES \(\$1, \$2, \$3\) ON CONFLICT`).
 		WithArgs("test.local", "currency", "USD").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	// The response re-reads currency, time zone and cutoff, all unset here.
+	for _, key := range []string{"currency", "time_zone", "business_day_cutoff"} {
+		mock.ExpectQuery(`SELECT setting_value FROM _kora_site_setting WHERE site = \$1 AND setting_key = \$2`).
+			WithArgs("test.local", key).
+			WillReturnRows(sqlmock.NewRows([]string{"setting_value"}))
+	}
 	handler.HandleSiteSettingsUpdate(settingsContext)
 	if settingsRecorder.Code != http.StatusOK {
 		t.Fatalf("PostgreSQL site settings update returned HTTP %d: %s", settingsRecorder.Code, settingsRecorder.Body.String())

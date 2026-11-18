@@ -42,6 +42,11 @@ func ParseCutoff(s string) (time.Duration, error) {
 	return cutoff, nil
 }
 
+// FormatCutoff renders a cutoff as HH:MM, the form ParseCutoff accepts.
+func FormatCutoff(cutoff time.Duration) string {
+	return fmt.Sprintf("%02d:%02d", int(cutoff.Hours()), int(cutoff.Minutes())%60)
+}
+
 // Querier reads one row. *sql.DB and *sql.Tx both satisfy it.
 type Querier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row

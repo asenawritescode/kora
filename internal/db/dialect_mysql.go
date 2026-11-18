@@ -312,6 +312,11 @@ func (d *MySQLDialect) NowTimestamp() string {
 	return "CURRENT_TIMESTAMP(6)"
 }
 
+// NowMinusSeconds is the database clock minus the bound seconds in the session zone.
+func (d *MySQLDialect) NowMinusSeconds() string {
+	return "DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL ? SECOND)"
+}
+
 func (d *MySQLDialect) ParseError(err error, dt *doctype.DocType) *doctype.ValidationError {
 	var mysqlErr *mysql.MySQLError
 	if !errors.As(err, &mysqlErr) {
