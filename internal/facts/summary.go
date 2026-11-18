@@ -1,6 +1,8 @@
 package facts
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -79,6 +81,33 @@ func rebuildInsert(dialect db.Dialect, dt *doctype.DocType, day tenanttime.Date)
 	}
 	insert := fmt.Sprintf("INSERT INTO %s (%s) %s", q(summaryTable(dt)), quoteList(dialect, cols), strings.Join(selects, " UNION ALL "))
 	return insert, args
+}
+
+// migrateSummary replaces a summary table that predates the status column. Summaries are caches, so the
+// table is dropped and recreated, and every business date with facts is marked dirty so the refresher
+// fills it again. A table that already has the column is left alone.
+func (b *Builder) migrateSummary(ctx context.Context, dt *doctype.DocType) error {
+	q := b.Dialect.QuoteIdent
+	probe := fmt.Sprintf("SELECT %s FROM %s WHERE 1 = 0", q("status"), q(summaryTable(dt))) //nolint:gosec // identifiers only, quoted by the dialect
+	if _, err := b.DB.ExecContext(ctx, probe); err == nil {
+		return nil
+	}
+	if err := b.execDDL(ctx, []string{"DROP TABLE IF EXISTS " + q(summaryTable(dt))}); err != nil {
+		return err
+	}
+	if err := b.execDDL(ctx, []string{summaryDDL(b.Dialect, dt)}); err != nil {
+		return err
+	}
+	inc, ok := b.Dialect.(db.TableQualifiedIncrementDialect)
+	if !ok {
+		return errors.New("facts: dialect has no table-qualified increment")
+	}
+	mark := fmt.Sprintf("INSERT INTO %s (model, business_date, version) SELECT DISTINCT ?, business_date, 1 FROM %s %s",
+		q(dirtyTable), q(dt.Facts.TableName(dt)), inc.UpsertIncrementForTable(dirtyTable, []string{"model", "business_date"}, []string{"version"}))
+	if _, err := b.DB.ExecContext(ctx, db.Rebind(b.Dialect, mark), dt.Name); err != nil {
+		return fmt.Errorf("facts: mark summary days dirty: %w", err)
+	}
+	return nil
 }
 
 // quoteList quotes each name for the dialect and joins them with commas.
