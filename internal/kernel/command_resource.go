@@ -162,6 +162,19 @@ type StepUpdate struct {
 	Adjust map[string]FieldAdjust `yaml:"adjust,omitempty" json:"adjust,omitempty"`
 }
 
+// validateEnsure checks an ensure step's record, where and values.
+func (c *CommandResource) validateEnsure(i int, e *StepEnsure) error {
+	if e.Record == "" || len(e.Where) == 0 {
+		return fmt.Errorf("command %q: step %d ensure requires record and where", c.Name, i)
+	}
+	for field := range e.Values {
+		if _, dup := e.Where[field]; dup {
+			return fmt.Errorf("command %q: step %d ensure sets %q in both where and values", c.Name, i, field)
+		}
+	}
+	return nil
+}
+
 // validateAdjustments checks that each adjusted field is set only by adjust
 // and that its adjustment is well formed.
 func (c *CommandResource) validateAdjustments(i int, u *StepUpdate) error {
@@ -213,13 +226,8 @@ func (c *CommandResource) validateWith(needSchemas bool) error {
 		}
 		switch {
 		case s.Ensure != nil:
-			if s.Ensure.Record == "" || len(s.Ensure.Where) == 0 {
-				return fmt.Errorf("command %q: step %d ensure requires record and where", c.Name, i)
-			}
-			for field := range s.Ensure.Values {
-				if _, dup := s.Ensure.Where[field]; dup {
-					return fmt.Errorf("command %q: step %d ensure sets %q in both where and values", c.Name, i, field)
-				}
+			if err := c.validateEnsure(i, s.Ensure); err != nil {
+				return err
 			}
 		case s.Create != nil:
 			if s.Create.Record == "" || len(s.Create.Values) == 0 {

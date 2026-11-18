@@ -42,3 +42,25 @@ func postCommitCopy(txMgr *orm.TxManager) *orm.TxManager {
 	completeTx.SkipHookScripts = nil
 	return &completeTx
 }
+
+// createDocumentValues builds the document a create step writes from its
+// values. Absent references are skipped; table values become child documents.
+func createDocumentValues(dt *doctype.DocType, values map[string]string, env refEnv, i int) (*doctype.Document, *contract.Error) {
+	doc := doctype.NewDocument(dt.Name)
+	for field, ref := range values {
+		v, rerr := resolveEnvRef(ref, env)
+		if errors.Is(rerr, errRefAbsent) {
+			continue
+		}
+		if rerr != nil {
+			return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
+		}
+		if tf := dt.GetField(field); tf != nil && tf.Fieldtype == "Table" {
+			if rows, ok := v.([]any); ok {
+				v = childDocuments(tf.Options, rows)
+			}
+		}
+		doc.Set(field, v)
+	}
+	return doc, nil
+}

@@ -546,21 +546,9 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			if dt == nil {
 				return nil, contract.NewError(contract.CodeNotFound, fmt.Sprintf("command %q: record %q not found", def.Name, create.Record))
 			}
-			doc := doctype.NewDocument(dt.Name)
-			for field, ref := range create.Values {
-				v, rerr := resolveEnvRef(ref, env)
-				if errors.Is(rerr, errRefAbsent) {
-					continue
-				}
-				if rerr != nil {
-					return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
-				}
-				if tf := dt.GetField(field); tf != nil && tf.Fieldtype == "Table" {
-					if rows, ok := v.([]any); ok {
-						v = childDocuments(tf.Options, rows)
-					}
-				}
-				doc.Set(field, v)
+			doc, valueErr := createDocumentValues(dt, create.Values, env, i)
+			if valueErr != nil {
+				return nil, valueErr
 			}
 			if err := dt.BindBusinessScope(doc, txMgr.BusinessScope, true, nil); err != nil {
 				return nil, contract.NewError(contract.CodePermissionDenied, err.Error())
