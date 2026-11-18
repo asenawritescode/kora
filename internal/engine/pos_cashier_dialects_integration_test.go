@@ -356,7 +356,7 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 			// Invalid input (unknown top-level "currency") is a validation error
 			// naming the field, never a 200 failed receipt; stock is untouched
 			// and a replay of the same key returns the same error.
-			badReturn := fmt.Sprintf(`{"register":"REG-1","location":"LOC-1","till_session":%q,"return_against":%q,"currency":"KES","items":[{"item":"ITM-1","quantity":1,"unit_price":180,"amount":180}],"payments":[{"method":"Cash","amount":180,"currency":"KES","reference":"refund"}]}`, till, sale1)
+			badReturn := fmt.Sprintf(`{"register":"REG-1","location":"LOC-1","till_session":%q,"return_against":%q,"reason":"Damaged","currency":"KES","items":[{"item":"ITM-1","quantity":1,"unit_price":180,"amount":180}],"payments":[{"method":"Cash","amount":180,"currency":"KES","reference":"refund"}]}`, till, sale1)
 			salesBefore := count("Sale")
 			for i := 0; i < 2; i++ {
 				for _, o := range cat.Data.PublishedOperations {
