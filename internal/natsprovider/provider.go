@@ -23,6 +23,7 @@ type Provider struct {
 	nc                 *nats.Conn
 	js                 nats.JetStreamContext
 	eventStreamDurable atomic.Bool
+	streamUsage        atomic.Pointer[Diagnostics]
 	realtimeMu         sync.RWMutex
 	realtimeSubs       map[*nats.Subscription]*realtimeSubscriptionState
 	realtimeDropped    atomic.Int64
@@ -466,6 +467,52 @@ func (p *Provider) Diagnostics(ctx context.Context) (Diagnostics, error) {
 	return d, nil
 }
 
+const (
+	streamUsageInterval      = 30 * time.Second
+	streamUsageSampleTimeout = 2 * time.Second
+)
+
+// StreamUsage returns the last stream usage sample. It performs no I/O and
+// reports false until RefreshStreamUsage has succeeded at least once.
+func (p *Provider) StreamUsage() (Diagnostics, bool) {
+	if p == nil {
+		return Diagnostics{}, false
+	}
+	usage := p.streamUsage.Load()
+	if usage == nil {
+		return Diagnostics{}, false
+	}
+	return *usage, true
+}
+
+// RefreshStreamUsage samples stream usage with a bounded query and stores it
+// for StreamUsage. A failed sample leaves the previous one in place.
+func (p *Provider) RefreshStreamUsage(ctx context.Context) error {
+	sampleCtx, cancel := context.WithTimeout(ctx, streamUsageSampleTimeout)
+	defer cancel()
+	usage, err := p.Diagnostics(sampleCtx)
+	if err != nil {
+		return err
+	}
+	p.streamUsage.Store(&usage)
+	return nil
+}
+
+// RunStreamUsageSampler keeps the stream usage sample fresh until ctx ends.
+func (p *Provider) RunStreamUsageSampler(ctx context.Context) {
+	ticker := time.NewTicker(streamUsageInterval)
+	defer ticker.Stop()
+	for {
+		// A failed sample keeps the previous value; the next tick retries.
+		_ = p.RefreshStreamUsage(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
 // Publish implements contract.EventPublisher.
 func (p *Provider) Publish(ctx context.Context, event contract.EventEnvelope) error {
 	if p == nil || p.js == nil {
@@ -498,8 +545,30 @@ func (p *Provider) Publish(ctx context.Context, event contract.EventEnvelope) er
 	}
 	subject := p.cfg.SubjectPrefix + "." + event.Type
 	_, err = p.js.PublishMsg(&nats.Msg{Subject: subject, Data: data}, nats.Context(ctx), nats.MsgId(event.ID))
+	return classifyPublishError(err)
+}
+
+// classifyPublishError maps a capacity refusal to contract.ErrDestinationFull.
+// A stream at its discard-new limit answers with a JetStream API error whose
+// description names the exhausted limit. Any other error, including a timeout,
+// stays an ordinary failure on the retry path.
+func classifyPublishError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var apiErr *nats.APIError
+	if errors.As(err, &apiErr) && (apiErr.Description == streamMaxMsgsDescription || apiErr.Description == streamMaxBytesDescription) {
+		return fmt.Errorf("%w: %w", contract.ErrDestinationFull, err)
+	}
 	return err
 }
+
+// JetStream descriptions for a discard-new stream at its limits (nats-server
+// store errors ErrMaxMsgs and ErrMaxBytes).
+const (
+	streamMaxMsgsDescription  = "maximum messages exceeded"
+	streamMaxBytesDescription = "maximum bytes exceeded"
+)
 
 // ErrNonDurableEventStream prevents an outbox publish acknowledgment from
 // being treated as durable when a deployed legacy stream uses memory storage.
