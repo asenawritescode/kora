@@ -86,8 +86,8 @@ func runImportModules(t *testing.T, driver string, conn *sql.DB, dbName string) 
 		qs += len(m.Queries)
 	}
 	sort.Strings(ids)
-	if strings.Join(ids, ",") != "inventory.app,inventory.core,pos.app,pos.core" || ops != 8 || qs != 19 {
-		t.Fatalf("modules %v ops=%d queries=%d, want 4 modules, 8 ops, 19 queries", ids, ops, qs)
+	if strings.Join(ids, ",") != "inventory.app,inventory.core,pos.app,pos.core" || ops != 8 || qs != 20 {
+		t.Fatalf("modules %v ops=%d queries=%d, want 4 modules, 8 ops, 20 queries", ids, ops, qs)
 	}
 	versions := versionCount(t, conn)
 	if err := ImportConfig(conn, doctype.NewRegistry(), dbName, site, pos, dialect); err != nil {

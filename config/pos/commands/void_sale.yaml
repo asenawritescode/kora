@@ -86,5 +86,7 @@ transaction:
       name: $input.till_session
       adjust:
         expected_cash: { decrease: $item.amount }
+        cash_sale_count: { decrease: "1", min: "0" }
+        cash_sale_total: { decrease: $item.amount, min: "0" }
 emit:
   - pos.sale.voided

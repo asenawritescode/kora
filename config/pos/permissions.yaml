@@ -363,3 +363,13 @@
   role: Cashier
   read: true
   if_owner: true
+- doctype: module.pos.core.query.expected_cash
+  role: Owner
+  read: true
+- doctype: module.pos.core.query.expected_cash
+  role: Manager
+  read: true
+- doctype: module.pos.core.query.expected_cash
+  role: Cashier
+  read: true
+  if_owner: true
