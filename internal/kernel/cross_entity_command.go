@@ -46,8 +46,8 @@ func operationForCommandStep(op Operation, command *CommandResource, step Comman
 	var side string
 	if create := step.createSpec(); create != nil {
 		side = create.Scope
-	} else if step.Update != nil {
-		side = step.Update.Scope
+	} else if step.updateSpec() != nil {
+		side = step.updateSpec().Scope
 	}
 	switch side {
 	case "source":

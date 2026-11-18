@@ -252,7 +252,7 @@ func authorizeOp(reg *doctype.Registry, op Operation, def CommandDefinition, dyn
 	if authErr := dyn.authorizeStepFieldReads(reg, op, operationAuthority); authErr != nil {
 		return authErr
 	}
-	for _, step := range dyn.Steps {
+	for _, step := range authorizedSteps(dyn.Steps) {
 		if alias, ok := iteratedGuardAlias(step); ok {
 			dt := dyn.guardRecord(reg, alias)
 			if dt == nil {
@@ -522,18 +522,14 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			return nil, scopeErr
 		}
 		lastBusinessScope = stepOp.Context.BusinessScope
-		if step.Ensure != nil {
-			existing, ensureErr := ensureExisting(txMgr, reg, step.Ensure, stepEnv{env, i}, scopeForOperation(reg, stepOp, step.Ensure.Record, "write")) //nolint:contextcheck // the context travels in txMgr.Context
-			if ensureErr != nil {
-				return nil, ensureErr
-			}
-			if existing != "" {
-				// Finding a record is not a write: no outcome, and the idempotency
-				// receipt is still claimed by the first step that writes.
-				bindStepName(stepNames, step.As, existing)
-				continue
-			}
+		resolved, skip, resolveErr := k.resolveStep(run, step, stepEnv{env, i}, stepOp, stepNames) //nolint:contextcheck // the context travels in txMgr.Context
+		if resolveErr != nil {
+			return nil, resolveErr
 		}
+		if skip {
+			continue
+		}
+		step = resolved
 		switch {
 		case step.Reserve != nil:
 			outcome, reserveErr := k.execReserveStep(dbTx, reg, step, env, stepNames)
@@ -612,7 +608,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 				if rerr != nil {
 					return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
 				}
-				doc.Set(field, v)
+				doc.Set(field, childValue(dt, field, v))
 			}
 			if adjustErr := applyAdjustments(dt, oldDoc, doc, step.Update.Adjust, stepEnv{env, i}); adjustErr != nil {
 				return nil, adjustErr
@@ -643,14 +639,9 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 
 	result := map[string]any{"command": def.Name, "steps": outcomes}
 	if len(cmd.Output) > 0 {
-		outEnv := refEnv{input: input, steps: stepNames, fieldReader: fieldReader, computed: computed, now: pinnedNow, actor: user}
-		out := make(map[string]any, len(cmd.Output))
-		for key, ref := range cmd.Output {
-			v, rerr := resolveEnvRef(ref, outEnv)
-			if rerr != nil {
-				return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("output %q: %v", key, rerr))
-			}
-			out[key] = v
+		out, outErr := resolveCommandOutput(cmd.Output, refEnv{input: input, steps: stepNames, fieldReader: fieldReader, computed: computed, now: pinnedNow, actor: user})
+		if outErr != nil {
+			return nil, outErr
 		}
 		result["output"] = out
 	}
