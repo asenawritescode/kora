@@ -9,6 +9,7 @@ input:
   register: {type: string, max_length: 140}
 filters:
   - {field: register, op: eq, value: $input.register, optional: true}
+  - {field: status, op: ne, value: Held}
 fields: [name, register, customer, total, status, creation]
 sort: [{field: creation, dir: desc}]
 limit: 20
