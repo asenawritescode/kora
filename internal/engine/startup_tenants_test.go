@@ -3,13 +3,14 @@ package engine
 import (
 	"context"
 	"errors"
+	"github.com/asenawritescode/kora/internal/eventbus"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"io"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/auth"
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/internal/doctype"
@@ -24,8 +25,8 @@ func TestStartupSiteCollectionClosesFanoutBusWhenSiblingLoadFails(t *testing.T) 
 		t.Fatal("create startup rollback DB:", err)
 	}
 	defer database.Close()
-	base := analytics.NewChannelBus(4, t.TempDir()+"/wal")
-	fanout, err := analytics.NewMultiBus(base)
+	base := eventbus.NewChannelBus(4, t.TempDir()+"/wal")
+	fanout, err := eventbus.NewMultiBus(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +50,7 @@ func TestStartupSiteCollectionClosesFanoutBusWhenSiblingLoadFails(t *testing.T) 
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("collection error = %v, want sibling failure", err)
 	}
-	if err := base.Publish(analytics.ChangeEvent{ID: "after-cleanup", Site: "loaded.example"}); err == nil {
+	if err := base.Publish(eventstream.ChangeEvent{ID: "after-cleanup", Site: "loaded.example"}); err == nil {
 		t.Fatal("startup rollback left the tenant event bus open")
 	}
 	select {

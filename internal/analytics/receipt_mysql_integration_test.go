@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"net"
 	"net/netip"
 	"os"
@@ -86,9 +87,9 @@ func TestMySQLAnalyticsReceiptDeduplicatesReplayAfterCommit(t *testing.T) {
 	if _, err = Backfill(context.Background(), database, db.Resolve("mysql"), "tenant-a", registry, from, ""); err != nil {
 		t.Fatal("rebuild analytics snapshot:", err)
 	}
-	event := ChangeEvent{
+	event := eventstream.ChangeEvent{
 		ID: "event-committed-before-wal-ack", Site: "tenant-a", Doctype: "Customer", DocName: "CUST-1",
-		Sequence: "1", Operation: EventInsert, Timestamp: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC),
+		Sequence: "1", Operation: eventstream.EventInsert, Timestamp: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC),
 		Data: map[string]any{"name": "Acme"},
 	}
 	first := NewWorker(newFakeBus(), database, db.Resolve("mysql"), registry, "tenant-a", LoadConfig())
@@ -106,9 +107,9 @@ func TestMySQLAnalyticsReceiptDeduplicatesReplayAfterCommit(t *testing.T) {
 	// represented by the rebuild snapshot, then by its committed receipt.
 	restarted := NewWorker(newFakeBus(), database, db.Resolve("mysql"), registry, "tenant-a", LoadConfig())
 	restarted.process(event)
-	secondEvent := ChangeEvent{
+	secondEvent := eventstream.ChangeEvent{
 		ID: "event-after-rebuild-cutoff", Sequence: "2", Site: "tenant-a", Doctype: "Customer", DocName: "CUST-2",
-		Operation: EventInsert, Timestamp: time.Date(2026, 10, 14, 1, 0, 0, 0, time.UTC),
+		Operation: eventstream.EventInsert, Timestamp: time.Date(2026, 10, 14, 1, 0, 0, 0, time.UTC),
 		Data: map[string]any{"name": "Beta"},
 	}
 	insertTx, err := database.Begin()

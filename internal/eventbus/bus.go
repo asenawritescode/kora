@@ -1,4 +1,4 @@
-package analytics
+package eventbus
 
 import (
 	"bufio"
@@ -16,9 +16,17 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/eventstream"
 )
 
-// channelBus is the default EventBus implementation — an in-process buffered
+// WALBatchDrainer reads at most limit events from durable local storage.
+// A non-positive limit means all available events. Workers use this optional
+// capability to bound per-batch memory while retaining the eventstream.Bus contract.
+type WALBatchDrainer interface {
+	DrainWALBatch(limit int, handler func(eventstream.ChangeEvent)) (int, error)
+}
+
+// channelBus is the default eventstream.Bus implementation — an in-process buffered
 // Go channel. Every event is written to a write-ahead log (WAL) on disk FIRST,
 // then sent to the channel. The WAL is the source of truth; the channel is a
 // low-latency wake-up mechanism.
@@ -30,7 +38,7 @@ import (
 // crash occurs before acknowledgment, the transactional analytics receipt
 // suppresses duplicate rollup effects when the WAL record is replayed.
 type channelBus struct {
-	ch             chan ChangeEvent
+	ch             chan eventstream.ChangeEvent
 	mu             sync.RWMutex
 	closed         bool
 	capacity       int
@@ -83,7 +91,7 @@ func (b *boundedEventBuffer) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 
-func encodeBoundedEvent(event ChangeEvent, limit int) ([]byte, error) {
+func encodeBoundedEvent(event eventstream.ChangeEvent, limit int) ([]byte, error) {
 	// Keep the durable and queued representation at or below the configured
 	// limit. This encoding may allocate temporary memory proportional to the
 	// caller-owned event while checking its encoded size.
@@ -104,20 +112,20 @@ func encodeBoundedEvent(event ChangeEvent, limit int) ([]byte, error) {
 // NewChannelBus creates an in-process event bus with WAL-first durability.
 // capacity is the channel buffer size (default 1000 if <= 0).
 // walDir is where the write-ahead log is stored.
-func NewChannelBus(capacity int, walDir string) EventBus {
+func NewChannelBus(capacity int, walDir string) eventstream.Bus {
 	return NewChannelBusWithMaxEventBytes(capacity, DefaultMaxEventBytes, walDir)
 }
 
 // NewChannelBusWithMaxEventBytes creates an analytics bus that rejects an
 // event before WAL publication when its encoded payload exceeds maxEventBytes.
-func NewChannelBusWithMaxEventBytes(capacity, maxEventBytes int, walDir string) EventBus {
+func NewChannelBusWithMaxEventBytes(capacity, maxEventBytes int, walDir string) eventstream.Bus {
 	return NewChannelBusWithLimits(capacity, maxEventBytes, DefaultMaxQueuedBytes, walDir)
 }
 
 // NewChannelBusWithLimits bounds the wake-up channel by both event count and
 // the maximum encoded payload bytes it may retain. The WAL remains the durable
 // queue, so reducing the in-memory hint capacity cannot lose published work.
-func NewChannelBusWithLimits(capacity, maxEventBytes, maxQueuedBytes int, walDir string) EventBus {
+func NewChannelBusWithLimits(capacity, maxEventBytes, maxQueuedBytes int, walDir string) eventstream.Bus {
 	if capacity <= 0 {
 		capacity = 1000
 	} else if capacity > MaxChannelCapacity {
@@ -144,7 +152,7 @@ func NewChannelBusWithLimits(capacity, maxEventBytes, maxQueuedBytes int, walDir
 	}
 
 	b := &channelBus{
-		ch:             make(chan ChangeEvent, capacity),
+		ch:             make(chan eventstream.ChangeEvent, capacity),
 		capacity:       capacity,
 		maxEventBytes:  maxEventBytes,
 		maxQueuedBytes: maxQueuedBytes,
@@ -179,14 +187,14 @@ func NewChannelBusWithLimits(capacity, maxEventBytes, maxQueuedBytes int, walDir
 }
 
 // QueueBudgetSnapshot reports a conservative serialized-payload bound for the
-// in-memory wake-up channel. Actual ChangeEvent object overhead is additional.
+// in-memory wake-up channel. Actual eventstream.ChangeEvent object overhead is additional.
 type QueueBudgetSnapshot struct {
 	QueuedItems     int
 	MaxQueuedItems  int
 	UpperBoundBytes int
 	MaxQueuedBytes  int
 	MaxEventBytes   int
-	// OldestAge is a conservative upper bound because EventBus subscribers read
+	// OldestAge is a conservative upper bound because eventstream.Bus subscribers read
 	// directly from the public channel and cannot report dequeue timestamps.
 	OldestAge time.Duration
 }
@@ -259,7 +267,7 @@ func (b *channelBus) WALBacklog() WALBacklogSnapshot {
 	return snapshot
 }
 
-func (b *channelBus) Publish(event ChangeEvent) error {
+func (b *channelBus) Publish(event eventstream.ChangeEvent) error {
 	_, err := b.publishWithSourceQueueCallbacks(event, nil, nil)
 	return err
 }
@@ -268,7 +276,7 @@ func (b *channelBus) Publish(event ChangeEvent) error {
 // when the bounded source wake-up queue is full. onQueue is called immediately
 // before attempting the nonblocking send; onDrop clears any corresponding
 // source-event deduplication marker when that send cannot fit.
-func (b *channelBus) publishWithSourceQueueCallbacks(event ChangeEvent, onQueue, onDrop func()) (bool, error) {
+func (b *channelBus) publishWithSourceQueueCallbacks(event eventstream.ChangeEvent, onQueue, onDrop func()) (bool, error) {
 	if event.ID == "" {
 		event.ID = contract.NewEventID()
 	}
@@ -334,14 +342,14 @@ func (b *channelBus) publishWithSourceQueueCallbacks(event ChangeEvent, onQueue,
 // DrainWAL replays all events from the WAL file and any leftover .flushing files
 // (from a crash during a previous flush rotation). Returns the total count of
 // replayed events.
-func (b *channelBus) DrainWAL(handler func(ChangeEvent)) (int, error) {
+func (b *channelBus) DrainWAL(handler func(eventstream.ChangeEvent)) (int, error) {
 	return b.DrainWALBatch(0, handler)
 }
 
 // DrainWALBatch rotates the current file to create a stable read set, then
 // processes at most limit valid events. Processed records remain durable until
 // the consumer acknowledges their IDs after its database commit.
-func (b *channelBus) DrainWALBatch(limit int, handler func(ChangeEvent)) (int, error) {
+func (b *channelBus) DrainWALBatch(limit int, handler func(eventstream.ChangeEvent)) (int, error) {
 	if b.walDir == "" {
 		return 0, nil
 	}
@@ -451,7 +459,7 @@ func (b *channelBus) AcknowledgeWAL(eventIDs []string) error {
 			if line == "" {
 				continue
 			}
-			var event ChangeEvent
+			var event eventstream.ChangeEvent
 			if json.Unmarshal([]byte(strings.TrimSpace(line)), &event) == nil {
 				if _, ok := ack[event.ID]; ok {
 					continue
@@ -525,7 +533,7 @@ func replaceFileAtomically(dir, path, content string) (err error) {
 	return nil
 }
 
-func (b *channelBus) drainFileLimit(path string, limit int, handler func(ChangeEvent)) (int, error) {
+func (b *channelBus) drainFileLimit(path string, limit int, handler func(eventstream.ChangeEvent)) (int, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -542,7 +550,7 @@ func (b *channelBus) drainFileLimit(path string, limit int, handler func(ChangeE
 		if limit > 0 && count >= limit {
 			break
 		}
-		var event ChangeEvent
+		var event eventstream.ChangeEvent
 		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
 			slog.Warn("analytics: skipping corrupt WAL line", "path", path, "error", err)
 			recordErr = errors.Join(recordErr, fmt.Errorf("corrupt WAL record in %s: %w", path, err))
@@ -797,7 +805,7 @@ func (b *channelBus) CommitWALRotation(oldWALPath string) error {
 	return nil
 }
 
-func (b *channelBus) Subscribe() (<-chan ChangeEvent, error) {
+func (b *channelBus) Subscribe() (<-chan eventstream.ChangeEvent, error) {
 	return b.ch, nil
 }
 
@@ -911,7 +919,7 @@ func (b *channelBus) writeWAL(data []byte, persistedAt time.Time) error {
 		return fmt.Errorf("encode WAL persistence timestamp: %w", err)
 	}
 	// Add the persistence timestamp as a top-level WAL-only field. Existing
-	// ChangeEvent decoders ignore unknown fields, preserving old readers.
+	// eventstream.ChangeEvent decoders ignore unknown fields, preserving old readers.
 	line := make([]byte, 0, len(data)+len(encodedAt)+32)
 	line = append(line, data[:len(data)-1]...)
 	line = append(line, `,"_kora_wal_written_at":`...)

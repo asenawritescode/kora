@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"github.com/asenawritescode/kora/internal/eventbus"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"strings"
 	"testing"
 	"time"
@@ -29,9 +31,9 @@ func (s analyticsCacheSnapshotStub) AnalyticsQueryCacheSnapshot() api.AnalyticsQ
 func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	reader := metric.NewManualReader()
 	provider := metric.NewMeterProvider(metric.WithReader(reader))
-	bus := analytics.NewChannelBusWithLimits(2, 1024, 2048, t.TempDir())
+	bus := eventbus.NewChannelBusWithLimits(2, 1024, 2048, t.TempDir())
 	defer bus.Close()
-	fanout, err := analytics.NewMultiBus(bus)
+	fanout, err := eventbus.NewMultiBus(bus)
 	if err != nil {
 		t.Fatal("create analytics listener fanout:", err)
 	}
@@ -40,10 +42,10 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	if err := fanout.TryAddListener(listener); err != nil {
 		t.Fatal("register analytics listener:", err)
 	}
-	if err := bus.Publish(analytics.ChangeEvent{ID: "metric-event", Site: "tenant", Doctype: "Thing", DocName: "1", Operation: analytics.EventInsert}); err != nil {
+	if err = bus.Publish(eventstream.ChangeEvent{ID: "metric-event", Site: "tenant", Doctype: "Thing", DocName: "1", Operation: eventstream.EventInsert}); err != nil {
 		t.Fatal("publish analytics metric fixture:", err)
 	}
-	if err := bus.Publish(analytics.ChangeEvent{ID: "metric-oversized", Site: "tenant", Doctype: "Thing", DocName: "2", Operation: analytics.EventInsert, Data: map[string]any{"payload": strings.Repeat("x", 2048)}}); err == nil {
+	if err = bus.Publish(eventstream.ChangeEvent{ID: "metric-oversized", Site: "tenant", Doctype: "Thing", DocName: "2", Operation: eventstream.EventInsert, Data: map[string]any{"payload": strings.Repeat("x", 2048)}}); err == nil {
 		t.Fatal("oversized analytics fixture was accepted")
 	}
 	deadline := time.Now().Add(time.Second)
@@ -130,7 +132,7 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 		t.Fatal("reserve upload budget:", err)
 	}
 	defer releaseUpload()
-	listenerQueueAdmission, err := analytics.NewAnalyticsQueueAdmissionWithLimits(2048, 2)
+	listenerQueueAdmission, err := eventbus.NewQueueAdmissionWithLimits(2048, 2)
 	if err != nil {
 		t.Fatal("create listener queue admission:", err)
 	}
@@ -150,8 +152,8 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	durableScan.sweeps.Store(3)
 	durableScan.lastSweep = time.Now().Add(-2 * time.Second)
 	durableScan.beginColdWALScan("")
-	durableScan.recordColdWALBacklog(analytics.WALBacklogSnapshot{Pending: true, AgeKnown: true, OldestAge: 3 * time.Second, Bytes: 2048, BytesKnown: true})
-	durableScan.recordColdWALBacklog(analytics.WALBacklogSnapshot{Pending: true, AgeKnown: false, BytesKnown: true})
+	durableScan.recordColdWALBacklog(eventbus.WALBacklogSnapshot{Pending: true, AgeKnown: true, OldestAge: 3 * time.Second, Bytes: 2048, BytesKnown: true})
+	durableScan.recordColdWALBacklog(eventbus.WALBacklogSnapshot{Pending: true, AgeKnown: false, BytesKnown: true})
 	durableScan.publishColdWALSnapshot()
 	platformDB, _, err := sqlmock.New()
 	if err != nil {
@@ -221,7 +223,7 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	if values["kora.analytics.queue.items"] != 0 || values["kora.analytics.queue.upper_bound_bytes"] != 0 || values["kora.analytics.queue.max_items"] != 2 || values["kora.analytics.queue.max_bytes"] != 2048 || values["kora.analytics.queue.oldest_age_upper_bound_ns"] != 0 {
 		t.Fatalf("analytics queue metrics = %v", values)
 	}
-	if values["kora.analytics.listeners.active"] != 1 || values["kora.analytics.listeners.capacity"] != analytics.DefaultMaxListeners || values["kora.analytics.listeners.queued_items"] != 1 || values["kora.analytics.listeners.queue_upper_bound_bytes"] != 1024 || values["kora.analytics.listeners.queue_max_bytes"] != analytics.MaxListenerQueueSize*1024 || values["kora.analytics.listeners.oldest_age_upper_bound_ns"] <= 0 {
+	if values["kora.analytics.listeners.active"] != 1 || values["kora.analytics.listeners.capacity"] != eventbus.DefaultMaxListeners || values["kora.analytics.listeners.queued_items"] != 1 || values["kora.analytics.listeners.queue_upper_bound_bytes"] != 1024 || values["kora.analytics.listeners.queue_max_bytes"] != eventbus.MaxListenerQueueSize*1024 || values["kora.analytics.listeners.oldest_age_upper_bound_ns"] <= 0 {
 		t.Fatalf("analytics listener queue metrics = %v", values)
 	}
 	if values["kora.analytics.events.dropped"] != 1 {

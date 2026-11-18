@@ -5,6 +5,7 @@ package analytics
 import (
 	"context"
 	"database/sql"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,7 +108,7 @@ func TestLibSQLRebuildCutoffAndLaterEvents(t *testing.T) {
 		t.Fatal("rebuild analytics snapshot:", err)
 	}
 	worker := NewWorker(newFakeBus(), database, dialect, registry, "tenant-a", LoadConfig())
-	worker.process(ChangeEvent{ID: "libsql-event-1", Sequence: "1", Site: "tenant-a", Doctype: "Customer", Operation: EventInsert,
+	worker.process(eventstream.ChangeEvent{ID: "libsql-event-1", Sequence: "1", Site: "tenant-a", Doctype: "Customer", Operation: eventstream.EventInsert,
 		Timestamp: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC), Data: map[string]any{"name": "CUST-1"}})
 	if err := worker.Flush(); err != nil {
 		t.Fatal("flush event represented by rebuild:", err)
@@ -140,7 +141,7 @@ func TestLibSQLRebuildCutoffAndLaterEvents(t *testing.T) {
 	if err := mutation.Commit(); err != nil {
 		t.Fatal("commit later source mutation:", err)
 	}
-	worker.process(ChangeEvent{ID: "libsql-event-2", Sequence: "2", Site: "tenant-a", Doctype: "Customer", Operation: EventInsert,
+	worker.process(eventstream.ChangeEvent{ID: "libsql-event-2", Sequence: "2", Site: "tenant-a", Doctype: "Customer", Operation: eventstream.EventInsert,
 		Timestamp: time.Date(2026, 10, 14, 1, 0, 0, 0, time.UTC), Data: map[string]any{"name": "CUST-2"}})
 	// Keep the same tenant rebuild lock used by Backfill while a concurrent
 	// flush sees the event. The snapshot and cutoff commit together; flush must

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"io"
 	"net/http"
 	"sort"
@@ -25,7 +26,7 @@ import (
 // process-default query cache.
 type AnalyticsOptions struct {
 	// EventBuses maps a site name to its event bus.
-	EventBuses map[string]analytics.EventBus
+	EventBuses map[string]eventstream.Bus
 	// RuntimeServices supplies per-site runtime services (event bus, rebuild
 	// worker) and the query cache when Cache is nil.
 	RuntimeServices *SiteRuntimeServices

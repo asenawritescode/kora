@@ -1,4 +1,4 @@
-package analytics
+package eventbus
 
 import (
 	"fmt"
@@ -7,18 +7,19 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/eventstream"
 )
 
-// MultiBus wraps an EventBus and is its sole subscriber, fanning each event
+// MultiBus wraps an eventstream.Bus and is its sole subscriber, fanning each event
 // out to independent listeners. Consumers should subscribe through MultiBus
 // rather than competing to read from the inner channel.
 type MultiBus struct {
-	inner                           EventBus
+	inner                           eventstream.Bus
 	mu                              sync.RWMutex
-	channels                        []chan ChangeEvent
-	realtime                        map[chan ChangeEvent]struct{}
-	oldestQueuedAt                  map[chan ChangeEvent]time.Time
-	queuedReservations              map[chan ChangeEvent][]uint64
+	channels                        []chan eventstream.ChangeEvent
+	realtime                        map[chan eventstream.ChangeEvent]struct{}
+	oldestQueuedAt                  map[chan eventstream.ChangeEvent]time.Time
+	queuedReservations              map[chan eventstream.ChangeEvent][]uint64
 	pendingSourceEvents             map[string]int
 	queueAdmission                  *QueueAdmission
 	maxListeners                    int
@@ -29,14 +30,15 @@ type MultiBus struct {
 	dropped                         atomic.Int64
 	subscriberOverflows             atomic.Int64
 	subscriberRegistrationsRejected atomic.Int64
-	source                          <-chan ChangeEvent
+	source                          <-chan eventstream.ChangeEvent
 	done                            chan struct{}
 	closeOnce                       sync.Once
 	doneOnce                        sync.Once
 	closeErr                        error
 }
 
-func (mb *MultiBus) Publish(event ChangeEvent) error {
+// Publish writes the event to the inner bus, then fans it out to listeners.
+func (mb *MultiBus) Publish(event eventstream.ChangeEvent) error {
 	if mb == nil {
 		return fmt.Errorf("multi bus is required")
 	}
@@ -54,7 +56,7 @@ func (mb *MultiBus) Publish(event ChangeEvent) error {
 		event.ID = contract.NewEventID()
 	}
 	if publisher, ok := mb.inner.(interface {
-		publishWithSourceQueueCallbacks(ChangeEvent, func(), func()) (bool, error)
+		publishWithSourceQueueCallbacks(eventstream.ChangeEvent, func(), func()) (bool, error)
 	}); ok {
 		_, err := publisher.publishWithSourceQueueCallbacks(event, func() {
 			mb.mu.Lock()
@@ -91,7 +93,7 @@ func (mb *MultiBus) QueueBudget() QueueBudgetSnapshot {
 
 // Subscribe registers a buffered listener. Long-lived consumers should remove
 // their listener explicitly when their context ends.
-func (mb *MultiBus) Subscribe() (<-chan ChangeEvent, error) {
+func (mb *MultiBus) Subscribe() (<-chan eventstream.ChangeEvent, error) {
 	ch := mb.NewListenerQueue(false)
 	if err := mb.TryAddListener(ch); err != nil {
 		return nil, err
@@ -99,10 +101,13 @@ func (mb *MultiBus) Subscribe() (<-chan ChangeEvent, error) {
 	return ch, nil
 }
 
-func (mb *MultiBus) DrainWAL(handler func(ChangeEvent)) (int, error) {
+// DrainWAL drains the inner bus WAL through handler.
+func (mb *MultiBus) DrainWAL(handler func(eventstream.ChangeEvent)) (int, error) {
 	return mb.inner.DrainWAL(handler)
 }
-func (mb *MultiBus) DrainWALBatch(limit int, handler func(ChangeEvent)) (int, error) {
+
+// DrainWALBatch drains at most limit WAL events when the inner bus supports it.
+func (mb *MultiBus) DrainWALBatch(limit int, handler func(eventstream.ChangeEvent)) (int, error) {
 	if drainer, ok := mb.inner.(WALBatchDrainer); ok {
 		return drainer.DrainWALBatch(limit, handler)
 	}
@@ -111,14 +116,14 @@ func (mb *MultiBus) DrainWALBatch(limit int, handler func(ChangeEvent)) (int, er
 func (mb *MultiBus) RotateWAL() (string, error)          { return mb.inner.RotateWAL() }
 func (mb *MultiBus) CommitWALRotation(path string) error { return mb.inner.CommitWALRotation(path) }
 func (mb *MultiBus) AcknowledgeWAL(ids []string) error {
-	if ack, ok := mb.inner.(EventWALAcknowledger); ok {
+	if ack, ok := mb.inner.(eventstream.WALAcknowledger); ok {
 		return ack.AcknowledgeWAL(ids)
 	}
 	return fmt.Errorf("event bus does not support per-event WAL acknowledgment")
 }
 
-// NewMultiBus creates and starts a fan-out wrapper around an existing EventBus.
-func NewMultiBus(inner EventBus) (*MultiBus, error) {
+// NewMultiBus creates and starts a fan-out wrapper around an existing eventstream.Bus.
+func NewMultiBus(inner eventstream.Bus) (*MultiBus, error) {
 	mb, err := NewDeferredMultiBus(inner)
 	if err != nil {
 		return nil, err
@@ -132,11 +137,11 @@ func NewMultiBus(inner EventBus) (*MultiBus, error) {
 
 // NewDeferredMultiBus prepares a fan-out wrapper without starting a goroutine.
 // The owner calls Start when its process or tenant generation becomes active.
-func NewDeferredMultiBus(inner EventBus) (*MultiBus, error) {
+func NewDeferredMultiBus(inner eventstream.Bus) (*MultiBus, error) {
 	if inner == nil {
 		return nil, fmt.Errorf("multi bus inner event bus is required")
 	}
-	mb := &MultiBus{inner: inner, done: make(chan struct{}), maxListeners: DefaultMaxListeners, listenerMaxBytes: DefaultListenerQueueBytes, oldestQueuedAt: make(map[chan ChangeEvent]time.Time), queuedReservations: make(map[chan ChangeEvent][]uint64), pendingSourceEvents: make(map[string]int)}
+	mb := &MultiBus{inner: inner, done: make(chan struct{}), maxListeners: DefaultMaxListeners, listenerMaxBytes: DefaultListenerQueueBytes, oldestQueuedAt: make(map[chan eventstream.ChangeEvent]time.Time), queuedReservations: make(map[chan eventstream.ChangeEvent][]uint64), pendingSourceEvents: make(map[string]int)}
 	ch, err := inner.Subscribe()
 	if err != nil {
 		return nil, err
@@ -152,7 +157,7 @@ const DefaultListenerQueueBytes = 16 << 20
 const DefaultRealtimeListenerQueueBytes = 16 << 20
 
 // MaxListenerQueueSize bounds the number of events a listener may retain.
-// Event payloads are already bounded by the underlying EventBus configuration.
+// Event payloads are already bounded by the underlying eventstream.Bus configuration.
 const MaxListenerQueueSize = 64
 
 type ListenerQueueSnapshot struct {
@@ -186,9 +191,10 @@ func (mb *MultiBus) ListenerQueueCapacity(realtime bool) int {
 	return capacity
 }
 
-func (mb *MultiBus) NewListenerQueue(realtime bool) chan ChangeEvent {
+// NewListenerQueue returns a buffered channel sized for one listener.
+func (mb *MultiBus) NewListenerQueue(realtime bool) chan eventstream.ChangeEvent {
 	capacity := mb.ListenerQueueCapacity(realtime)
-	return make(chan ChangeEvent, capacity)
+	return make(chan eventstream.ChangeEvent, capacity)
 }
 
 func (mb *MultiBus) ListenerQueueBudget() ListenerQueueSnapshot {
@@ -302,7 +308,7 @@ func (mb *MultiBus) reapConsumedLocked() {
 	}
 }
 
-func (mb *MultiBus) releaseListenerReservationsLocked(listener chan ChangeEvent) {
+func (mb *MultiBus) releaseListenerReservationsLocked(listener chan eventstream.ChangeEvent) {
 	reservations := mb.queuedReservations[listener]
 	var released uint64
 	for _, bytes := range reservations {
@@ -376,7 +382,7 @@ func (mb *MultiBus) removePendingSourceEventLocked(id string) {
 	mb.pendingSourceEvents[id] = pending - 1
 }
 
-func (mb *MultiBus) fanout(event ChangeEvent) {
+func (mb *MultiBus) fanout(event eventstream.ChangeEvent) {
 	mb.mu.Lock()
 	defer mb.mu.Unlock()
 	if mb.closed {
@@ -405,7 +411,7 @@ func (mb *MultiBus) fanout(event ChangeEvent) {
 	}
 }
 
-func (mb *MultiBus) recordListenerOverflowLocked(listener chan ChangeEvent, closeOnOverflow bool, index *int) {
+func (mb *MultiBus) recordListenerOverflowLocked(listener chan eventstream.ChangeEvent, closeOnOverflow bool, index *int) {
 	mb.dropped.Add(1)
 	mb.subscriberOverflows.Add(1)
 	if !closeOnOverflow {
@@ -421,7 +427,7 @@ func (mb *MultiBus) recordListenerOverflowLocked(listener chan ChangeEvent, clos
 	mb.channels = append(mb.channels[:*index], mb.channels[*index+1:]...)
 }
 
-func drainRealtimeQueue(ch <-chan ChangeEvent) {
+func drainRealtimeQueue(ch <-chan eventstream.ChangeEvent) {
 	for {
 		select {
 		case <-ch:
@@ -434,24 +440,24 @@ func drainRealtimeQueue(ch <-chan ChangeEvent) {
 // AddListener registers a new subscriber channel. Events are fanned out to all listeners.
 // The channel should be buffered to avoid blocking the fan-out goroutine; the
 // caller must only receive from it and must not send to or close it.
-func (mb *MultiBus) AddListener(ch chan ChangeEvent) {
+func (mb *MultiBus) AddListener(ch chan eventstream.ChangeEvent) {
 	_ = mb.TryAddListener(ch)
 }
 
 // TryAddListener registers a listener or returns a capacity/closed error.
 // On error the supplied channel is closed and is not owned by the bus.
-func (mb *MultiBus) TryAddListener(ch chan ChangeEvent) error {
+func (mb *MultiBus) TryAddListener(ch chan eventstream.ChangeEvent) error {
 	return mb.addListener(ch, false)
 }
 
 // AddRealtimeListener registers a bounded local realtime queue. If it falls
 // behind, MultiBus closes and removes it so the stream handler can reconnect
 // and the client can refetch authorized state.
-func (mb *MultiBus) AddRealtimeListener(ch chan ChangeEvent) error {
+func (mb *MultiBus) AddRealtimeListener(ch chan eventstream.ChangeEvent) error {
 	return mb.addListener(ch, true)
 }
 
-func (mb *MultiBus) addListener(ch chan ChangeEvent, closeOnOverflow bool) error {
+func (mb *MultiBus) addListener(ch chan eventstream.ChangeEvent, closeOnOverflow bool) error {
 	if ch == nil {
 		return fmt.Errorf("listener channel is required")
 	}
@@ -487,7 +493,7 @@ func (mb *MultiBus) addListener(ch chan ChangeEvent, closeOnOverflow bool) error
 		if existing == ch {
 			if closeOnOverflow {
 				if mb.realtime == nil {
-					mb.realtime = make(map[chan ChangeEvent]struct{})
+					mb.realtime = make(map[chan eventstream.ChangeEvent]struct{})
 				}
 				mb.realtime[ch] = struct{}{}
 			}
@@ -508,11 +514,11 @@ func (mb *MultiBus) addListener(ch chan ChangeEvent, closeOnOverflow bool) error
 	}
 	mb.channels = append(mb.channels, ch)
 	if mb.oldestQueuedAt == nil {
-		mb.oldestQueuedAt = make(map[chan ChangeEvent]time.Time)
+		mb.oldestQueuedAt = make(map[chan eventstream.ChangeEvent]time.Time)
 	}
 	if closeOnOverflow {
 		if mb.realtime == nil {
-			mb.realtime = make(map[chan ChangeEvent]struct{})
+			mb.realtime = make(map[chan eventstream.ChangeEvent]struct{})
 		}
 		mb.realtime[ch] = struct{}{}
 	}
@@ -520,7 +526,7 @@ func (mb *MultiBus) addListener(ch chan ChangeEvent, closeOnOverflow bool) error
 }
 
 // RemoveListener removes a subscriber channel.
-func (mb *MultiBus) RemoveListener(ch chan ChangeEvent) {
+func (mb *MultiBus) RemoveListener(ch chan eventstream.ChangeEvent) {
 	mb.mu.Lock()
 	defer mb.mu.Unlock()
 	for i, c := range mb.channels {
@@ -572,7 +578,7 @@ func (mb *MultiBus) Close() error {
 		}
 		mb.channels = nil
 		mb.realtime = nil
-		mb.oldestQueuedAt = make(map[chan ChangeEvent]time.Time)
+		mb.oldestQueuedAt = make(map[chan eventstream.ChangeEvent]time.Time)
 		mb.mu.Unlock()
 		mb.closeErr = mb.inner.Close()
 		if !started {
@@ -606,5 +612,5 @@ func (mb *MultiBus) releaseUnstartedSourceQueue() {
 	}
 }
 
-// Inner returns the wrapped EventBus.
-func (mb *MultiBus) Inner() EventBus { return mb.inner }
+// Inner returns the wrapped eventstream.Bus.
+func (mb *MultiBus) Inner() eventstream.Bus { return mb.inner }

@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"os"
 	"testing"
 	"time"
@@ -19,11 +20,11 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if cfg.ChannelSize != 1000 {
 		t.Errorf("default channel size should be 1000, got %d", cfg.ChannelSize)
 	}
-	if cfg.MaxEventBytes != DefaultMaxEventBytes {
-		t.Errorf("default max event size = %d, want %d", cfg.MaxEventBytes, DefaultMaxEventBytes)
+	if cfg.MaxEventBytes != eventbus.DefaultMaxEventBytes {
+		t.Errorf("default max event size = %d, want %d", cfg.MaxEventBytes, eventbus.DefaultMaxEventBytes)
 	}
-	if cfg.MaxQueuedBytes != DefaultMaxQueuedBytes {
-		t.Errorf("default max queued bytes = %d, want %d", cfg.MaxQueuedBytes, DefaultMaxQueuedBytes)
+	if cfg.MaxQueuedBytes != eventbus.DefaultMaxQueuedBytes {
+		t.Errorf("default max queued bytes = %d, want %d", cfg.MaxQueuedBytes, eventbus.DefaultMaxQueuedBytes)
 	}
 	if cfg.BatchSize != 100 {
 		t.Errorf("default batch size should be 100, got %d", cfg.BatchSize)

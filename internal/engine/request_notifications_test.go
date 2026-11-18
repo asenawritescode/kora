@@ -2,17 +2,17 @@ package engine
 
 import (
 	"context"
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"testing"
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/eventstream"
 	"github.com/asenawritescode/kora/internal/notifications"
 )
 
 func TestInboxNotificationSenderPublishesRecipientScopedInvalidationOnly(t *testing.T) {
-	bus := analytics.NewChannelBusWithLimits(2, 2048, 4096, t.TempDir())
+	bus := eventbus.NewChannelBusWithLimits(2, 2048, 4096, t.TempDir())
 	defer bus.Close()
 	events, err := bus.Subscribe()
 	if err != nil {

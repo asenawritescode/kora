@@ -7,13 +7,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"net/url"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/eventstream"
 	"github.com/asenawritescode/kora/internal/notifications"
@@ -182,7 +182,7 @@ func runRequestNotificationOutboxLifecycle(t *testing.T, database *sql.DB, diale
 	if _, err := database.ExecContext(ctx, db.Rebind(dialect, `UPDATE _kora_notification_delivery SET available_at=? WHERE tenant_id=? AND request_id=?`), now, string(tenant), string(requestID)); err != nil {
 		t.Fatalf("%s make retry due: %v", dialect.DriverName(), err)
 	}
-	bus := analytics.NewChannelBusWithLimits(2, 2048, 4096, t.TempDir())
+	bus := eventbus.NewChannelBusWithLimits(2, 2048, 4096, t.TempDir())
 	defer bus.Close()
 	events, err := bus.Subscribe()
 	if err != nil {

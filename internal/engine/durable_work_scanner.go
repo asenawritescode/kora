@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"log/slog"
 	"sort"
 	"strings"
@@ -419,16 +420,16 @@ func (s *DurableWorkScanner) probeTenant(ctx context.Context, descriptor site.De
 	}
 	config := site.ReconstructSiteConfigFromDBInfo(info, s.common)
 	if s.analytics != nil && strings.TrimSpace(s.analytics.WALDir) != "" && strings.TrimSpace(info.SiteID) != "" {
-		backlog, err := analytics.InspectWALBacklog(AnalyticsTenantWALDir(s.analytics.WALDir, info.SiteID))
-		if err != nil {
-			slog.Warn("analytics WAL probe failed", "tenant_id", descriptor.SiteID, "error", err)
+		backlog, walErr := eventbus.InspectWALBacklog(AnalyticsTenantWALDir(s.analytics.WALDir, info.SiteID))
+		if walErr != nil {
+			slog.Warn("analytics WAL probe failed", "tenant_id", descriptor.SiteID, "error", walErr)
 		}
 		s.recordColdWALBacklog(backlog)
 		if backlog.Pending {
 			return true, nil
 		}
-		if err != nil {
-			return false, err
+		if walErr != nil {
+			return false, walErr
 		}
 	}
 	var admission interface {
@@ -450,7 +451,7 @@ func (s *DurableWorkScanner) probeTenant(ctx context.Context, descriptor site.De
 		return due, err
 	}
 	if s.analytics != nil && strings.TrimSpace(s.analytics.WALDir) != "" && strings.TrimSpace(info.SiteID) != "" {
-		backlog, walErr := analytics.InspectWALBacklog(AnalyticsTenantWALDir(s.analytics.WALDir, info.SiteID))
+		backlog, walErr := eventbus.InspectWALBacklog(AnalyticsTenantWALDir(s.analytics.WALDir, info.SiteID))
 		if walErr != nil {
 			if backlog.Pending {
 				s.recordColdWALBacklog(backlog)
@@ -481,7 +482,7 @@ func withTenantProbeAdmission(ctx context.Context, admission interface {
 	return work()
 }
 
-func (s *DurableWorkScanner) recordColdWALBacklog(backlog analytics.WALBacklogSnapshot) {
+func (s *DurableWorkScanner) recordColdWALBacklog(backlog eventbus.WALBacklogSnapshot) {
 	if s == nil {
 		return
 	}

@@ -1,4 +1,4 @@
-package analytics
+package eventbus
 
 import (
 	"context"
@@ -6,19 +6,20 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/eventstream"
 )
 
 func TestEnvelopeOp(t *testing.T) {
 	tests := []struct {
 		eventType string
-		want      EventOp
+		want      eventstream.EventOp
 	}{
-		{"kora.sales_invoice.after_insert", EventInsert},
-		{"kora.sales_invoice.after_delete", EventDelete},
-		{"kora.sales_invoice.after_submit", EventSubmit},
-		{"kora.sales_invoice.after_cancel", EventCancel},
-		{"kora.sales_invoice.after_save", EventUpdate},
-		{"kora.sales_invoice.unknown", EventUpdate},
+		{"kora.sales_invoice.after_insert", eventstream.EventInsert},
+		{"kora.sales_invoice.after_delete", eventstream.EventDelete},
+		{"kora.sales_invoice.after_submit", eventstream.EventSubmit},
+		{"kora.sales_invoice.after_cancel", eventstream.EventCancel},
+		{"kora.sales_invoice.after_save", eventstream.EventUpdate},
+		{"kora.sales_invoice.unknown", eventstream.EventUpdate},
 	}
 	for _, tt := range tests {
 		if got := envelopeOp(tt.eventType); got != tt.want {
@@ -56,11 +57,11 @@ func TestLocalProviderPublish(t *testing.T) {
 }
 
 type capturingBus struct {
-	EventBus
-	published []ChangeEvent
+	eventstream.Bus
+	published []eventstream.ChangeEvent
 }
 
-func (b *capturingBus) Publish(event ChangeEvent) error {
+func (b *capturingBus) Publish(event eventstream.ChangeEvent) error {
 	b.published = append(b.published, event)
 	return nil
 }

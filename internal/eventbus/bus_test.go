@@ -1,4 +1,4 @@
-package analytics
+package eventbus
 
 import (
 	"encoding/json"
@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/eventstream"
 )
 
 func TestChannelBus_PublishSubscribe(t *testing.T) {
@@ -21,11 +23,11 @@ func TestChannelBus_PublishSubscribe(t *testing.T) {
 		t.Fatalf("Subscribe failed: %v", err)
 	}
 
-	event := ChangeEvent{
+	event := eventstream.ChangeEvent{
 		Site:      "test.local",
 		Doctype:   "Customer",
 		DocName:   "CUST-0001",
-		Operation: EventInsert,
+		Operation: eventstream.EventInsert,
 		Timestamp: time.Now(),
 		Data:      map[string]any{"name": "Acme Corp"},
 	}
@@ -42,7 +44,7 @@ func TestChannelBus_PublishSubscribe(t *testing.T) {
 		if received.DocName != "CUST-0001" {
 			t.Errorf("expected doc 'CUST-0001', got %q", received.DocName)
 		}
-		if received.Operation != EventInsert {
+		if received.Operation != eventstream.EventInsert {
 			t.Errorf("expected op 'insert', got %q", received.Operation)
 		}
 	case <-time.After(time.Second):
@@ -65,8 +67,8 @@ func TestChannelBusRejectsOversizedEventBeforeWALWrite(t *testing.T) {
 	walDir := filepath.Join(t.TempDir(), "wal")
 	bus := NewChannelBusWithMaxEventBytes(4, 96, walDir).(*channelBus)
 	defer bus.Close()
-	err := bus.Publish(ChangeEvent{
-		Site: "tenant", Doctype: "Record", DocName: "large", Operation: EventInsert,
+	err := bus.Publish(eventstream.ChangeEvent{
+		Site: "tenant", Doctype: "Record", DocName: "large", Operation: eventstream.EventInsert,
 		Data: map[string]any{"payload": strings.Repeat("x", 512)},
 	})
 	if !errors.Is(err, ErrEventTooLarge) {
@@ -95,7 +97,7 @@ func TestChannelBusBoundsWakeupQueueByPayloadBytesWithoutLosingWALWork(t *testin
 		t.Fatalf("effective channel capacity = %d, want 2", got)
 	}
 	for i := 0; i < 3; i++ {
-		if err := bus.Publish(ChangeEvent{ID: fmt.Sprintf("evt-%d", i), Site: "tenant", Doctype: "Thing", DocName: fmt.Sprint(i), Operation: EventInsert}); err != nil {
+		if err := bus.Publish(eventstream.ChangeEvent{ID: fmt.Sprintf("evt-%d", i), Site: "tenant", Doctype: "Thing", DocName: fmt.Sprint(i), Operation: eventstream.EventInsert}); err != nil {
 			t.Fatalf("publish %d: %v", i, err)
 		}
 	}
@@ -104,7 +106,7 @@ func TestChannelBusBoundsWakeupQueueByPayloadBytesWithoutLosingWALWork(t *testin
 		t.Fatalf("queue budget snapshot = %+v", snapshot)
 	}
 	var drained []string
-	count, err := bus.DrainWAL(func(event ChangeEvent) { drained = append(drained, event.ID) })
+	count, err := bus.DrainWAL(func(event eventstream.ChangeEvent) { drained = append(drained, event.ID) })
 	if err != nil {
 		t.Fatal("drain durable events:", err)
 	}
@@ -116,11 +118,11 @@ func TestChannelBusBoundsWakeupQueueByPayloadBytesWithoutLosingWALWork(t *testin
 func TestChannelBusWALBacklogAgeSurvivesRestartAndAcknowledgment(t *testing.T) {
 	walDir := filepath.Join(t.TempDir(), "wal")
 	bus := NewChannelBus(4, walDir).(*channelBus)
-	if err := bus.Publish(ChangeEvent{ID: "older", Site: "tenant", Doctype: "Thing", DocName: "1", Operation: EventInsert}); err != nil {
+	if err := bus.Publish(eventstream.ChangeEvent{ID: "older", Site: "tenant", Doctype: "Thing", DocName: "1", Operation: eventstream.EventInsert}); err != nil {
 		t.Fatal("publish older event:", err)
 	}
 	time.Sleep(10 * time.Millisecond)
-	if err := bus.Publish(ChangeEvent{ID: "newer", Site: "tenant", Doctype: "Thing", DocName: "2", Operation: EventInsert}); err != nil {
+	if err := bus.Publish(eventstream.ChangeEvent{ID: "newer", Site: "tenant", Doctype: "Thing", DocName: "2", Operation: eventstream.EventInsert}); err != nil {
 		t.Fatal("publish newer event:", err)
 	}
 	before := bus.WALBacklog()
@@ -166,7 +168,7 @@ func TestChannelBusLegacyWALBacklogAgeIsExplicitlyUnknown(t *testing.T) {
 	if err := os.MkdirAll(walDir, 0700); err != nil {
 		t.Fatal("create WAL directory:", err)
 	}
-	legacy, err := json.Marshal(ChangeEvent{ID: "legacy", Site: "tenant", Doctype: "Thing", DocName: "1", Operation: EventInsert})
+	legacy, err := json.Marshal(eventstream.ChangeEvent{ID: "legacy", Site: "tenant", Doctype: "Thing", DocName: "1", Operation: eventstream.EventInsert})
 	if err != nil {
 		t.Fatal("encode legacy event:", err)
 	}
@@ -191,7 +193,7 @@ func TestChannelBusRecoversInterruptedWALAcknowledgmentRewrite(t *testing.T) {
 	if err := os.MkdirAll(walDir, 0700); err != nil {
 		t.Fatal("create WAL directory:", err)
 	}
-	event := ChangeEvent{ID: "interrupted-ack", Site: "tenant", Doctype: "Thing", DocName: "1", Operation: EventInsert}
+	event := eventstream.ChangeEvent{ID: "interrupted-ack", Site: "tenant", Doctype: "Thing", DocName: "1", Operation: eventstream.EventInsert}
 	line, err := json.Marshal(event)
 	if err != nil {
 		t.Fatal("encode WAL event:", err)
@@ -207,8 +209,8 @@ func TestChannelBusRecoversInterruptedWALAcknowledgmentRewrite(t *testing.T) {
 	}
 	bus := NewChannelBus(4, walDir).(*channelBus)
 	defer bus.Close()
-	var replayed []ChangeEvent
-	count, err := bus.DrainWAL(func(got ChangeEvent) { replayed = append(replayed, got) })
+	var replayed []eventstream.ChangeEvent
+	count, err := bus.DrainWAL(func(got eventstream.ChangeEvent) { replayed = append(replayed, got) })
 	if err != nil || count != 1 || len(replayed) != 1 || replayed[0].ID != event.ID {
 		t.Fatalf("DrainWAL() = (%d, %v), events=%+v; want recovered event %q", count, err, replayed, event.ID)
 	}
@@ -229,7 +231,7 @@ func TestChannelBusByteBudgetBelowEventLimitLowersEffectiveEventLimit(t *testing
 	if bus.maxEventBytes != 1024 || cap(bus.ch) != 1 {
 		t.Fatalf("effective event/channel limits = (%d, %d), want (1024, 1)", bus.maxEventBytes, cap(bus.ch))
 	}
-	err := bus.Publish(ChangeEvent{ID: "oversized-for-queue-budget", Site: "tenant", Doctype: "Thing", DocName: "1", Operation: EventInsert, Data: map[string]any{"body": strings.Repeat("x", 1500)}})
+	err := bus.Publish(eventstream.ChangeEvent{ID: "oversized-for-queue-budget", Site: "tenant", Doctype: "Thing", DocName: "1", Operation: eventstream.EventInsert, Data: map[string]any{"body": strings.Repeat("x", 1500)}})
 	if !errors.Is(err, ErrEventTooLarge) {
 		t.Fatalf("Publish error = %v, want ErrEventTooLarge under effective event limit", err)
 	}
@@ -239,7 +241,7 @@ func TestChannelBusDrainReportsAndPreservesCorruptWALRecords(t *testing.T) {
 	walDir := filepath.Join(t.TempDir(), "wal[recovery]")
 	bus := NewChannelBus(8, walDir).(*channelBus)
 	defer bus.Close()
-	if err := bus.Publish(ChangeEvent{ID: "evt-before", Site: "tenant", Doctype: "Task", DocName: "1", Operation: EventInsert}); err != nil {
+	if err := bus.Publish(eventstream.ChangeEvent{ID: "evt-before", Site: "tenant", Doctype: "Task", DocName: "1", Operation: eventstream.EventInsert}); err != nil {
 		t.Fatal(err)
 	}
 	file, err := os.OpenFile(bus.currentWALPath(), os.O_APPEND|os.O_WRONLY, 0600)
@@ -252,12 +254,12 @@ func TestChannelBusDrainReportsAndPreservesCorruptWALRecords(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := bus.Publish(ChangeEvent{ID: "evt-after", Site: "tenant", Doctype: "Task", DocName: "2", Operation: EventInsert}); err != nil {
+	if err = bus.Publish(eventstream.ChangeEvent{ID: "evt-after", Site: "tenant", Doctype: "Task", DocName: "2", Operation: eventstream.EventInsert}); err != nil {
 		t.Fatal(err)
 	}
 
 	var ids []string
-	count, err := bus.DrainWAL(func(event ChangeEvent) { ids = append(ids, event.ID) })
+	count, err := bus.DrainWAL(func(event eventstream.ChangeEvent) { ids = append(ids, event.ID) })
 	if err == nil {
 		t.Fatalf("DrainWAL = (%d, %v), want two valid events and a corruption error", count, err)
 	}
@@ -288,8 +290,8 @@ func TestChannelBus_BufferFull_StillWritesToWAL(t *testing.T) {
 
 	// With WAL-first, ALL events go to WAL regardless of channel state.
 	// The channel is just a wake-up optimization.
-	bus.Publish(ChangeEvent{Site: "test", Doctype: "A", DocName: "1", Operation: EventInsert})
-	bus.Publish(ChangeEvent{Site: "test", Doctype: "B", DocName: "2", Operation: EventInsert})
+	_ = bus.Publish(eventstream.ChangeEvent{Site: "test", Doctype: "A", DocName: "1", Operation: eventstream.EventInsert})
+	_ = bus.Publish(eventstream.ChangeEvent{Site: "test", Doctype: "B", DocName: "2", Operation: eventstream.EventInsert})
 
 	// dropped should be 0 — WAL writes succeeded for both.
 	if dropped := bus.Dropped(); dropped != 0 {
@@ -315,7 +317,7 @@ func TestChannelBusPublishReturnsWALWriteFailure(t *testing.T) {
 	}
 	bus := NewChannelBus(1, blockedWalPath)
 	defer bus.Close()
-	if err := bus.Publish(ChangeEvent{Site: "test", Doctype: "A", DocName: "1", Operation: EventInsert}); err == nil {
+	if err := bus.Publish(eventstream.ChangeEvent{Site: "test", Doctype: "A", DocName: "1", Operation: eventstream.EventInsert}); err == nil {
 		t.Fatal("Publish returned success although WAL persistence failed")
 	}
 	if got := bus.(*channelBus).Dropped(); got != 1 {
@@ -330,14 +332,14 @@ func TestChannelBus_DrainWAL(t *testing.T) {
 	defer bus.Close()
 
 	// With WAL-first, all events go to WAL. Publish 3 events.
-	bus.Publish(ChangeEvent{Site: "test", Doctype: "A", DocName: "1", Operation: EventInsert})
-	bus.Publish(ChangeEvent{Site: "test", Doctype: "B", DocName: "2", Operation: EventInsert})
-	bus.Publish(ChangeEvent{Site: "test", Doctype: "C", DocName: "3", Operation: EventInsert})
+	_ = bus.Publish(eventstream.ChangeEvent{Site: "test", Doctype: "A", DocName: "1", Operation: eventstream.EventInsert})
+	_ = bus.Publish(eventstream.ChangeEvent{Site: "test", Doctype: "B", DocName: "2", Operation: eventstream.EventInsert})
+	_ = bus.Publish(eventstream.ChangeEvent{Site: "test", Doctype: "C", DocName: "3", Operation: eventstream.EventInsert})
 
 	// Drain WAL.
-	var drained []ChangeEvent
+	var drained []eventstream.ChangeEvent
 	var mu sync.Mutex
-	count, err := bus.DrainWAL(func(e ChangeEvent) {
+	count, err := bus.DrainWAL(func(e eventstream.ChangeEvent) {
 		mu.Lock()
 		drained = append(drained, e)
 		mu.Unlock()
@@ -371,7 +373,7 @@ func TestChannelBusDrainWALBatchRecoversOverflowInBoundedBatches(t *testing.T) {
 	bus := NewChannelBus(1, walDir).(*channelBus)
 	defer bus.Close()
 	for i := 1; i <= 4; i++ {
-		if err := bus.Publish(ChangeEvent{ID: fmt.Sprintf("evt-%d", i), Site: "tenant", Doctype: "Task", DocName: fmt.Sprint(i), Operation: EventInsert}); err != nil {
+		if err := bus.Publish(eventstream.ChangeEvent{ID: fmt.Sprintf("evt-%d", i), Site: "tenant", Doctype: "Task", DocName: fmt.Sprint(i), Operation: eventstream.EventInsert}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -379,15 +381,15 @@ func TestChannelBusDrainWALBatchRecoversOverflowInBoundedBatches(t *testing.T) {
 		t.Fatalf("wake channel length = %d, want capacity 1", got)
 	}
 
-	var first []ChangeEvent
-	if count, err := bus.DrainWALBatch(2, func(event ChangeEvent) { first = append(first, event) }); err != nil || count != 2 {
+	var first []eventstream.ChangeEvent
+	if count, err := bus.DrainWALBatch(2, func(event eventstream.ChangeEvent) { first = append(first, event) }); err != nil || count != 2 {
 		t.Fatalf("first bounded drain=(%d,%v), want 2 events", count, err)
 	}
 	if err := bus.AcknowledgeWAL([]string{first[0].ID, first[1].ID}); err != nil {
 		t.Fatalf("acknowledge first batch: %v", err)
 	}
-	var second []ChangeEvent
-	if count, err := bus.DrainWALBatch(2, func(event ChangeEvent) { second = append(second, event) }); err != nil || count != 2 {
+	var second []eventstream.ChangeEvent
+	if count, err := bus.DrainWALBatch(2, func(event eventstream.ChangeEvent) { second = append(second, event) }); err != nil || count != 2 {
 		t.Fatalf("second bounded drain=(%d,%v), want remaining overflow events", count, err)
 	}
 	if second[0].ID != "evt-3" || second[1].ID != "evt-4" {
@@ -402,8 +404,8 @@ func TestChannelBus_DrainWAL_WithFlushingFiles(t *testing.T) {
 	defer bus.Close()
 
 	// Publish 2 events to the WAL.
-	bus.Publish(ChangeEvent{Site: "test", Doctype: "X", DocName: "1", Operation: EventInsert})
-	bus.Publish(ChangeEvent{Site: "test", Doctype: "Y", DocName: "2", Operation: EventInsert})
+	_ = bus.Publish(eventstream.ChangeEvent{Site: "test", Doctype: "X", DocName: "1", Operation: eventstream.EventInsert})
+	_ = bus.Publish(eventstream.ChangeEvent{Site: "test", Doctype: "Y", DocName: "2", Operation: eventstream.EventInsert})
 
 	// Rotate simulates a pre-flush rotation.
 	oldPath, err := bus.RotateWAL()
@@ -415,10 +417,10 @@ func TestChannelBus_DrainWAL_WithFlushingFiles(t *testing.T) {
 	}
 
 	// Publish 1 more event to the new WAL.
-	bus.Publish(ChangeEvent{Site: "test", Doctype: "Z", DocName: "3", Operation: EventInsert})
+	_ = bus.Publish(eventstream.ChangeEvent{Site: "test", Doctype: "Z", DocName: "3", Operation: eventstream.EventInsert})
 
 	// Drain should replay both the .flushing file and the current WAL.
-	count, err := bus.DrainWAL(func(e ChangeEvent) {})
+	count, err := bus.DrainWAL(func(e eventstream.ChangeEvent) {})
 	if err != nil {
 		t.Fatalf("DrainWAL failed: %v", err)
 	}
@@ -442,10 +444,10 @@ func TestChannelBus_DrainWAL_WithFlushingFiles(t *testing.T) {
 func TestChannelBusReplayCanRetryBeforeAcknowledgment(t *testing.T) {
 	walDir := filepath.Join(t.TempDir(), "wal")
 	bus := NewChannelBus(4, walDir)
-	if err := bus.Publish(ChangeEvent{Site: "test", Doctype: "Invoice", DocName: "1", Operation: EventInsert}); err != nil {
+	if err := bus.Publish(eventstream.ChangeEvent{Site: "test", Doctype: "Invoice", DocName: "1", Operation: eventstream.EventInsert}); err != nil {
 		t.Fatal(err)
 	}
-	count, err := bus.DrainWAL(func(ChangeEvent) {})
+	count, err := bus.DrainWAL(func(eventstream.ChangeEvent) {})
 	if err != nil || count != 1 {
 		t.Fatalf("first drain=(%d,%v)", count, err)
 	}
@@ -454,7 +456,7 @@ func TestChannelBusReplayCanRetryBeforeAcknowledgment(t *testing.T) {
 	}
 	restarted := NewChannelBus(4, walDir)
 	defer restarted.Close()
-	count, err = restarted.DrainWAL(func(ChangeEvent) {})
+	count, err = restarted.DrainWAL(func(eventstream.ChangeEvent) {})
 	if err != nil || count != 1 {
 		t.Fatalf("retry drain=(%d,%v), want 1", count, err)
 	}
@@ -468,19 +470,19 @@ func TestChannelBusAcknowledgesOnlyCommittedEventIDs(t *testing.T) {
 	bus := NewChannelBus(4, walDir)
 	defer bus.Close()
 	for i := 1; i <= 3; i++ {
-		if err := bus.Publish(ChangeEvent{Site: "test", Doctype: "Invoice", DocName: fmt.Sprint(i), Operation: EventInsert}); err != nil {
+		if err := bus.Publish(eventstream.ChangeEvent{Site: "test", Doctype: "Invoice", DocName: fmt.Sprint(i), Operation: eventstream.EventInsert}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	var events []ChangeEvent
-	if _, err := bus.DrainWAL(func(event ChangeEvent) { events = append(events, event) }); err != nil {
+	var events []eventstream.ChangeEvent
+	if _, err := bus.DrainWAL(func(event eventstream.ChangeEvent) { events = append(events, event) }); err != nil {
 		t.Fatal(err)
 	}
-	if err := bus.(EventWALAcknowledger).AcknowledgeWAL([]string{events[0].ID, events[1].ID}); err != nil {
+	if err := bus.(eventstream.WALAcknowledger).AcknowledgeWAL([]string{events[0].ID, events[1].ID}); err != nil {
 		t.Fatal(err)
 	}
-	var remaining []ChangeEvent
-	if count, err := bus.DrainWAL(func(event ChangeEvent) { remaining = append(remaining, event) }); err != nil || count != 1 {
+	var remaining []eventstream.ChangeEvent
+	if count, err := bus.DrainWAL(func(event eventstream.ChangeEvent) { remaining = append(remaining, event) }); err != nil || count != 1 {
 		t.Fatalf("remaining drain=(%d,%v), want one event", count, err)
 	}
 	if remaining[0].ID != events[2].ID {
@@ -517,7 +519,7 @@ func TestChannelBus_Close(t *testing.T) {
 	}
 
 	// Publish after close should not panic.
-	err := bus.Publish(ChangeEvent{})
+	err := bus.Publish(eventstream.ChangeEvent{})
 	if err == nil {
 		t.Error("Publish after Close should return error")
 	}
@@ -535,12 +537,12 @@ func TestChannelBus_Dropped(t *testing.T) {
 	// Actually, make the walDir itself a regular file — then MkdirAll fails.
 	// Simpler: use a path that can't be written to.
 	invalidBus := &channelBus{
-		ch:     make(chan ChangeEvent, 1),
+		ch:     make(chan eventstream.ChangeEvent, 1),
 		walDir: "/proc/analytics_test_wal", // /proc is a virtual filesystem, can't create dirs
 	}
 
 	// Publish should fail the WAL write.
-	invalidBus.Publish(ChangeEvent{Site: "a", Doctype: "a", DocName: "a", Operation: EventInsert})
+	_ = invalidBus.Publish(eventstream.ChangeEvent{Site: "a", Doctype: "a", DocName: "a", Operation: eventstream.EventInsert})
 	if d := invalidBus.Dropped(); d != 1 {
 		t.Errorf("expected 1 dropped (WAL write failed), got %d", d)
 	}

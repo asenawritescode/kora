@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"os"
 	"strconv"
 	"time"
@@ -26,8 +27,8 @@ type Config struct {
 func LoadConfig() *Config {
 	cfg := &Config{
 		ChannelSize:    1000,
-		MaxEventBytes:  DefaultMaxEventBytes,
-		MaxQueuedBytes: DefaultMaxQueuedBytes,
+		MaxEventBytes:  eventbus.DefaultMaxEventBytes,
+		MaxQueuedBytes: eventbus.DefaultMaxQueuedBytes,
 		BatchSize:      DefaultAnalyticsBatchSize,
 		FlushInterval:  "1s",
 		RetentionDays:  30,
@@ -35,7 +36,7 @@ func LoadConfig() *Config {
 	}
 
 	if v := os.Getenv("KORA_ANALYTICS_CHANNEL_SIZE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= MaxChannelCapacity {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= eventbus.MaxChannelCapacity {
 			cfg.ChannelSize = n
 		}
 	}
@@ -47,7 +48,7 @@ func LoadConfig() *Config {
 	}
 
 	if v := os.Getenv("KORA_ANALYTICS_MAX_QUEUED_BYTES"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= MaxConfiguredQueuedBytes {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= eventbus.MaxConfiguredQueuedBytes {
 			cfg.MaxQueuedBytes = n
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"log/slog"
 	"sort"
 	"time"
@@ -52,7 +53,7 @@ type TenantServiceConfig struct {
 	Analytics               *analytics.Config
 	CloudRelay              *analytics.CloudRelayConfig
 	CloudUsage              *usage.Config
-	AnalyticsQueueAdmission *analytics.QueueAdmission
+	AnalyticsQueueAdmission *eventbus.QueueAdmission
 	NATS                    *natsprovider.Provider
 	ScriptRunner            script.Runner
 	HTTPAllowlist           []string
@@ -461,10 +462,10 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	if err != nil {
 		return fmt.Errorf("bootstrap tenant analytics tables: %w", err)
 	}
-	baseBus := analytics.NewChannelBusWithLimits(config.Analytics.ChannelSize, config.Analytics.MaxEventBytes, config.Analytics.MaxQueuedBytes, AnalyticsTenantWALDir(config.Analytics.WALDir, loaded.SiteID))
+	baseBus := eventbus.NewChannelBusWithLimits(config.Analytics.ChannelSize, config.Analytics.MaxEventBytes, config.Analytics.MaxQueuedBytes, AnalyticsTenantWALDir(config.Analytics.WALDir, loaded.SiteID))
 	if config.AnalyticsQueueAdmission != nil {
 		queueAware, ok := baseBus.(interface {
-			SetQueueAdmission(*analytics.QueueAdmission) error
+			SetQueueAdmission(*eventbus.QueueAdmission) error
 		})
 		if !ok {
 			_ = baseBus.Close()
@@ -475,7 +476,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 			return fmt.Errorf("configure process analytics wake-up queue admission: %w", err)
 		}
 	}
-	multiBus, err := analytics.NewDeferredMultiBus(baseBus)
+	multiBus, err := eventbus.NewDeferredMultiBus(baseBus)
 	if err != nil {
 		_ = baseBus.Close()
 		return fmt.Errorf("create tenant event fanout: %w", err)
@@ -588,7 +589,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		if config.NATS != nil {
 			destination = config.NATS
 		} else {
-			destination = analytics.NewLocalProvider(services.EventBus)
+			destination = eventbus.NewLocalProvider(services.EventBus)
 		}
 		publisher := outbox.NewPublisher(loaded.DB, destination, dialect)
 		if err := registerTenantWorkerStart(config, func() error {
@@ -951,7 +952,7 @@ func withTenantWorkAdmission(ctx context.Context, admission interface {
 
 // registerCloudWorkers starts the tenant's Cloud-facing workers, each only when
 // configured: the analytics relay and the usage reporter.
-func registerCloudWorkers(config TenantServiceConfig, loaded *knet.LoadedSite, services *tenantruntime.Services, bus *analytics.MultiBus, dialect kdb.Dialect) error {
+func registerCloudWorkers(config TenantServiceConfig, loaded *knet.LoadedSite, services *tenantruntime.Services, bus *eventbus.MultiBus, dialect kdb.Dialect) error {
 	if config.CloudRelay != nil {
 		relay := analytics.NewCloudRelay(bus, loaded.Name, *config.CloudRelay)
 		services.AnalyticsRelay = relay

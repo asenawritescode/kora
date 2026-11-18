@@ -1,14 +1,21 @@
-package analytics
+package eventbus
 
 import (
 	"errors"
 	"sync"
 )
 
-const MaxAnalyticsQueueAdmissionBytes uint64 = 4 << 30
-const DefaultAnalyticsQueueAdmissionBytes uint64 = 512 << 20
-const DefaultAnalyticsProcessMaxListeners = 4096
-const MaxAnalyticsProcessListeners = 65536
+// MaxQueueAdmissionBytes is the largest process-wide queue byte budget.
+const MaxQueueAdmissionBytes uint64 = 4 << 30
+
+// DefaultQueueAdmissionBytes is the default process-wide queue byte budget.
+const DefaultQueueAdmissionBytes uint64 = 512 << 20
+
+// DefaultProcessMaxListeners is the default process-wide listener limit.
+const DefaultProcessMaxListeners = 4096
+
+// MaxProcessListeners is the largest process-wide listener limit.
+const MaxProcessListeners = 65536
 
 var ErrAnalyticsQueueBudgetInvalid = errors.New("analytics process queue admission budget must be between 1 byte and 4 GiB")
 
@@ -38,16 +45,16 @@ type QueueSnapshot struct {
 // NewAnalyticsQueueAdmission returns a byte budget for queued analytics events
 // with the default listener limit.
 func NewAnalyticsQueueAdmission(maxBytes uint64) (*QueueAdmission, error) {
-	return NewAnalyticsQueueAdmissionWithLimits(maxBytes, DefaultAnalyticsProcessMaxListeners)
+	return NewQueueAdmissionWithLimits(maxBytes, DefaultProcessMaxListeners)
 }
 
-// NewAnalyticsQueueAdmissionWithLimits returns a budget of maxBytes queued bytes
+// NewQueueAdmissionWithLimits returns a budget of maxBytes queued bytes
 // and maxListeners process listeners, or an error if either is out of range.
-func NewAnalyticsQueueAdmissionWithLimits(maxBytes uint64, maxListeners int) (*QueueAdmission, error) {
-	if maxBytes == 0 || maxBytes > MaxAnalyticsQueueAdmissionBytes {
+func NewQueueAdmissionWithLimits(maxBytes uint64, maxListeners int) (*QueueAdmission, error) {
+	if maxBytes == 0 || maxBytes > MaxQueueAdmissionBytes {
 		return nil, ErrAnalyticsQueueBudgetInvalid
 	}
-	if maxListeners <= 0 || maxListeners > MaxAnalyticsProcessListeners {
+	if maxListeners <= 0 || maxListeners > MaxProcessListeners {
 		return nil, ErrAnalyticsListenerBudgetInvalid
 	}
 	return &QueueAdmission{maxBytes: maxBytes, maxListeners: maxListeners}, nil

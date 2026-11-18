@@ -2,6 +2,8 @@ package analytics
 
 import (
 	"encoding/json"
+	"github.com/asenawritescode/kora/internal/eventbus"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,16 +13,16 @@ import (
 )
 
 type stubBus struct {
-	ch chan ChangeEvent
+	ch chan eventstream.ChangeEvent
 }
 
-func (s *stubBus) Publish(event ChangeEvent) error         { s.ch <- event; return nil }
-func (s *stubBus) Subscribe() (<-chan ChangeEvent, error)  { return s.ch, nil }
-func (s *stubBus) DrainWAL(func(ChangeEvent)) (int, error) { return 0, nil }
-func (s *stubBus) RotateWAL() (string, error)              { return "", nil }
-func (s *stubBus) CommitWALRotation(string) error          { return nil }
-func (s *stubBus) Dropped() int64                          { return 0 }
-func (s *stubBus) Close() error                            { close(s.ch); return nil }
+func (s *stubBus) Publish(event eventstream.ChangeEvent) error         { s.ch <- event; return nil }
+func (s *stubBus) Subscribe() (<-chan eventstream.ChangeEvent, error)  { return s.ch, nil }
+func (s *stubBus) DrainWAL(func(eventstream.ChangeEvent)) (int, error) { return 0, nil }
+func (s *stubBus) RotateWAL() (string, error)                          { return "", nil }
+func (s *stubBus) CommitWALRotation(string) error                      { return nil }
+func (s *stubBus) Dropped() int64                                      { return 0 }
+func (s *stubBus) Close() error                                        { close(s.ch); return nil }
 
 func TestCloudRelayPostsFirstRecordOnlyOncePerDoctype(t *testing.T) {
 	t.Parallel()
@@ -43,8 +45,8 @@ func TestCloudRelayPostsFirstRecordOnlyOncePerDoctype(t *testing.T) {
 	}))
 	defer server.Close()
 
-	bus := &stubBus{ch: make(chan ChangeEvent, 10)}
-	mb, err := NewMultiBus(bus)
+	bus := &stubBus{ch: make(chan eventstream.ChangeEvent, 10)}
+	mb, err := eventbus.NewMultiBus(bus)
 	if err != nil {
 		t.Fatalf("NewMultiBus() error = %v", err)
 	}
@@ -61,9 +63,9 @@ func TestCloudRelayPostsFirstRecordOnlyOncePerDoctype(t *testing.T) {
 	defer relay.Stop()
 
 	now := time.Now().UTC()
-	_ = bus.Publish(ChangeEvent{Site: "tenant.example.com", Doctype: "Invoice", DocName: "INV-1", Operation: EventInsert, Timestamp: now, ModifiedBy: "a@test"})
-	_ = bus.Publish(ChangeEvent{Site: "tenant.example.com", Doctype: "Invoice", DocName: "INV-2", Operation: EventInsert, Timestamp: now.Add(time.Second), ModifiedBy: "a@test"})
-	_ = bus.Publish(ChangeEvent{Site: "tenant.example.com", Doctype: "_kora_script", DocName: "SCR-1", Operation: EventInsert, Timestamp: now.Add(2 * time.Second), ModifiedBy: "a@test"})
+	_ = bus.Publish(eventstream.ChangeEvent{Site: "tenant.example.com", Doctype: "Invoice", DocName: "INV-1", Operation: eventstream.EventInsert, Timestamp: now, ModifiedBy: "a@test"})
+	_ = bus.Publish(eventstream.ChangeEvent{Site: "tenant.example.com", Doctype: "Invoice", DocName: "INV-2", Operation: eventstream.EventInsert, Timestamp: now.Add(time.Second), ModifiedBy: "a@test"})
+	_ = bus.Publish(eventstream.ChangeEvent{Site: "tenant.example.com", Doctype: "_kora_script", DocName: "SCR-1", Operation: eventstream.EventInsert, Timestamp: now.Add(2 * time.Second), ModifiedBy: "a@test"})
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -95,16 +97,34 @@ func TestCloudRelayPostsFirstRecordOnlyOncePerDoctype(t *testing.T) {
 	relay.Stop()
 }
 
+type multiBusStub struct {
+	ch chan eventstream.ChangeEvent
+}
+
+func (s *multiBusStub) Publish(event eventstream.ChangeEvent) error { return nil }
+func (s *multiBusStub) Subscribe() (<-chan eventstream.ChangeEvent, error) {
+	s.ch = make(chan eventstream.ChangeEvent, 1)
+	return s.ch, nil
+}
+func (s *multiBusStub) DrainWAL(handler func(eventstream.ChangeEvent)) (int, error) { return 0, nil }
+func (s *multiBusStub) RotateWAL() (string, error)                                  { return "", nil }
+func (s *multiBusStub) CommitWALRotation(string) error                              { return nil }
+func (s *multiBusStub) Dropped() int64                                              { return 0 }
+func (s *multiBusStub) Close() error {
+	close(s.ch)
+	return nil
+}
+
 func TestCloudRelayRejectedSubscriptionCanStop(t *testing.T) {
 	inner := &multiBusStub{}
-	mb, err := NewDeferredMultiBus(inner)
+	mb, err := eventbus.NewDeferredMultiBus(inner)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := mb.SetMaxListeners(1); err != nil {
 		t.Fatal(err)
 	}
-	if err := mb.TryAddListener(make(chan ChangeEvent, 1)); err != nil {
+	if err := mb.TryAddListener(make(chan eventstream.ChangeEvent, 1)); err != nil {
 		t.Fatal(err)
 	}
 	relay := NewCloudRelay(mb, "tenant", CloudRelayConfig{})

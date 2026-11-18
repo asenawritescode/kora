@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"net"
 	"net/netip"
 	"net/url"
@@ -98,7 +99,7 @@ func TestPostgresRebuildCutoffSerializesWithFlush(t *testing.T) {
 		t.Fatal("rebuild PostgreSQL analytics snapshot:", err)
 	}
 	worker := NewWorker(newFakeBus(), database, dialect, registry, "tenant-a", LoadConfig())
-	worker.process(ChangeEvent{ID: "pg-event-1", Sequence: "1", Site: "tenant-a", Doctype: "Customer", Operation: EventInsert,
+	worker.process(eventstream.ChangeEvent{ID: "pg-event-1", Sequence: "1", Site: "tenant-a", Doctype: "Customer", Operation: eventstream.EventInsert,
 		Timestamp: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC), Data: map[string]any{"name": "CUST-1"}})
 	if err := worker.Flush(); err != nil {
 		t.Fatal("flush PostgreSQL event represented by snapshot:", err)
@@ -127,8 +128,8 @@ func TestPostgresRebuildCutoffSerializesWithFlush(t *testing.T) {
 	if err := mutation.Commit(); err != nil {
 		t.Fatal("commit PostgreSQL source mutation:", err)
 	}
-	secondEvent := ChangeEvent{ID: "pg-event-2", Sequence: "2", Site: "tenant-a", Doctype: "Customer", DocName: "CUST-2",
-		Operation: EventInsert, Timestamp: time.Date(2026, 10, 14, 1, 0, 0, 0, time.UTC), Data: map[string]any{"name": "CUST-2"}}
+	secondEvent := eventstream.ChangeEvent{ID: "pg-event-2", Sequence: "2", Site: "tenant-a", Doctype: "Customer", DocName: "CUST-2",
+		Operation: eventstream.EventInsert, Timestamp: time.Date(2026, 10, 14, 1, 0, 0, 0, time.UTC), Data: map[string]any{"name": "CUST-2"}}
 	worker.process(secondEvent)
 	rebuildTx, err := database.BeginTx(context.Background(), &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	if err != nil {

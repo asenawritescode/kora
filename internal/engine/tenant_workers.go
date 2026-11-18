@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -46,7 +47,8 @@ func AnalyticsTenantWALDir(baseDir, tenantID string) string {
 	return filepath.Join(baseDir, "tenant-"+hex.EncodeToString(hash[:]))
 }
 
-func RunRealtimeBridge(ctx context.Context, siteName string, bus analytics.EventBus, provider *natsprovider.Provider) {
+// RunRealtimeBridge forwards tenant bus events to realtime listeners until the bus closes.
+func RunRealtimeBridge(ctx context.Context, siteName string, bus eventstream.Bus, provider *natsprovider.Provider) {
 	ch, err := bus.Subscribe()
 	if err != nil {
 		slog.Warn("realtime bridge subscribe failed", "site", siteName, "error", err)
@@ -114,7 +116,8 @@ func RunAnalyticsRebuildConsumer(ctx context.Context, siteName string, provider 
 	})
 }
 
-func RunNATSOutboxSideEffects(ctx context.Context, siteName string, provider *natsprovider.Provider, bus analytics.EventBus) {
+// RunNATSOutboxSideEffects publishes tenant outbox side effects to NATS.
+func RunNATSOutboxSideEffects(ctx context.Context, siteName string, provider *natsprovider.Provider, bus eventstream.Bus) {
 	cfg := provider.Config()
 	cfg.ConsumerName = siteName + "-sideeffects"
 	// The shared stream also carries browser realtime payloads, Cloud events,
@@ -194,13 +197,14 @@ func OutboxSideEffectSubject(prefix string) string {
 	return prefix + "." + prefix + ".>"
 }
 
-func DecodeOutboxDelivery(delivery contract.Delivery) (analytics.ChangeEvent, error) {
+// DecodeOutboxDelivery decodes an outbox delivery into a ChangeEvent.
+func DecodeOutboxDelivery(delivery contract.Delivery) (eventstream.ChangeEvent, error) {
 	var envelope contract.EventEnvelope
 	if err := json.Unmarshal(delivery.Data, &envelope); err != nil {
-		return analytics.ChangeEvent{}, err
+		return eventstream.ChangeEvent{}, err
 	}
 	if err := envelope.Validate(); err != nil {
-		return analytics.ChangeEvent{}, fmt.Errorf("invalid outbox event envelope: %w", err)
+		return eventstream.ChangeEvent{}, fmt.Errorf("invalid outbox event envelope: %w", err)
 	}
 
 	var payload struct {
@@ -209,11 +213,11 @@ func DecodeOutboxDelivery(delivery contract.Delivery) (analytics.ChangeEvent, er
 	}
 	if len(envelope.Data) > 0 {
 		if err := json.Unmarshal(envelope.Data, &payload); err != nil {
-			return analytics.ChangeEvent{}, err
+			return eventstream.ChangeEvent{}, err
 		}
 	}
 
-	return analytics.ChangeEvent{
+	return eventstream.ChangeEvent{
 		ID:         envelope.ID,
 		Sequence:   string(envelope.Sequence),
 		Site:       envelope.Site,
@@ -227,18 +231,19 @@ func DecodeOutboxDelivery(delivery contract.Delivery) (analytics.ChangeEvent, er
 	}, nil
 }
 
-func OutboxEventOperation(eventType string) analytics.EventOp {
+// OutboxEventOperation maps an outbox event type to its EventOp.
+func OutboxEventOperation(eventType string) eventstream.EventOp {
 	switch {
 	case strings.HasSuffix(eventType, ".after_insert"):
-		return analytics.EventInsert
+		return eventstream.EventInsert
 	case strings.HasSuffix(eventType, ".after_delete"):
-		return analytics.EventDelete
+		return eventstream.EventDelete
 	case strings.HasSuffix(eventType, ".after_submit"):
-		return analytics.EventSubmit
+		return eventstream.EventSubmit
 	case strings.HasSuffix(eventType, ".after_cancel"):
-		return analytics.EventCancel
+		return eventstream.EventCancel
 	default:
-		return analytics.EventUpdate
+		return eventstream.EventUpdate
 	}
 }
 

@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"sync"
 	"time"
 
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/auth"
 	"github.com/asenawritescode/kora/internal/db"
 	knet "github.com/asenawritescode/kora/internal/net"
@@ -59,7 +59,7 @@ type ProcessResources struct {
 	RealtimeStreams         *RealtimeStreamAdmission
 	SessionCacheBudget      *auth.SessionCacheBudget
 	UploadAdmission         *UploadAdmission
-	AnalyticsQueueAdmission *analytics.QueueAdmission
+	AnalyticsQueueAdmission *eventbus.QueueAdmission
 }
 
 // RegisterWorkerStart defers worker execution until Engine.Run begins. If the

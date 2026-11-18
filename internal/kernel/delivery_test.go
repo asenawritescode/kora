@@ -10,28 +10,29 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/asenawritescode/kora/internal/eventbus"
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"testing"
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/natsprovider"
 	"github.com/asenawritescode/kora/internal/outbox"
 	"github.com/nats-io/nats-server/v2/server"
 )
 
-// capturingBus is a minimal analytics.EventBus used to observe deliveries
+// capturingBus is a minimal eventstream.Bus used to observe deliveries
 // routed through the local WAL provider.
 type capturingBus struct {
-	events chan analytics.ChangeEvent
+	events chan eventstream.ChangeEvent
 }
 
-func (b *capturingBus) Publish(e analytics.ChangeEvent) error {
+func (b *capturingBus) Publish(e eventstream.ChangeEvent) error {
 	b.events <- e
 	return nil
 }
-func (b *capturingBus) Subscribe() (<-chan analytics.ChangeEvent, error) { return b.events, nil }
-func (b *capturingBus) DrainWAL(func(analytics.ChangeEvent)) (int, error) {
+func (b *capturingBus) Subscribe() (<-chan eventstream.ChangeEvent, error) { return b.events, nil }
+func (b *capturingBus) DrainWAL(func(eventstream.ChangeEvent)) (int, error) {
 	return 0, nil
 }
 func (b *capturingBus) RotateWAL() (string, error)     { return "", nil }
@@ -49,8 +50,8 @@ func TestLocalProviderDeliveryAfterCommit(t *testing.T) {
 	res := exec(t, s, k, createOp(map[string]any{"title": "Local delivery"}))
 	mustComplete(t, res)
 
-	bus := &capturingBus{events: make(chan analytics.ChangeEvent, 4)}
-	pub := outbox.NewPublisher(s.DB, analytics.NewLocalProvider(bus), s.Dialect)
+	bus := &capturingBus{events: make(chan eventstream.ChangeEvent, 4)}
+	pub := outbox.NewPublisher(s.DB, eventbus.NewLocalProvider(bus), s.Dialect)
 	delivered, err := pub.PublishDue(context.Background(), 10)
 	if err != nil {
 		t.Fatalf("publish: %v", err)

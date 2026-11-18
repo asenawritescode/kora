@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/eventstream"
 	"github.com/asenawritescode/kora/internal/netguard"
@@ -75,8 +75,8 @@ func TestWorkerStopIsIdempotent(t *testing.T) {
 }
 
 func TestWorkerUsesBoundedMultiBusListenerQueue(t *testing.T) {
-	inner := analytics.NewChannelBus(1, t.TempDir())
-	bus, err := analytics.NewDeferredMultiBus(inner)
+	inner := eventbus.NewChannelBus(1, t.TempDir())
+	bus, err := eventbus.NewDeferredMultiBus(inner)
 	if err != nil {
 		t.Fatal("create multi bus:", err)
 	}
@@ -86,7 +86,7 @@ func TestWorkerUsesBoundedMultiBusListenerQueue(t *testing.T) {
 	if got := bus.ListenerCount(); got != 1 {
 		t.Fatalf("registered listeners = %d, want worker registered", got)
 	}
-	if cap(worker.listenerCh) != defaultEventQueueSize || cap(worker.listenerCh) > analytics.MaxListenerQueueSize {
+	if cap(worker.listenerCh) != defaultEventQueueSize || cap(worker.listenerCh) > eventbus.MaxListenerQueueSize {
 		t.Fatalf("webhook queue capacity = %d, want bounded %d", cap(worker.listenerCh), defaultEventQueueSize)
 	}
 	worker.Stop()

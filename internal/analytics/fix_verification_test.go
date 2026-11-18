@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"github.com/asenawritescode/kora/internal/eventstream"
 	"testing"
 	"time"
 
@@ -165,9 +166,9 @@ func TestFix1_EventsAfterInvalidation_CorrectMetrics(t *testing.T) {
 	scope := contract.BusinessScope{TenantID: "test.local", Kind: contract.ScopeKindTenant}
 
 	// Process V1 events.
-	w.process(ChangeEvent{
+	w.process(eventstream.ChangeEvent{
 		Site: "test.local", Doctype: "Customer", DocName: "CUST-0001",
-		Operation: EventInsert, Timestamp: time.Now(),
+		Operation: eventstream.EventInsert, Timestamp: time.Now(),
 		Data: map[string]any{"status": "Active"},
 	})
 
@@ -189,9 +190,9 @@ func TestFix1_EventsAfterInvalidation_CorrectMetrics(t *testing.T) {
 	w.InvalidateAllMetrics()
 
 	// Process V2 event — should go to NEW metric names
-	w.process(ChangeEvent{
+	w.process(eventstream.ChangeEvent{
 		Site: "test.local", Doctype: "Customer", DocName: "CUST-0002",
-		Operation: EventInsert, Timestamp: time.Now(),
+		Operation: eventstream.EventInsert, Timestamp: time.Now(),
 		Data: map[string]any{"state": "Inactive", "priority": "High"},
 	})
 
@@ -244,9 +245,9 @@ func TestFix1_DoctypeDelete_InvalidatesWorkerCache(t *testing.T) {
 	}
 
 	// Worker should not panic on events for deleted doctype.
-	w.process(ChangeEvent{
+	w.process(eventstream.ChangeEvent{
 		Site: "test.local", Doctype: "Customer", DocName: "CUST-0001",
-		Operation: EventInsert, Timestamp: time.Now(),
+		Operation: eventstream.EventInsert, Timestamp: time.Now(),
 		Data: map[string]any{"name": "Acme"},
 	})
 	// No panic = pass.
@@ -272,9 +273,9 @@ func TestFix2_FieldRename_WithInvalidation_NewMetricsGenerated(t *testing.T) {
 
 	// Process V1 events.
 	for i := 0; i < 5; i++ {
-		w.process(ChangeEvent{
+		w.process(eventstream.ChangeEvent{
 			Site: "test.local", Doctype: "Customer", DocName: "doc",
-			Operation: EventInsert, Timestamp: time.Now(),
+			Operation: eventstream.EventInsert, Timestamp: time.Now(),
 			Data: map[string]any{"status": "Active"},
 		})
 	}
@@ -295,9 +296,9 @@ func TestFix2_FieldRename_WithInvalidation_NewMetricsGenerated(t *testing.T) {
 	w.InvalidateAllMetrics()
 
 	// Process V2 events.
-	w.process(ChangeEvent{
+	w.process(eventstream.ChangeEvent{
 		Site: "test.local", Doctype: "Customer", DocName: "doc2",
-		Operation: EventInsert, Timestamp: time.Now(),
+		Operation: eventstream.EventInsert, Timestamp: time.Now(),
 		Data: map[string]any{"state": "Active"},
 	})
 
@@ -430,9 +431,9 @@ func TestFix4_DoctypeDelete_WorkerGraceful(t *testing.T) {
 	w.InvalidateMetrics("Customer")
 
 	// Worker should not panic, should not generate deltas for deleted doctype.
-	w.process(ChangeEvent{
+	w.process(eventstream.ChangeEvent{
 		Site: "test.local", Doctype: "Customer", DocName: "CUST-0001",
-		Operation: EventInsert, Timestamp: time.Now(),
+		Operation: eventstream.EventInsert, Timestamp: time.Now(),
 		Data: map[string]any{"name": "Acme Corp"},
 	})
 
@@ -635,9 +636,9 @@ func TestFix_Stress_RapidConfigChanges(t *testing.T) {
 			}
 		}
 		today := time.Now().Format("2006-01-02")
-		w.process(ChangeEvent{
+		w.process(eventstream.ChangeEvent{
 			Site: "test.local", Doctype: cfg.name, DocName: "doc",
-			Operation: EventInsert, Timestamp: time.Now(),
+			Operation: eventstream.EventInsert, Timestamp: time.Now(),
 			Data: data,
 		})
 
