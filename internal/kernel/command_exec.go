@@ -461,7 +461,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 		txMgr.SkipHookScripts = priorSkipHooks
 	}()
 
-	input, cerr := decodeInput(op.Payload)
+	input, cerr := cmd.readInput(op.Payload)
 	if cerr != nil {
 		return nil, cerr
 	}

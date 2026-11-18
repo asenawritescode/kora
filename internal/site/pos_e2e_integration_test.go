@@ -329,7 +329,7 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 		t.Fatalf("low_stock = %v, want only bread (3 <= 4)", low.Rows)
 	}
 
-	// Return restocks; void restocks only while the shift is open.
+	// Return restocks (restock on); void restocks only while the shift is open.
 	stock := func(item string) float64 {
 		return num("SELECT quantity FROM "+table("Stock Balance")+" WHERE item = ?", item)
 	}
@@ -338,6 +338,7 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 		"register": register, "till_session": till, "location": loc, "return_against": ref,
 		"items":    []map[string]any{{"item": tea, "quantity": 1, "unit_price": 100, "amount": 100}},
 		"payments": []map[string]any{{"method": "Cash", "amount": 100, "reference": "refund"}},
+		"restock":  true,
 	}})
 	if got := stock(tea); got != 9 {
 		t.Fatalf("tea after return = %v, want 9", got)

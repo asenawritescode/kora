@@ -135,6 +135,7 @@ func runPOSReturnBalances(t *testing.T, driver string, conn *sql.DB, dbName stri
 			"items":    []map[string]any{{"item": tea, "quantity": qty, "unit_price": price, "amount": price * float64(qty)}},
 			"payments": []map[string]any{{"method": "Cash", "amount": price * float64(qty), "reference": "refund"}},
 			"reason":   "Damaged",
+			"restock":  true,
 		}})
 	}
 	retReason := func(sale, reason string, qty int) (contract.CommandResult, *contract.Error) {
@@ -289,6 +290,40 @@ func runPOSReturnBalances(t *testing.T, driver string, conn *sql.DB, dbName stri
 	}
 	if _, cerr := bigReturn(1); cerr != nil || num(remaining(big)) != 1 {
 		t.Fatalf("return at the limit: %+v remaining=%s", cerr, remaining(big))
+	}
+
+	// 11. the restock box: off (the default) refunds cash and writes no stock
+	// change or ledger row; on refunds the same cash and restores stock.
+	refund := func(sale string, restock any) *contract.Error {
+		data := map[string]any{"register": register, "till_session": till, "location": loc, "return_against": sale,
+			"items":    []map[string]any{{"item": tea, "quantity": 1, "unit_price": 19.99, "amount": 19.99}},
+			"payments": []map[string]any{{"method": "Cash", "amount": 19.99, "reference": "refund"}},
+			"reason":   "Damaged"}
+		if restock != nil {
+			data["restock"] = restock
+		}
+		_, cerr := exec("pos.return_sale", "", map[string]any{"data": data})
+		return cerr
+	}
+	expectedCash := func() float64 {
+		return num(q("SELECT expected_cash FROM "+table("Till Session")+" WHERE name = ?", till))
+	}
+	entries := func() float64 { return num(q("SELECT COUNT(*) FROM " + table("Stock Entry"))) }
+	off, on := sell(1), sell(1)
+	stockBefore, entriesBefore, cashBefore := num(stock()), entries(), expectedCash()
+	if cerr := refund(off, nil); cerr != nil {
+		t.Fatalf("refund without restock: %+v", cerr)
+	}
+	offCash := cashBefore - expectedCash()
+	if num(stock()) != stockBefore || entries() != entriesBefore || offCash < 19.98 || offCash > 20 {
+		t.Fatalf("restock off: stock=%s entries=%v cash drop=%v", stock(), entries(), offCash)
+	}
+	stockBefore, entriesBefore, cashBefore = num(stock()), entries(), expectedCash()
+	if cerr := refund(on, true); cerr != nil {
+		t.Fatalf("refund with restock: %+v", cerr)
+	}
+	if num(stock()) != stockBefore+1 || entries() != entriesBefore+1 || cashBefore-expectedCash() != offCash {
+		t.Fatalf("restock on: stock=%s entries=%v cash drop=%v want %v", stock(), entries(), cashBefore-expectedCash(), offCash)
 	}
 
 	// 10. refund_lookup finds a paid receipt by number within its location only.
