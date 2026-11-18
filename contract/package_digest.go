@@ -187,6 +187,9 @@ func ValidPackageFileType(filePath, contentType string) bool {
 	return validPackageFileType(filePath, contentType)
 }
 
+// packageDirs are the directories holding the YAML files of each content type.
+var packageDirs = map[string]string{"view": "views/", "report": "reports/", "metric": "metrics/", "query": "queries/", "command": "commands/"}
+
 func validPackageFileType(filePath, contentType string) bool {
 	ext := strings.ToLower(path.Ext(filePath))
 	yml := ext == ".yaml" || ext == ".yml"
@@ -199,16 +202,12 @@ func validPackageFileType(filePath, contentType string) bool {
 		return (filePath == "permissions.yaml" || (strings.HasPrefix(filePath, "components/") && path.Base(filePath) == "permissions.yaml")) && ext == ".yaml"
 	case "workflow_definition":
 		return strings.HasPrefix(filePath, "workflows/") && ext == ".json"
-	case "view":
-		return strings.HasPrefix(filePath, "views/") && yml
-	case "report":
-		return strings.HasPrefix(filePath, "reports/") && yml
+	case "view", "report", "metric":
+		return strings.HasPrefix(filePath, packageDirs[contentType]) && yml
 	case "script":
 		return strings.HasPrefix(filePath, "scripts/") && ext == ".js"
-	case "query":
-		return strings.HasPrefix(filePath, "queries/") && yml
-	case "command":
-		return strings.HasPrefix(filePath, "commands/") && yml
+	case "query", "command":
+		return strings.HasPrefix(filePath, packageDirs[contentType]) && yml
 	case "print_format":
 		return strings.HasPrefix(filePath, "print_formats/") && yml
 	case "pack":
@@ -248,7 +247,7 @@ func (n packNamespace) valid() bool {
 
 // PackageFileType infers the content type of a package file from its path.
 func PackageFileType(filePath string) (string, bool) {
-	for _, t := range []string{"doctype", "roles", "permissions", "workflow_definition", "view", "report", "script", "query", "command", "print_format", "pack"} {
+	for _, t := range []string{"doctype", "roles", "permissions", "workflow_definition", "view", "report", "metric", "script", "query", "command", "print_format", "pack"} {
 		if validPackageFileType(filePath, t) {
 			return t, true
 		}

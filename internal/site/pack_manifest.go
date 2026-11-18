@@ -11,6 +11,7 @@ import (
 	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/kernel"
+	"github.com/asenawritescode/kora/internal/metrics"
 	"github.com/asenawritescode/kora/internal/print"
 	"github.com/asenawritescode/kora/internal/query"
 	"gopkg.in/yaml.v3"
@@ -362,9 +363,8 @@ func validatePackFileSyntax(file PackFile) error {
 	case "view":
 		_, err := doctype.ParseViewYAML(data)
 		return err
-	case "report":
-		_, err := analytics.ParseReportYAML(data, file.Path)
-		return err
+	case "report", "metric":
+		return validateYAMLDefinition(file.ContentType, file.Path, data)
 	case "command":
 		_, err := kernel.ParseCommandResource(data)
 		return err
@@ -418,4 +418,14 @@ func ManifestDigest(canonical []byte) string {
 // ParsePackDigest verifies the stored lowercase digest shape.
 func ParsePackDigest(value string) error {
 	return contract.ParsePackDigest(value)
+}
+
+// validateYAMLDefinition checks a report or metric document against its parser.
+func validateYAMLDefinition(contentType, path string, data []byte) error {
+	if contentType == "metric" {
+		_, err := metrics.ParseYAML(data, path)
+		return err
+	}
+	_, err := analytics.ParseReportYAML(data, path)
+	return err
 }
