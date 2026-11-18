@@ -118,6 +118,17 @@ type StepEnsure struct {
 	Values map[string]string `yaml:"values,omitempty" json:"values,omitempty"`
 }
 
+// kindCount returns how many of create, update and ensure the step sets.
+func (s CommandStep) kindCount() int {
+	kinds := 0
+	for _, present := range []bool{s.Create != nil, s.Update != nil, s.Ensure != nil} {
+		if present {
+			kinds++
+		}
+	}
+	return kinds
+}
+
 // createSpec returns the record this step would create: the create step
 // itself, or the creation an ensure step falls back to.
 func (s CommandStep) createSpec() *StepCreate {
@@ -149,6 +160,20 @@ type StepUpdate struct {
 	Values map[string]string `yaml:"values"         json:"values"`
 	// Adjust changes numeric fields relative to their stored value.
 	Adjust map[string]FieldAdjust `yaml:"adjust,omitempty" json:"adjust,omitempty"`
+}
+
+// validateAdjustments checks that each adjusted field is set only by adjust
+// and that its adjustment is well formed.
+func (c *CommandResource) validateAdjustments(i int, u *StepUpdate) error {
+	for field, change := range u.Adjust {
+		if _, set := u.Values[field]; set {
+			return fmt.Errorf("command %q: step %d sets and adjusts %q", c.Name, i, field)
+		}
+		if err := change.validate(); err != nil {
+			return fmt.Errorf("command %q: step %d %s: %w", c.Name, i, field, err)
+		}
+	}
+	return nil
 }
 
 // ParseCommandResource parses one command definition from YAML bytes with
@@ -183,13 +208,7 @@ func (c *CommandResource) validateWith(needSchemas bool) error {
 		return fmt.Errorf("command %q: empty transaction", c.Name)
 	}
 	for i, s := range c.Steps {
-		kinds := 0
-		for _, present := range []bool{s.Create != nil, s.Update != nil, s.Ensure != nil} {
-			if present {
-				kinds++
-			}
-		}
-		if kinds > 1 {
+		if s.kindCount() > 1 {
 			return fmt.Errorf("command %q: step %d must set exactly one of create, update or ensure", c.Name, i)
 		}
 		switch {
@@ -210,13 +229,8 @@ func (c *CommandResource) validateWith(needSchemas bool) error {
 			if s.Update.Record == "" || (s.Update.Name == "") == (len(s.Update.Where) == 0) || len(s.Update.Values)+len(s.Update.Adjust) == 0 {
 				return fmt.Errorf("command %q: step %d update requires record, exactly one of name or where, and values or adjust", c.Name, i)
 			}
-			for field, change := range s.Update.Adjust {
-				if _, set := s.Update.Values[field]; set {
-					return fmt.Errorf("command %q: step %d sets and adjusts %q", c.Name, i, field)
-				}
-				if err := change.validate(); err != nil {
-					return fmt.Errorf("command %q: step %d %s: %w", c.Name, i, field, err)
-				}
+			if err := c.validateAdjustments(i, s.Update); err != nil {
+				return err
 			}
 		default:
 			return fmt.Errorf("command %q: step %d has none of create, update or ensure", c.Name, i)
