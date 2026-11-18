@@ -449,47 +449,59 @@ func (d *PostgresDialect) InsertOrIgnorePrefix() string {
 	return "INSERT"
 }
 
+// AllocateNameNumber issues the next PREFIX-NNNN number. The prefix is its own
+// counter key, so it shares the series path.
 func (d *PostgresDialect) AllocateNameNumber(tx *sql.Tx, doctypeName, prefix, tableName string) (int64, error) {
-	var maxNum sql.NullInt64
-	if err := tx.QueryRow(d.NameGenQuery(tableName, prefix)).Scan(&maxNum); err != nil {
-		return 0, fmt.Errorf("reading max name number: %w", err)
-	}
-	var allocated int64
-	if err := tx.QueryRow(
-		`INSERT INTO "_kora_naming_series" ("doctype", "prefix", "current", "modified")
-VALUES ($1, $2, $3, NOW())
-ON CONFLICT ("doctype", "prefix")
-DO UPDATE SET "current" = "_kora_naming_series"."current" + 1,
-              "modified" = NOW()
-RETURNING "current"`,
-		doctypeName, prefix, maxNum.Int64+1,
-	).Scan(&allocated); err != nil {
-		return 0, fmt.Errorf("allocating name number: %w", err)
-	}
-	return allocated, nil
+	return d.AllocateSeriesNumber(tx, doctypeName, prefix, func() (int64, error) {
+		var maxNum sql.NullInt64
+		if err := tx.QueryRow(d.NameGenQuery(tableName), prefix+"-%").Scan(&maxNum); err != nil {
+			return 0, fmt.Errorf("reading max name number: %w", err)
+		}
+		return maxNum.Int64, nil
+	})
 }
 
-func (d *PostgresDialect) AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed int64) (int64, error) {
+// AllocateSeriesNumber increments the counter row in one statement. The table
+// scan behind seed runs only when the row is missing; the upsert covers a
+// concurrent insert of the same key.
+func (d *PostgresDialect) AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed func() (int64, error)) (int64, error) {
 	var allocated int64
-	if err := tx.QueryRow(
+	err := tx.QueryRow(
+		`UPDATE "_kora_naming_series" SET "current" = "current" + 1, "modified" = NOW()
+WHERE "doctype" = $1 AND "prefix" = $2
+RETURNING "current"`,
+		doctypeName, key,
+	).Scan(&allocated)
+	if err == nil {
+		return allocated, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("allocating series number: %w", err)
+	}
+	highest, err := seed()
+	if err != nil {
+		return 0, err
+	}
+	if err = tx.QueryRow(
 		`INSERT INTO "_kora_naming_series" ("doctype", "prefix", "current", "modified")
 VALUES ($1, $2, $3, NOW())
 ON CONFLICT ("doctype", "prefix")
 DO UPDATE SET "current" = "_kora_naming_series"."current" + 1,
               "modified" = NOW()
 RETURNING "current"`,
-		doctypeName, key, seed+1,
+		doctypeName, key, highest+1,
 	).Scan(&allocated); err != nil {
 		return 0, fmt.Errorf("allocating series number: %w", err)
 	}
 	return allocated, nil
 }
 
-func (d *PostgresDialect) NameGenQuery(tableName, prefix string) string {
+// NameGenQuery returns the query for the highest existing number under a name prefix.
+func (d *PostgresDialect) NameGenQuery(tableName string) string {
 	// PostgreSQL: SPLIT_PART(name, '-', 2) extracts the text after the first dash.
 	return fmt.Sprintf(
-		"SELECT COALESCE(MAX(CAST(SPLIT_PART(name, '-', 2) AS INTEGER)), 0) FROM %s WHERE name LIKE '%s-%%'",
-		d.QuoteIdent(tableName), prefix,
+		"SELECT COALESCE(MAX(CAST(SPLIT_PART(name, '-', 2) AS INTEGER)), 0) FROM %s WHERE name LIKE $1",
+		d.QuoteIdent(tableName),
 	)
 }
 

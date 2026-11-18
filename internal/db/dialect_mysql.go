@@ -383,35 +383,49 @@ func (d *MySQLDialect) UpsertIncrementForTable(_ string, conflictCols []string, 
 
 func (d *MySQLDialect) InsertOrIgnorePrefix() string { return "INSERT IGNORE" }
 
+// AllocateNameNumber issues the next PREFIX-NNNN number. The prefix is its own
+// counter key, so it shares the series path.
 func (d *MySQLDialect) AllocateNameNumber(tx *sql.Tx, doctypeName, prefix, tableName string) (int64, error) {
-	var maxNum sql.NullInt64
-	if err := tx.QueryRow(d.NameGenQuery(tableName, prefix)).Scan(&maxNum); err != nil {
-		return 0, fmt.Errorf("reading max name number: %w", err)
-	}
-	next := maxNum.Int64 + 1
-	if _, err := tx.Exec(
-		`INSERT INTO _kora_naming_series (doctype, prefix, current, modified)
-VALUES (?, ?, LAST_INSERT_ID(?), NOW(6))
-ON DUPLICATE KEY UPDATE current = LAST_INSERT_ID(current + 1), modified = NOW(6)`,
-		doctypeName, prefix, next,
-	); err != nil {
-		return 0, fmt.Errorf("allocating name number: %w", err)
-	}
-	var allocated int64
-	if err := tx.QueryRow("SELECT LAST_INSERT_ID()").Scan(&allocated); err != nil {
-		return 0, fmt.Errorf("reading allocated name number: %w", err)
-	}
-	return allocated, nil
+	return d.AllocateSeriesNumber(tx, doctypeName, prefix, func() (int64, error) {
+		var maxNum sql.NullInt64
+		if err := tx.QueryRow(d.NameGenQuery(tableName), prefix+"-%").Scan(&maxNum); err != nil {
+			return 0, fmt.Errorf("reading max name number: %w", err)
+		}
+		return maxNum.Int64, nil
+	})
 }
 
-func (d *MySQLDialect) AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed int64) (int64, error) {
-	if _, err := tx.Exec(
-		`INSERT INTO _kora_naming_series (doctype, prefix, current, modified)
+// AllocateSeriesNumber increments the counter row. The probe is a non-locking
+// read: an UPDATE that misses would take a gap lock, and concurrent first
+// allocations for a new key would deadlock on each other's gap locks. The
+// table scan behind seed runs only when the row is missing.
+func (d *MySQLDialect) AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed func() (int64, error)) (int64, error) {
+	var current int64
+	err := tx.QueryRow(
+		`SELECT current FROM _kora_naming_series WHERE doctype = ? AND prefix = ?`,
+		doctypeName, key,
+	).Scan(&current)
+	if errors.Is(err, sql.ErrNoRows) {
+		highest, seedErr := seed()
+		if seedErr != nil {
+			return 0, seedErr
+		}
+		if _, execErr := tx.Exec(
+			`INSERT INTO _kora_naming_series (doctype, prefix, current, modified)
 VALUES (?, ?, LAST_INSERT_ID(?), NOW(6))
 ON DUPLICATE KEY UPDATE current = LAST_INSERT_ID(current + 1), modified = NOW(6)`,
-		doctypeName, key, seed+1,
-	); err != nil {
-		return 0, fmt.Errorf("allocating series number: %w", err)
+			doctypeName, key, highest+1,
+		); execErr != nil {
+			return 0, fmt.Errorf("allocating series number: %w", execErr)
+		}
+	} else if err != nil {
+		return 0, fmt.Errorf("reading series counter: %w", err)
+	} else if _, execErr := tx.Exec(
+		`UPDATE _kora_naming_series SET current = LAST_INSERT_ID(current + 1), modified = NOW(6)
+WHERE doctype = ? AND prefix = ?`,
+		doctypeName, key,
+	); execErr != nil {
+		return 0, fmt.Errorf("incrementing series number: %w", execErr)
 	}
 	var allocated int64
 	if err := tx.QueryRow("SELECT LAST_INSERT_ID()").Scan(&allocated); err != nil {
@@ -420,10 +434,11 @@ ON DUPLICATE KEY UPDATE current = LAST_INSERT_ID(current + 1), modified = NOW(6)
 	return allocated, nil
 }
 
-func (d *MySQLDialect) NameGenQuery(tableName, prefix string) string {
+// NameGenQuery returns the query for the highest existing number under a name prefix.
+func (d *MySQLDialect) NameGenQuery(tableName string) string {
 	return fmt.Sprintf(
-		"SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(name, '-', -1) AS UNSIGNED)), 0) FROM %s WHERE name LIKE '%s-%%'",
-		d.QuoteIdent(tableName), prefix,
+		"SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(name, '-', -1) AS UNSIGNED)), 0) FROM %s WHERE name LIKE ?",
+		d.QuoteIdent(tableName),
 	)
 }
 

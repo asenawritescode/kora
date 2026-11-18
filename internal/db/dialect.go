@@ -48,9 +48,13 @@ type QueryDialect interface {
 	InsertOrIgnorePrefix() string
 	AllocateNameNumber(tx *sql.Tx, doctypeName, prefix, tableName string) (int64, error)
 	// AllocateSeriesNumber atomically increments the counter for one naming
-	// series key, starting after seed when the key is new. All values are bound.
-	AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed int64) (int64, error)
-	NameGenQuery(tableName, prefix string) string
+	// series key. seed is called only when the counter row does not exist yet;
+	// it returns the highest number already stored, and the first issued
+	// number is that value plus one. All values are bound.
+	AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed func() (int64, error)) (int64, error)
+	// NameGenQuery returns the highest PREFIX-NNNN number in tableName. The
+	// single placeholder takes the LIKE pattern "PREFIX-%".
+	NameGenQuery(tableName string) string
 	Placeholder(n int) string
 	NowTimestamp() string
 	// NowMinusSeconds is the database clock minus one bound seconds placeholder.
