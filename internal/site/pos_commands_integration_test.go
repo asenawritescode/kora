@@ -168,7 +168,7 @@ func runPOSCommandFeatures(t *testing.T, driver string, conn *sql.DB, dbName str
 	if got := q("SELECT opening_note FROM "+table("Till Session")+" WHERE shift = ?", session); got != "Short 20 from the bag" {
 		t.Fatalf("opening_note = %q", got)
 	}
-	must("pos.close_session", "", map[string]any{"data": map[string]any{"shift": session, "closing_count": 470}})
+	must("pos.close_session", "", map[string]any{"data": map[string]any{"shift": session, "closing_count": 470, "left_in_drawer": 200}})
 	defs, err := query.LoadDir(filepath.Join("..", "..", "config", "pos", "queries"), reg)
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +184,8 @@ func runPOSCommandFeatures(t *testing.T, driver string, conn *sql.DB, dbName str
 		t.Fatalf("last_close = %v, %v", page, err)
 	}
 	row := page.Rows[0]
-	if fmt.Sprint(row["cashier"]) != "cashier-1" || !strings.HasPrefix(fmt.Sprint(row["closing_count"]), "470") || fmt.Sprint(row["closed_at"]) == "" {
+	// The next till opens from what the last cashier left, not what they counted.
+	if fmt.Sprint(row["cashier"]) != "cashier-1" || !strings.HasPrefix(fmt.Sprint(row["closing_count"]), "470") || !strings.HasPrefix(fmt.Sprint(row["left_in_drawer"]), "200") || fmt.Sprint(row["closed_at"]) == "" {
 		t.Fatalf("last_close row = %v", row)
 	}
 
