@@ -1,0 +1,16 @@
+name: sales
+label: Sales
+type: simple
+model: Sale
+measure:
+  agg: sum
+  field: total
+filters:
+  - field: status
+    op: "="
+    value: Paid
+time: business_date
+good: up
+format: currency
+description: Total of paid sales.
+verified: true

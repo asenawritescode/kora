@@ -15,6 +15,7 @@ import (
 	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/metrics"
 	"github.com/asenawritescode/kora/internal/schema"
 	"github.com/asenawritescode/kora/internal/site"
 	"github.com/spf13/cobra"
@@ -183,6 +184,27 @@ func runConfigImport(ctx context.Context, siteName, path, dbName string) (return
 	return runConfigImportForSiteContext(ctx, siteName, path, siteCfg, tenantID)
 }
 
+// loadReportsAndMetrics reads a pack's reports and metric definitions as the JSON documents a config snapshot carries.
+func loadReportsAndMetrics(path string, doctypes []*doctype.DocType) (reports, metricDefs []json.RawMessage, err error) {
+	reportDefinitions, err := analytics.ParseReportsDirectory(path + "/reports")
+	if err != nil {
+		return nil, nil, fmt.Errorf("parsing reports: %w", err)
+	}
+	reports = make([]json.RawMessage, 0, len(reportDefinitions))
+	for _, report := range reportDefinitions {
+		data, marshalErr := json.Marshal(report)
+		if marshalErr != nil {
+			return nil, nil, fmt.Errorf("encoding report %s: %w", report.Name, marshalErr)
+		}
+		reports = append(reports, data)
+	}
+	if len(reports) > 0 {
+		fmt.Printf("Found %d reports\n", len(reports))
+	}
+	metricDefs, err = metrics.Load(path+"/metrics", doctypes)
+	return reports, metricDefs, err
+}
+
 func runConfigImportForSiteContext(ctx context.Context, siteName, path string, siteCfg *site.Config, tenantID string) (returnErr error) { //nolint:contextcheck // tolerates a nil ctx from legacy callers
 	if ctx == nil {
 		ctx = context.Background()
@@ -256,20 +278,9 @@ func runConfigImportForSiteContext(ctx context.Context, siteName, path string, s
 	if len(views) > 0 {
 		fmt.Printf("Found %d views\n", len(views))
 	}
-	reportDefinitions, err := analytics.ParseReportsDirectory(path + "/reports")
+	reports, metricDefs, err := loadReportsAndMetrics(path, doctypes)
 	if err != nil {
-		return fmt.Errorf("parsing reports: %w", err)
-	}
-	reports := make([]json.RawMessage, 0, len(reportDefinitions))
-	for _, report := range reportDefinitions {
-		data, err := json.Marshal(report)
-		if err != nil {
-			return fmt.Errorf("encoding report %s: %w", report.Name, err)
-		}
-		reports = append(reports, data)
-	}
-	if len(reports) > 0 {
-		fmt.Printf("Found %d reports\n", len(reports))
+		return err
 	}
 	workflowDefinitions, err := site.ParseWorkflowDefinitionsDirectory(path + "/workflows")
 	if err != nil {
@@ -279,7 +290,7 @@ func runConfigImportForSiteContext(ctx context.Context, siteName, path string, s
 		fmt.Printf("Found %d workflow definitions\n", len(workflowDefinitions))
 	}
 
-	snapshot := &doctype.ConfigSnapshot{DocTypes: doctypes, Roles: roles, Permissions: permissions, WorkflowDefinitions: workflowDefinitions, Views: views, Reports: reports, MinKoraVersion: Version}
+	snapshot := &doctype.ConfigSnapshot{DocTypes: doctypes, Roles: roles, Permissions: permissions, WorkflowDefinitions: workflowDefinitions, Views: views, Reports: reports, Metrics: metricDefs, MinKoraVersion: Version}
 	dialect := kdb.Resolve(siteCfg.DBType)
 	registry := doctype.NewRegistry()
 	if err := site.ImportConfigFromSnapshotContext(ctx, db, registry, siteCfg.DBName, siteName, tenantID, "Config import from "+path, snapshot, dialect, nil); err != nil {
