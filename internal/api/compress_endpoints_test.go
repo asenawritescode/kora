@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -89,7 +90,7 @@ func TestPrintRoutesUnderGzip(t *testing.T) {
 					t.Fatalf("plain request encoded: %q", plainResp.Header.Get("Content-Encoding"))
 				}
 				gzResp, gz := rawGet(t, url, map[string]string{"Accept-Encoding": "gzip"})
-				if !bytes.Equal(decodedBody(t, gzResp, gz), plain) {
+				if !bytes.Equal(withoutPDFDates(decodedBody(t, gzResp, gz)), withoutPDFDates(plain)) {
 					t.Fatalf("gzip response differs from plain (%d vs %d bytes)", len(gz), len(plain))
 				}
 				if cl := gzResp.Header.Get("Content-Length"); cl != "" && cl != strconv.Itoa(len(gz)) {
@@ -149,4 +150,13 @@ func TestStoredFileUnderGzip(t *testing.T) {
 			}
 		})
 	}
+}
+
+// pdfDate matches the creation and modification times a PDF writer stamps,
+// which differ between two renders that fall in different seconds.
+var pdfDate = regexp.MustCompile(`/(CreationDate|ModDate) ?\(D:[0-9+\-Z']*\)`)
+
+// withoutPDFDates blanks those times so two renders of one receipt compare equal.
+func withoutPDFDates(body []byte) []byte {
+	return pdfDate.ReplaceAll(body, []byte("/$1 ()"))
 }
