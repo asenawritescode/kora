@@ -166,10 +166,10 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 			owner := get("Owner")
 			ownerOps, ownerQueries := refs(owner)
 			t.Logf("owner operations=%v queries=%v", ownerOps, ownerQueries)
-			if len(ownerOps) != 11 {
-				t.Errorf("owner operations = %d, want 11: %v", len(ownerOps), ownerOps)
+			if len(ownerOps) != 13 {
+				t.Errorf("owner operations = %d, want 13: %v", len(ownerOps), ownerOps)
 			}
-			for _, name := range []string{"receive_stock", "adjust_stock", "open_session", "close_session", "record_sale", "return_sale", "void_sale", "hold_sale", "delete_held_sale", "record_cash_movement"} {
+			for _, name := range []string{"receive_stock", "adjust_stock", "open_session", "close_session", "record_sale", "return_sale", "void_sale", "hold_sale", "delete_held_sale", "record_cash_movement", "record_pay_in", "record_pay_out"} {
 				found := false
 				for _, ref := range ownerOps {
 					found = found || strings.HasSuffix(ref, "~"+name)
@@ -190,6 +190,38 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 				}
 			}
 			checkSchemas("Owner", owner)
+			// The published input schema narrows reason to each direction's list.
+			for _, o := range owner.PublishedOperations {
+				want := map[string]string{"~record_pay_in": "Change from the bank,Owner added cash,Other", "~record_pay_out": "Stock purchase,Transport,Wages,Owner took cash,Other"}
+				for suffix, list := range want {
+					if !strings.HasSuffix(o.OperationRef, suffix) {
+						continue
+					}
+					found := false
+					for _, d := range owner.Schemas {
+						if d.Ref != o.InputSchema {
+							continue
+						}
+						found = true
+						var s struct {
+							Properties struct {
+								Reason struct {
+									Enum []string `json:"enum"`
+								} `json:"reason"`
+							} `json:"properties"`
+						}
+						if jerr := json.Unmarshal(d.Schema, &s); jerr != nil {
+							t.Fatal(jerr)
+						}
+						if got := strings.Join(s.Properties.Reason.Enum, ","); got != list {
+							t.Errorf("%s reason enum = %q, want %q", o.OperationRef, got, list)
+						}
+					}
+					if !found {
+						t.Errorf("%s input schema missing from catalog", o.OperationRef)
+					}
+				}
+			}
 			sale := false
 			for _, o := range owner.PublishedOperations {
 				if strings.HasSuffix(o.OperationRef, "~record_sale") {

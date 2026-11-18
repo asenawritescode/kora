@@ -1,3 +1,6 @@
+# Superseded by record_pay_in and record_pay_out, which give each direction its
+# own reason list. Kept only so the existing Studio step works until Studio
+# switches; it accepts the union of both reason lists in either direction.
 name: record_cash_movement
 namespace: pos
 version: 1

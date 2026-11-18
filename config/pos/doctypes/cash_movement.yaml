@@ -26,6 +26,9 @@ fields:
     label: Amount
     reqd: true
     in_list_view: true
+  # Union of the pay-out and pay-in reason lists. record_pay_in and
+  # record_pay_out narrow it per direction. "Change from bank" is the spelling
+  # from before the board's "Change from the bank"; kept so stored rows stay valid.
   - fieldname: reason
     fieldtype: Select
     label: Reason
@@ -34,8 +37,10 @@ fields:
       Transport
       Wages
       Owner took cash
-      Change from bank
       Other
+      Change from the bank
+      Owner added cash
+      Change from bank
     reqd: true
     in_list_view: true
   - fieldname: note

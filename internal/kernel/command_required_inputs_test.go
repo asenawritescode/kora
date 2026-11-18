@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/asenawritescode/kora/contract"
@@ -81,7 +82,7 @@ transaction:
 		{"complete", map[string]any{"register": "R-1", "location": "L-1"}, ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			err := cmd.missingInput(tt.input)
+			err := cmd.inputError(tt.input)
 			if tt.field == "" {
 				if err != nil {
 					t.Fatalf("err = %v", err)
@@ -90,6 +91,66 @@ transaction:
 			}
 			if err == nil || err.Type != contract.CodeValidationFailed || err.Field != tt.field || err.Message != "input "+tt.field+" is required" {
 				t.Fatalf("err = %+v, want input %s is required on field %s", err, tt.field, tt.field)
+			}
+		})
+	}
+}
+
+// TestInputEnumRefusesOtherValues: an enum input accepts only its listed values,
+// and the refusal names the input. Absent inputs are the required check's job.
+func TestInputEnumRefusesOtherValues(t *testing.T) {
+	cmd, err := ParseCommandResource([]byte(`name: pos.record_pay_in
+version: 1
+module_owner_id: pos.core
+capability: pos.drawer
+operation: record_pay_in
+input_schema: {id: pos.record_pay_in.input, version: 1}
+output_schema: {id: pos.record_pay_in.output, version: 1}
+input: {record: Cash Movement, enum: {reason: [Other, Owner added cash]}}
+transaction:
+  - create: {record: Cash Movement, values: {reason: $input.reason}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name  string
+		input map[string]any
+		field string
+	}{
+		{"listed value", map[string]any{"reason": "Other"}, ""},
+		{"value of the other list", map[string]any{"reason": "Transport"}, "reason"},
+		{"non-string value", map[string]any{"reason": 1}, "reason"},
+		{"null value", map[string]any{"reason": nil}, "reason"},
+		{"absent input is not this check", map[string]any{}, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := cmd.inputError(tt.input)
+			if tt.field == "" {
+				if err != nil {
+					t.Fatalf("err = %+v", err)
+				}
+				return
+			}
+			if err == nil || err.Type != contract.CodeValidationFailed || err.Field != tt.field || err.Message != "input reason must be one of: Other, Owner added cash" {
+				t.Fatalf("err = %+v, want the enum refusal on %s", err, tt.field)
+			}
+		})
+	}
+}
+
+// TestInputEnumNeedsModuleOwnedCommand: an enum is published and enforced only
+// by module-owned commands, and must list values.
+func TestInputEnumNeedsModuleOwnedCommand(t *testing.T) {
+	for _, tt := range []struct{ name, yaml, wantErr string }{
+		{"not module owned", "input: {record: Thing, enum: {reason: [A]}}", "requires a module-owned command"},
+		{"empty list", "module_owner_id: pos.core\ncapability: pos.drawer\ninput: {record: Thing, enum: {reason: []}}", "lists no values"},
+		{"extra input not a string", "module_owner_id: pos.core\ncapability: pos.drawer\ninput: {record: Thing, extra: {n: {type: integer}}, enum: {n: [1]}}", "must be a string input"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseCommandResource([]byte("name: shop.do\nversion: 1\n" + tt.yaml + "\ntransaction:\n  - create: {record: Thing, values: {a: $input.a}}\n"))
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want %q", err, tt.wantErr)
 			}
 		})
 	}

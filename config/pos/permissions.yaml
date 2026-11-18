@@ -428,6 +428,24 @@
 - doctype: module.pos.core.operation.record_cash_movement
   role: Cashier
   write: true
+- doctype: module.pos.core.operation.record_pay_in
+  role: Owner
+  write: true
+- doctype: module.pos.core.operation.record_pay_in
+  role: Manager
+  write: true
+- doctype: module.pos.core.operation.record_pay_in
+  role: Cashier
+  write: true
+- doctype: module.pos.core.operation.record_pay_out
+  role: Owner
+  write: true
+- doctype: module.pos.core.operation.record_pay_out
+  role: Manager
+  write: true
+- doctype: module.pos.core.operation.record_pay_out
+  role: Cashier
+  write: true
 - doctype: module.pos.core.query.x_report
   role: Owner
   read: true
