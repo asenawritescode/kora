@@ -29,7 +29,7 @@ func TestSiteSettingsUpdatesValidatePresentFieldsOnly(t *testing.T) {
 		{name: "unsupported currency", request: siteSettingsRequest{Currency: &badCurrency}, field: "currency"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.request.updates()
+			got, err := tt.request.updates("KES")
 			if tt.field != "" {
 				var settingErr *settingError
 				if !errors.As(err, &settingErr) || settingErr.field != tt.field {
@@ -71,6 +71,9 @@ func TestSiteSettingsPutSavesOnlyPresentFields(t *testing.T) {
 				}
 				mock.ExpectQuery("SELECT setting_value FROM _kora_site_setting").WithArgs("s1", key).WillReturnRows(rows)
 			}
+			// The read-back also loads the denominations of the site currency.
+			mock.ExpectQuery("SELECT setting_value FROM _kora_site_setting").WithArgs("s1", sqlmock.AnyArg()).
+				WillReturnRows(sqlmock.NewRows([]string{"setting_value"}))
 			w := serve(r, http.MethodPut, "/api/system/settings", tt.body)
 			if w.Code != http.StatusOK {
 				t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
