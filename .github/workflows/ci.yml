@@ -127,11 +127,10 @@ jobs:
           KORA_TENANT_CLOCK_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_FACTS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_DB_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_ORM_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
         run: >-
           go test -tags=integration -p 1
           ./internal/db ./internal/dbaccess ./internal/api ./internal/tenanttime ./internal/analytics ./internal/outbox ./internal/site ./internal/requests/sqlstore ./internal/workflow/sqlstore
-          ./internal/notifications/sqlstore ./internal/management/sqlstore ./internal/facts ./internal/orm -count=1 -timeout=15m
+          ./internal/notifications/sqlstore ./internal/management/sqlstore ./internal/facts -count=1 -timeout=15m
 
       - name: Test programmatic module owner command fixture
         env:
@@ -185,6 +184,11 @@ jobs:
         run: >-
           go test -tags=integration ./internal/db -run 'TestNameAllocationIssuesUniqueNamesUnderConcurrency|TestReserveSeriesRangeGivesDisjointRangesToTwoTills' -count=1 -timeout=5m &&
           go test -tags=integration ./internal/orm -run TestReserveNumberBlockRecordsDisjointOpenBlocksForTwoTills -count=1 -timeout=5m
+
+      - name: Test number blocks on disposable MySQL
+        env:
+          KORA_ORM_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+        run: go test -tags=integration ./internal/orm -run TestReserveNumberBlockRecordsDisjointOpenBlocksForTwoTills -count=1 -timeout=5m
 
       - name: Test module snapshot fence on disposable SQL dialects
         env:
