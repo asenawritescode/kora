@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/expression"
 	"gopkg.in/yaml.v3"
 )
 
@@ -90,6 +91,8 @@ type CommandInput struct {
 type CommandExtraInput struct {
 	Type     string `yaml:"type"               json:"type"`
 	Required bool   `yaml:"required,omitempty" json:"required,omitempty"`
+	// Default fills the input when the payload omits it. Boolean inputs only.
+	Default *bool `yaml:"default,omitempty" json:"default,omitempty"`
 }
 
 // CommandStep is one transactional write. Values map target record fields to
@@ -116,6 +119,13 @@ type CommandStep struct {
 	// Upsert creates Record under Name when no record has that name, and
 	// otherwise updates that record. Which one runs is decided per call.
 	Upsert *StepUpsert `yaml:"upsert,omitempty" json:"upsert,omitempty"`
+	// When runs the step only while the condition holds. It is a boolean over
+	// $input.<extra input> and $computed.<key> references, such as
+	// "$input.restock = true". A false condition skips the whole step, so a
+	// skipped for_each writes nothing. A conditional step cannot set as.
+	When string `yaml:"when,omitempty" json:"when,omitempty"`
+	// cond is When compiled at load.
+	cond *expression.Expr
 }
 
 // StepUpsert writes one record of Record under the name Name. A new record takes
@@ -244,6 +254,9 @@ func (c *CommandResource) validateReserve(i int, r *StepReserve) error {
 
 // validateStep checks one transaction step: its kind and its fields.
 func (c *CommandResource) validateStep(i int, s CommandStep) error {
+	if err := c.validateWhen(i); err != nil {
+		return err
+	}
 	if s.kindCount() > 1 {
 		return fmt.Errorf("command %q: step %d must set exactly one of create, update or ensure", c.Name, i)
 	}
@@ -300,6 +313,9 @@ func (c *CommandResource) validateInputs() error {
 		case "string", "integer", "number", "boolean":
 		default:
 			return fmt.Errorf("command %q: input.extra.%s type %q must be string, integer, number or boolean", c.Name, name, extra.Type)
+		}
+		if err := c.validateExtraDefault(name, extra); err != nil {
+			return err
 		}
 	}
 	for name, values := range c.Input.Enum {

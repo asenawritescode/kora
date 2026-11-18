@@ -167,6 +167,16 @@ func selectFieldOptions(dt *doctype.DocType, name string) []string {
 	return nil
 }
 
+// extraInputSchema is the property schema of an extra input, with its default
+// when it has one.
+func extraInputSchema(extra kernel.CommandExtraInput, enum []string) map[string]any {
+	prop := map[string]any{"type": extra.Type}
+	if extra.Default != nil {
+		prop["default"] = *extra.Default
+	}
+	return withEnum(prop, enum)
+}
+
 func commandInputSchema(cmd *kernel.CommandResource, records map[string]*doctype.DocType) json.RawMessage {
 	raw, _ := json.Marshal(cmd)
 	fields := map[string]doctype.Field{}
@@ -180,7 +190,7 @@ func commandInputSchema(cmd *kernel.CommandResource, records map[string]*doctype
 	for _, m := range inputRef.FindAllSubmatch(raw, -1) {
 		name := string(m[1])
 		if extra, ok := cmd.Input.Extra[name]; ok {
-			props[name] = withEnum(map[string]any{"type": extra.Type}, cmd.Input.Enum[name])
+			props[name] = extraInputSchema(extra, cmd.Input.Enum[name])
 			required[name] = extra.Required
 		} else if f, ok := fields[name]; ok {
 			props[name] = withEnum(fieldSchema(f, records), cmd.Input.Enum[name])

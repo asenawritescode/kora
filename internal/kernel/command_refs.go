@@ -107,44 +107,64 @@ func resolveEnvStringRef(ref string, env refEnv) (string, error) {
 	return s, nil
 }
 
-// expandCommandSteps turns each for_each step into one instance per element
-// of its input list. Elements must be objects.
+// expandCommandSteps turns each step into the instances it runs: none when its
+// when condition is false, one for a plain step, and one per matching element
+// of its for_each list.
 func expandCommandSteps(steps []CommandStep, env refEnv, rows map[string][]map[string]any) ([]stepInstance, error) {
 	out := make([]stepInstance, 0, len(steps))
 	for i, step := range steps {
-		if step.ForEach == "" {
-			out = append(out, stepInstance{index: i, step: step})
-			continue
-		}
-		var list []any
-		if key, ok := guardRowsKey(step.ForEach); ok {
-			for _, row := range rows[key] {
-				list = append(list, row)
-			}
-		} else {
-			value, err := resolveEnvRef(step.ForEach, refEnv{input: env.input})
-			if err != nil {
-				return nil, fmt.Errorf("step %d: %w", i, err)
-			}
-			if list, ok = value.([]any); !ok {
-				return nil, fmt.Errorf("step %d: for_each %q must resolve to a list", i, step.ForEach)
-			}
-		}
-		want, err := resolveWhere(step.Where, env)
+		instances, err := expandStep(i, step, env, rows)
 		if err != nil {
-			return nil, fmt.Errorf("step %d: where: %w", i, err)
+			return nil, err
 		}
-		for _, element := range list {
-			item, ok := element.(map[string]any)
-			if !ok {
-				return nil, fmt.Errorf("step %d: for_each %q elements must be objects", i, step.ForEach)
-			}
-			if matchesWhere(item, want) {
-				out = append(out, stepInstance{index: i, step: step, item: item})
-			}
-		}
+		out = append(out, instances...)
 		if len(out) > MaxCommandStepInstances {
 			return nil, fmt.Errorf("command expands to more than %d writes", MaxCommandStepInstances)
+		}
+	}
+	return out, nil
+}
+
+// expandStep returns the instances of step i. Elements must be objects.
+func expandStep(i int, step CommandStep, env refEnv, rows map[string][]map[string]any) ([]stepInstance, error) {
+	runs, err := step.stepRuns(env)
+	if err != nil {
+		return nil, fmt.Errorf("step %d: when: %w", i, err)
+	}
+	if !runs {
+		return nil, nil
+	}
+	if step.ForEach == "" {
+		return []stepInstance{{index: i, step: step}}, nil
+	}
+	var list []any
+	if key, ok := guardRowsKey(step.ForEach); ok {
+		for _, row := range rows[key] {
+			list = append(list, row)
+		}
+	} else {
+		value, valErr := resolveEnvRef(step.ForEach, refEnv{input: env.input})
+		if valErr != nil {
+			return nil, fmt.Errorf("step %d: %w", i, valErr)
+		}
+		items, isList := value.([]any)
+		if !isList {
+			return nil, fmt.Errorf("step %d: for_each %q must resolve to a list", i, step.ForEach)
+		}
+		list = items
+	}
+	want, err := resolveWhere(step.Where, env)
+	if err != nil {
+		return nil, fmt.Errorf("step %d: where: %w", i, err)
+	}
+	var out []stepInstance
+	for _, element := range list {
+		item, ok := element.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("step %d: for_each %q elements must be objects", i, step.ForEach)
+		}
+		if matchesWhere(item, want) {
+			out = append(out, stepInstance{index: i, step: step, item: item})
 		}
 	}
 	return out, nil

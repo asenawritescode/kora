@@ -14,6 +14,8 @@ input:
     reason: [Damaged, Wrong item, Changed their mind, Other]
   extra:
     reason: {type: string, required: true}
+    # The board's "Put the items back in stock" checkbox; it starts off.
+    restock: {type: boolean, default: false}
 require:
   - lock:
       record: Sale
@@ -73,6 +75,7 @@ transaction:
         status: Return
         return_reason: $input.reason
   - for_each: $input.items
+    when: "$input.restock = true"
     update:
       record: Stock Balance
       where:
@@ -81,6 +84,7 @@ transaction:
       adjust:
         quantity: { increase: $item.quantity }
   - for_each: $input.items
+    when: "$input.restock = true"
     create:
       record: Stock Entry
       values:

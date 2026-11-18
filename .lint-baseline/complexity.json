@@ -1861,9 +1861,6 @@
   "internal/kernel::executeScriptMutationInTx": {
    "statements": 142
   },
-  "internal/kernel::expandCommandSteps": {
-   "cognitive": 25
-  },
   "internal/kernel::prepareQuantityEffect": {
    "cognitive": 39,
    "cyclomatic": 31,
