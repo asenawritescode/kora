@@ -53,6 +53,29 @@ fields:
   - fieldname: closed_at
     fieldtype: Datetime
     label: Closed At
+  - fieldname: difference_reason
+    fieldtype: Select
+    label: Difference Reason
+    options: |
+      Wrong change given
+      Pay-out not recorded
+      Sale not rung up
+      Don't know
+    description: Why counted cash differs from expected. Required when the difference is over KES 100.
+  - fieldname: difference_note
+    fieldtype: Data
+    label: Difference Note
+    description: What happened, in the cashier's words.
+  - fieldname: left_in_drawer
+    fieldtype: Currency
+    label: Left in Drawer
+    description: Cash kept in the drawer for the next shift.
+  - fieldname: taken_out
+    fieldtype: Currency
+    label: Taken Out
+    read_only: true
+    computed: "closing_count - left_in_drawer"
+    description: Counted cash that leaves the till, kept by close_session.
   - fieldname: variance
     fieldtype: Currency
     label: Variance
@@ -105,3 +128,8 @@ fields:
     label: Pay-ins
     default: 0
     read_only: true
+doc_constraints:
+  - type: field_dependency
+    condition: '(and (== status "Closed") (or (> (- closing_count expected_cash) 100) (> (- expected_cash closing_count) 100)))'
+    require_fields: [difference_reason]
+    message: Pick a reason before closing.

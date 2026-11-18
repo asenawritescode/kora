@@ -39,6 +39,9 @@ transaction:
         closing_count: $input.closing_count
         status: Closed
         closed_at: $now
+        difference_reason: $input.difference_reason
+        difference_note: $input.difference_note
+        left_in_drawer: $input.left_in_drawer
   - update:
       record: Shift
       name: $input.shift
