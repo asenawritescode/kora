@@ -60,10 +60,10 @@ func (c *CommandResource) RequiredInputs() []string {
 			addMap(s.Ensure.Where)
 		}
 		add(s.reserveOwner())
-		if s.Update != nil {
-			add(s.Update.Name)
-			addMap(s.Update.Where)
-			for _, a := range s.Update.Adjust {
+		if s.updateSpec() != nil {
+			add(s.updateSpec().Name)
+			addMap(s.updateSpec().Where)
+			for _, a := range s.updateSpec().Adjust {
 				add(a.Increase, a.Decrease, a.By, a.SignFrom)
 			}
 		}

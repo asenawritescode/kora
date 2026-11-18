@@ -12,6 +12,7 @@ input:
 filters:
   - {field: register, op: eq, value: $input.register, optional: true}
   - {field: name, op: eq, value: $input.name, optional: true}
+  - {field: status, op: ne, value: Held}
 fields: [name, register, customer, total, status, creation, owner]
 sort: [{field: creation, dir: desc}]
 limit: 20

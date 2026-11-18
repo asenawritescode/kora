@@ -57,11 +57,22 @@ fields:
     label: Status
     options: |
       Draft
+      Held
       Paid
       Void
       Return
     default: Draft
     in_list_view: true
+  - fieldname: held_name
+    fieldtype: Data
+    label: Held Name
+    description: What the cashier named a held sale, or its held time.
+  - fieldname: held_at
+    fieldtype: Datetime
+    label: Held At
+  - fieldname: held_by
+    fieldtype: Data
+    label: Held By
 facts:
   time: creation
   lines: items
@@ -74,3 +85,5 @@ facts:
     - field: till_session
     - field: items.item
   status_field: status
+  exclude_status:
+    - Held

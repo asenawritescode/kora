@@ -86,6 +86,9 @@ type GuardCount struct {
 	Record string            `yaml:"record" json:"record"`
 	Where  map[string]string `yaml:"where" json:"where"`
 	Limit  int               `yaml:"limit" json:"limit"`
+	// Except, a reference, names one record that is not counted: an upsert
+	// does not count the record it is about to update.
+	Except string `yaml:"except,omitempty" json:"except,omitempty"`
 }
 
 // GuardMatch is an equality match over declared fields. Values may be literals
@@ -309,6 +312,7 @@ func guardRefValues(guard CommandGuard) []string {
 		for _, ref := range guard.Count.Where {
 			refs = append(refs, ref)
 		}
+		refs = append(refs, guard.Count.Except)
 	}
 	return refs
 }
@@ -340,11 +344,27 @@ func checkCountGuard(run txRun, op Operation, count *GuardCount, env refEnv, ind
 	if cerr != nil {
 		return cerr
 	}
-	names, err := run.Mgr.MatchingNamesLocked(dt, filters, scopeForOperation(run.Reg, op, dt.Name, "read"), count.Limit)
+	except := ""
+	if count.Except != "" {
+		name, nameErr := resolveEnvStringRef(count.Except, env)
+		if nameErr != nil {
+			return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("require %d: %v", index, nameErr))
+		}
+		except = name
+	}
+	// One record more than the limit is fetched: whether the excepted record is
+	// among them, the rest still decide the count.
+	names, err := run.Mgr.MatchingNamesLocked(dt, filters, scopeForOperation(run.Reg, op, dt.Name, "read"), count.Limit+1)
 	if err != nil {
 		return contract.NewError(contract.CodeDependencyUnavailable, fmt.Sprintf("require %d: count failed", index))
 	}
-	if len(names) < count.Limit {
+	counted := 0
+	for _, name := range names {
+		if name != except {
+			counted++
+		}
+	}
+	if counted < count.Limit {
 		return nil
 	}
 	return contract.NewError(contract.CodeConflict, fmt.Sprintf("%s limit of %d reached", dt.Name, count.Limit))

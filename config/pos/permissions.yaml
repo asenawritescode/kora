@@ -373,6 +373,34 @@
   role: Cashier
   read: true
   if_owner: true
+- doctype: module.pos.core.operation.hold_sale
+  role: Owner
+  write: true
+- doctype: module.pos.core.operation.delete_held_sale
+  role: Owner
+  write: true
+- doctype: module.pos.core.operation.hold_sale
+  role: Manager
+  write: true
+- doctype: module.pos.core.operation.delete_held_sale
+  role: Manager
+  write: true
+- doctype: module.pos.core.operation.hold_sale
+  role: Cashier
+  write: true
+- doctype: module.pos.core.operation.delete_held_sale
+  role: Cashier
+  write: true
+- doctype: module.pos.core.query.held_sales
+  role: Owner
+  read: true
+- doctype: module.pos.core.query.held_sales
+  role: Manager
+  read: true
+- doctype: module.pos.core.query.held_sales
+  role: Cashier
+  read: true
+  if_owner: true
 - doctype: Cash Movement
   role: Cashier
   read: true
