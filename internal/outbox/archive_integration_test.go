@@ -258,7 +258,7 @@ func sessionZoneScenario(pgZone, mysqlZone string) func(t *testing.T, f archiveF
 			f.exec(t, "SET time_zone = '"+mysqlZone+"'")
 		}
 		insertAged := func(id string, extra time.Duration) {
-			f.exec(t, `INSERT INTO _kora_outbox (id, site, event_type, status, created_at, published_at, payload) VALUES (?, 'acme', 'kora.test.created', 'published', `+archiveCutoffSQL(f.dialect)+`, NULL, ?)`,
+			f.exec(t, `INSERT INTO _kora_outbox (id, site, event_type, status, created_at, published_at, payload) VALUES (?, 'acme', 'kora.test.created', 'published', `+f.dialect.NowMinusSeconds()+`, NULL, ?)`,
 				id, archiveHorizonSeconds(MinArchiveHorizon+extra), `{"id":"`+id+`"}`)
 		}
 		insertAged("past-horizon", time.Hour)

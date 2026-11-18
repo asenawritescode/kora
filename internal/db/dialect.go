@@ -53,6 +53,8 @@ type QueryDialect interface {
 	NameGenQuery(tableName, prefix string) string
 	Placeholder(n int) string
 	NowTimestamp() string
+	// NowMinusSeconds is the database clock minus one bound seconds placeholder.
+	NowMinusSeconds() string
 }
 
 // BoolParam returns the bound representation used by Kora's boolean-like SQL

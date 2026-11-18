@@ -336,6 +336,11 @@ func (d *PostgresDialect) NowTimestamp() string {
 	return "NOW()"
 }
 
+// NowMinusSeconds is the database clock minus the bound seconds in the session zone.
+func (d *PostgresDialect) NowMinusSeconds() string {
+	return "(NOW() - (? * INTERVAL '1 second'))"
+}
+
 func (d *PostgresDialect) ParseError(err error, dt *doctype.DocType) *doctype.ValidationError {
 	var pqErr *pq.Error
 	if !errors.As(err, &pqErr) {
