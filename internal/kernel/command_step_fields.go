@@ -32,6 +32,8 @@ func (c *CommandResource) stepAliases() map[string]stepAlias {
 		switch {
 		case step.Update != nil:
 			out[step.As] = stepAlias{record: step.Update.Record, step: step}
+		case step.Reserve != nil:
+			out[step.As] = stepAlias{record: step.Reserve.Record, step: step}
 		case step.createSpec() != nil:
 			out[step.As] = stepAlias{record: step.createSpec().Record, step: step}
 		}

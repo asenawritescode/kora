@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -432,6 +433,16 @@ func (d *LibSQLDialect) InsertOrIgnorePrefix() string { return "INSERT OR IGNORE
 
 // SharedRowLock is empty: SQLite has no row locks and no FOR SHARE.
 func (d *LibSQLDialect) SharedRowLock() string { return "" }
+
+// ReserveSeriesRange is not supported on LibSQL, which is being removed.
+func (d *LibSQLDialect) ReserveSeriesRange(_ *sql.Tx, _, _ string, _ int64, _ func() (int64, error)) (int64, int64, error) {
+	return 0, 0, errors.New("number blocks need MySQL or Postgres")
+}
+
+// RecordNumberBlock is not supported on LibSQL, which is being removed.
+func (d *LibSQLDialect) RecordNumberBlock(_ *sql.Tx, _ NumberBlockRow) error {
+	return errors.New("number blocks need MySQL or Postgres")
+}
 
 // AllocateSeriesNumber returns the next number for a series key. The counter row is
 // seeded from seed when it is missing; the table scan runs only in that case.

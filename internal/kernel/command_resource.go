@@ -105,6 +105,18 @@ type CommandStep struct {
 	// created with Where plus Values when absent. With As, later steps
 	// address the existing or new record as $steps.<as>.name.
 	Ensure *StepEnsure `yaml:"ensure,omitempty" json:"ensure,omitempty"`
+	// Reserve takes a block of numbers from Record's naming series for Owner.
+	// As names the block's first record name, so later steps can reference it.
+	Reserve *StepReserve `yaml:"reserve,omitempty" json:"reserve,omitempty"`
+}
+
+// StepReserve reserves Size numbers from the naming series of Record. Owner is
+// a $input or $steps reference to the record that owns the block, such as an
+// open till session. The block never spans two series prefixes.
+type StepReserve struct {
+	Record string `yaml:"record" json:"record"`
+	Owner  string `yaml:"owner"  json:"owner"`
+	Size   int64  `yaml:"size"   json:"size"`
 }
 
 // StepEnsure is a create-if-absent. Where fields identify the record and seed
@@ -118,10 +130,10 @@ type StepEnsure struct {
 	Values map[string]string `yaml:"values,omitempty" json:"values,omitempty"`
 }
 
-// kindCount returns how many of create, update and ensure the step sets.
+// kindCount returns how many of create, update, ensure and reserve the step sets.
 func (s CommandStep) kindCount() int {
 	kinds := 0
-	for _, present := range []bool{s.Create != nil, s.Update != nil, s.Ensure != nil} {
+	for _, present := range []bool{s.Create != nil, s.Update != nil, s.Ensure != nil, s.Reserve != nil} {
 		if present {
 			kinds++
 		}
@@ -129,9 +141,23 @@ func (s CommandStep) kindCount() int {
 	return kinds
 }
 
+// reserveOwner returns the owner reference of a reserve step, or "".
+func (s CommandStep) reserveOwner() string {
+	if s.Reserve == nil {
+		return ""
+	}
+	return s.Reserve.Owner
+}
+
 // createSpec returns the record this step would create: the create step
 // itself, or the creation an ensure step falls back to.
+//
+// A reserve step names its record too: it writes numbers in that record's
+// series, so it needs the same create permission.
 func (s CommandStep) createSpec() *StepCreate {
+	if s.Reserve != nil {
+		return &StepCreate{Record: s.Reserve.Record}
+	}
 	if s.Ensure == nil {
 		return s.Create
 	}
@@ -160,6 +186,87 @@ type StepUpdate struct {
 	Values map[string]string `yaml:"values"         json:"values"`
 	// Adjust changes numeric fields relative to their stored value.
 	Adjust map[string]FieldAdjust `yaml:"adjust,omitempty" json:"adjust,omitempty"`
+}
+
+// validateReserve checks that a reserve step names a record, an owner and a size.
+func (c *CommandResource) validateReserve(i int, r *StepReserve) error {
+	if r.Record == "" || r.Owner == "" || r.Size < 1 {
+		return fmt.Errorf("command %q: step %d reserve requires record, owner and a positive size", c.Name, i)
+	}
+	return nil
+}
+
+// validateStep checks one transaction step: its kind and its fields.
+func (c *CommandResource) validateStep(i int, s CommandStep) error {
+	if s.kindCount() > 1 {
+		return fmt.Errorf("command %q: step %d must set exactly one of create, update or ensure", c.Name, i)
+	}
+	switch {
+	case s.Ensure != nil:
+		if err := c.validateEnsure(i, s.Ensure); err != nil {
+			return err
+		}
+	case s.Reserve != nil:
+		if err := c.validateReserve(i, s.Reserve); err != nil {
+			return err
+		}
+	case s.Create != nil:
+		if err := c.validateCreate(i, s.Create); err != nil {
+			return err
+		}
+	case s.Update != nil:
+		if err := c.validateUpdate(i, s.Update); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("command %q: step %d has none of create, update or ensure", c.Name, i)
+	}
+	return nil
+}
+
+// validateHeader checks the name, namespace, preconditions and steps presence.
+func (c *CommandResource) validateHeader() error {
+	if c.Name == "" {
+		return fmt.Errorf("command definition: missing name")
+	}
+	if len(c.Preconditions) != 0 {
+		return fmt.Errorf("command %q: free-form preconditions are not supported; use require", c.FullName())
+	}
+	if strings.Count(c.Name, ".") == 0 && c.Namespace == "" {
+		return fmt.Errorf("command %q: namespaced name or namespace required", c.Name)
+	}
+	if len(c.Steps) == 0 {
+		return fmt.Errorf("command %q: empty transaction", c.Name)
+	}
+	return nil
+}
+
+// validateInputExtras checks that each extra input declares a scalar type.
+func (c *CommandResource) validateInputExtras() error {
+	for name, extra := range c.Input.Extra {
+		switch extra.Type {
+		case "string", "integer", "number", "boolean":
+		default:
+			return fmt.Errorf("command %q: input.extra.%s type %q must be string, integer, number or boolean", c.Name, name, extra.Type)
+		}
+	}
+	return nil
+}
+
+// validateCreate checks that a create step names a record and sets values.
+func (c *CommandResource) validateCreate(i int, cr *StepCreate) error {
+	if cr.Record == "" || len(cr.Values) == 0 {
+		return fmt.Errorf("command %q: step %d create requires record and values", c.Name, i)
+	}
+	return nil
+}
+
+// validateUpdate checks that an update step names one record and sets values or adjustments.
+func (c *CommandResource) validateUpdate(i int, u *StepUpdate) error {
+	if u.Record == "" || (u.Name == "") == (len(u.Where) == 0) || len(u.Values)+len(u.Adjust) == 0 {
+		return fmt.Errorf("command %q: step %d update requires record, exactly one of name or where, and values or adjust", c.Name, i)
+	}
+	return c.validateAdjustments(i, u)
 }
 
 // validateEnsure checks an ensure step's record, where and values.
@@ -208,51 +315,19 @@ func ParseCommandResource(raw []byte) (*CommandResource, error) {
 // validateWith checks the definition. With needSchemas false (config YAML) the
 // versioned schema refs may be absent: the pack generator fills them.
 func (c *CommandResource) validateWith(needSchemas bool) error {
-	if c.Name == "" {
-		return fmt.Errorf("command definition: missing name")
-	}
-	if len(c.Preconditions) != 0 {
-		return fmt.Errorf("command %q: free-form preconditions are not supported; use require", c.FullName())
-	}
-	if strings.Count(c.Name, ".") == 0 && c.Namespace == "" {
-		return fmt.Errorf("command %q: namespaced name or namespace required", c.Name)
-	}
-	if len(c.Steps) == 0 {
-		return fmt.Errorf("command %q: empty transaction", c.Name)
+	if err := c.validateHeader(); err != nil {
+		return err
 	}
 	for i, s := range c.Steps {
-		if s.kindCount() > 1 {
-			return fmt.Errorf("command %q: step %d must set exactly one of create, update or ensure", c.Name, i)
-		}
-		switch {
-		case s.Ensure != nil:
-			if err := c.validateEnsure(i, s.Ensure); err != nil {
-				return err
-			}
-		case s.Create != nil:
-			if s.Create.Record == "" || len(s.Create.Values) == 0 {
-				return fmt.Errorf("command %q: step %d create requires record and values", c.Name, i)
-			}
-		case s.Update != nil:
-			if s.Update.Record == "" || (s.Update.Name == "") == (len(s.Update.Where) == 0) || len(s.Update.Values)+len(s.Update.Adjust) == 0 {
-				return fmt.Errorf("command %q: step %d update requires record, exactly one of name or where, and values or adjust", c.Name, i)
-			}
-			if err := c.validateAdjustments(i, s.Update); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("command %q: step %d has none of create, update or ensure", c.Name, i)
+		if err := c.validateStep(i, s); err != nil {
+			return err
 		}
 	}
 	if c.Input.Record == "" {
 		return fmt.Errorf("command %q: input.record required in this slice", c.Name)
 	}
-	for name, extra := range c.Input.Extra {
-		switch extra.Type {
-		case "string", "integer", "number", "boolean":
-		default:
-			return fmt.Errorf("command %q: input.extra.%s type %q must be string, integer, number or boolean", c.Name, name, extra.Type)
-		}
+	if err := c.validateInputExtras(); err != nil {
+		return err
 	}
 	if err := c.validateCompute(); err != nil {
 		return err

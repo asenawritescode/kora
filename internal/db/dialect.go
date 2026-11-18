@@ -41,6 +41,16 @@ type SearchIndexDialect interface {
 	SearchIndexName(tableName, fieldName string) string
 }
 
+// NumberBlockRow is one reserved range of a naming series, stored in _kora_number_block.
+type NumberBlockRow struct {
+	Doctype string
+	Prefix  string
+	Owner   string
+	State   string
+	First   int64
+	Last    int64
+}
+
 // QueryDialect is the DML subset (insert/update/select helpers).
 type QueryDialect interface {
 	UpsertClause(conflictCols []string, updateCols []string) string
@@ -57,6 +67,12 @@ type QueryDialect interface {
 	// it returns the highest number already stored, and the first issued
 	// number is that value plus one. All values are bound.
 	AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed func() (int64, error)) (int64, error)
+	// ReserveSeriesRange moves the counter for one series key forward by size
+	// and returns the inclusive first and last numbers of the range it took.
+	// Concurrent callers get disjoint ranges. seed is used as above.
+	ReserveSeriesRange(tx *sql.Tx, doctypeName, key string, size int64, seed func() (int64, error)) (first, last int64, err error)
+	// RecordNumberBlock inserts one reserved range into _kora_number_block.
+	RecordNumberBlock(tx *sql.Tx, row NumberBlockRow) error
 	// NameGenQuery returns the highest PREFIX-NNNN number in tableName. The
 	// single placeholder takes the LIKE pattern "PREFIX-%".
 	NameGenQuery(tableName string) string

@@ -464,39 +464,56 @@ func (d *PostgresDialect) AllocateNameNumber(tx *sql.Tx, doctypeName, prefix, ta
 	})
 }
 
-// AllocateSeriesNumber increments the counter row in one statement. The table
-// scan behind seed runs only when the row is missing; the upsert covers a
-// concurrent insert of the same key.
+// AllocateSeriesNumber increments the counter row by one and returns the number.
 func (d *PostgresDialect) AllocateSeriesNumber(tx *sql.Tx, doctypeName, key string, seed func() (int64, error)) (int64, error) {
-	var allocated int64
+	_, last, err := d.ReserveSeriesRange(tx, doctypeName, key, 1, seed)
+	return last, err
+}
+
+// ReserveSeriesRange moves the counter row forward by size in one statement.
+// The table scan behind seed runs only when the row is missing; the upsert
+// covers a concurrent insert of the same key.
+func (d *PostgresDialect) ReserveSeriesRange(tx *sql.Tx, doctypeName, key string, size int64, seed func() (int64, error)) (int64, int64, error) {
+	var last int64
 	err := tx.QueryRow(
-		`UPDATE "_kora_naming_series" SET "current" = "current" + 1, "modified" = NOW()
+		`UPDATE "_kora_naming_series" SET "current" = "current" + $3, "modified" = NOW()
 WHERE "doctype" = $1 AND "prefix" = $2
 RETURNING "current"`,
-		doctypeName, key,
-	).Scan(&allocated)
+		doctypeName, key, size,
+	).Scan(&last)
 	if err == nil {
-		return allocated, nil
+		return last - size + 1, last, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("allocating series number: %w", err)
+		return 0, 0, fmt.Errorf("allocating series number: %w", err)
 	}
 	highest, err := seed()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if err = tx.QueryRow(
 		`INSERT INTO "_kora_naming_series" ("doctype", "prefix", "current", "modified")
 VALUES ($1, $2, $3, NOW())
 ON CONFLICT ("doctype", "prefix")
-DO UPDATE SET "current" = "_kora_naming_series"."current" + 1,
+DO UPDATE SET "current" = "_kora_naming_series"."current" + $4,
               "modified" = NOW()
 RETURNING "current"`,
-		doctypeName, key, highest+1,
-	).Scan(&allocated); err != nil {
-		return 0, fmt.Errorf("allocating series number: %w", err)
+		doctypeName, key, highest+size, size,
+	).Scan(&last); err != nil {
+		return 0, 0, fmt.Errorf("allocating series number: %w", err)
 	}
-	return allocated, nil
+	return last - size + 1, last, nil
+}
+
+// RecordNumberBlock inserts one reserved range into _kora_number_block.
+func (d *PostgresDialect) RecordNumberBlock(tx *sql.Tx, row NumberBlockRow) error {
+	if _, err := tx.Exec(
+		`INSERT INTO "_kora_number_block" ("doctype", "prefix", "first_number", "last_number", "owner", "state") VALUES ($1, $2, $3, $4, $5, $6)`,
+		row.Doctype, row.Prefix, row.First, row.Last, row.Owner, row.State,
+	); err != nil {
+		return fmt.Errorf("recording number block: %w", err)
+	}
+	return nil
 }
 
 // NameGenQuery returns the query for the highest existing number under a name prefix.
@@ -526,8 +543,25 @@ func (d *PostgresDialect) ExecuteBatch(db *sql.DB, statements []string) error {
 	return tx.Commit()
 }
 
+// numberBlockSQL creates _kora_number_block: a range of series numbers
+// reserved for one owner.
+func (d *PostgresDialect) numberBlockSQL() []string {
+	return []string{
+		`CREATE TABLE IF NOT EXISTS "_kora_number_block" (
+				"doctype" VARCHAR(140) NOT NULL,
+				"prefix" VARCHAR(32) NOT NULL,
+				"first_number" BIGINT NOT NULL,
+				"last_number" BIGINT NOT NULL,
+				"owner" VARCHAR(140) NOT NULL,
+				"state" VARCHAR(16) NOT NULL,
+				"creation" TIMESTAMP NOT NULL DEFAULT NOW(),
+				PRIMARY KEY ("doctype", "prefix", "first_number")
+			)`,
+	}
+}
+
 func (d *PostgresDialect) SystemTableSQL() []string {
-	return append([]string{
+	return append(append(d.numberBlockSQL(), []string{
 		// _kora_naming_series
 		`CREATE TABLE IF NOT EXISTS "_kora_naming_series" (
 			"doctype" VARCHAR(140) NOT NULL,
@@ -789,5 +823,5 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 
 		// Backward compat: existing _kora_view tables may lack idx column.
 		`ALTER TABLE "_kora_view" ADD COLUMN IF NOT EXISTS "idx" INTEGER NOT NULL DEFAULT 0`,
-	}, PaymentTablesPostgres()...)
+	}...), PaymentTablesPostgres()...)
 }
