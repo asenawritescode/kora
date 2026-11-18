@@ -1789,8 +1789,8 @@
    "cyclomatic": 40
   },
   "internal/kernel::(*CommandResource).validateWith": {
-   "cognitive": 50,
-   "cyclomatic": 47
+   "cognitive": 39,
+   "cyclomatic": 41
   },
   "internal/kernel::(*Kernel).Execute": {
    "cognitive": 40,
@@ -1809,8 +1809,8 @@
    "cyclomatic": 16
   },
   "internal/kernel::(*Kernel).execDefinedCommand": {
-   "cognitive": 157,
-   "cyclomatic": 76
+   "cognitive": 151,
+   "cyclomatic": 75
   },
   "internal/kernel::(*Kernel).executeScriptMutationInTx": {
    "cognitive": 76,
@@ -1842,8 +1842,8 @@
    "cyclomatic": 17
   },
   "internal/kernel::applyAdjustments": {
-   "cognitive": 26,
-   "cyclomatic": 18
+   "cognitive": 22,
+   "cyclomatic": 17
   },
   "internal/kernel::applyData": {
    "cognitive": 27
@@ -1864,7 +1864,7 @@
    "cyclomatic": 16
   },
   "internal/kernel::execDefinedCommand": {
-   "statements": 214
+   "statements": 212
   },
   "internal/kernel::executeInTx": {
    "statements": 60
@@ -1891,9 +1891,6 @@
   },
   "internal/kernel::validateStepReferences": {
    "statements": 51
-  },
-  "internal/kernel::validateWith": {
-   "statements": 49
   },
   "internal/management/sqlstore::(*Store).Accept": {
    "cognitive": 26,

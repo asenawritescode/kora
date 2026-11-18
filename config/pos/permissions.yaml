@@ -373,3 +373,30 @@
   role: Cashier
   read: true
   if_owner: true
+- doctype: Cash Movement
+  role: Cashier
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Cash Movement
+  role: Owner
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Cash Movement
+  role: Manager
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: module.pos.core.operation.record_cash_movement
+  role: Owner
+  write: true
+- doctype: module.pos.core.operation.record_cash_movement
+  role: Manager
+  write: true
+- doctype: module.pos.core.operation.record_cash_movement
+  role: Cashier
+  write: true

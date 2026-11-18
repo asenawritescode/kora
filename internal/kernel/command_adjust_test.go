@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"math/big"
 	"strings"
 	"testing"
 
@@ -149,6 +150,31 @@ func TestApplyOneSidedSignedAdjustmentCountsOnlyItsDirection(t *testing.T) {
 			}
 			if tc.start != tc.want && got != tc.want {
 				t.Fatalf("payout_count = %v, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMoveExactAndStoredNumberKeepDecimalsExact(t *testing.T) {
+	tests := []struct {
+		name      string
+		current   string
+		delta     string
+		increase  bool
+		fieldtype string
+		want      any
+	}{
+		{"add decimals", "0.1", "0.2", true, "Float", "0.3"},
+		{"subtract to whole", "1.5", "0.5", false, "Currency", "1"},
+		{"int stays integer", "7", "2", false, "Int", int64(5)},
+		{"float trims zeros", "2", "0.25", true, "Float", "2.25"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			current, _ := new(big.Rat).SetString(tc.current)
+			delta, _ := new(big.Rat).SetString(tc.delta)
+			if got := storedNumber(tc.fieldtype, moveExact(current, delta, tc.increase)); got != tc.want {
+				t.Fatalf("got %#v, want %#v", got, tc.want)
 			}
 		})
 	}

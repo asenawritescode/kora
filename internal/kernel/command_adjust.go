@@ -169,25 +169,35 @@ func applyAdjustments(dt *doctype.DocType, oldDoc, doc *doctype.Document, adjust
 		if !ok {
 			current = new(big.Rat)
 		}
-		next := new(big.Rat)
-		if increase {
-			next.Add(current, delta)
-		} else {
-			next.Sub(current, delta)
-		}
+		next := moveExact(current, delta, increase)
 		if change.Min != "" {
 			floor, _ := new(big.Rat).SetString(change.Min)
 			if next.Cmp(floor) < 0 {
 				return contract.NewError(contract.CodeConflict, fmt.Sprintf("%s %s would fall below %s", dt.Name, field, change.Min))
 			}
 		}
-		if definition.Fieldtype == "Int" {
-			doc.Set(field, next.Num().Int64())
-		} else {
-			doc.Set(field, strings.TrimRight(strings.TrimRight(next.FloatString(9), "0"), "."))
-		}
+		doc.Set(field, storedNumber(definition.Fieldtype, next))
 	}
 	return nil
+}
+
+// moveExact returns current plus delta when increase is set, else current minus
+// delta, in exact decimal.
+func moveExact(current, delta *big.Rat, increase bool) *big.Rat {
+	next := new(big.Rat)
+	if increase {
+		return next.Add(current, delta)
+	}
+	return next.Sub(current, delta)
+}
+
+// storedNumber converts an exact result to the value stored for a field of the
+// given type: an integer for Int, otherwise a trimmed decimal string.
+func storedNumber(fieldtype string, next *big.Rat) any {
+	if fieldtype == "Int" {
+		return next.Num().Int64()
+	}
+	return strings.TrimRight(strings.TrimRight(next.FloatString(9), "0"), ".")
 }
 
 // exactNumber reads a stored or supplied value as an exact decimal. Floats go
