@@ -14,6 +14,7 @@ import (
 var erpPackLayers = []string{"pos-base", "erp-purchasing", "erp-accounting", "erp-inventory"}
 
 func loadERPLayers(t *testing.T) []*DocType {
+	skipParkedPacks(t)
 	t.Helper()
 	var all []*DocType
 	seen := map[string]string{}
@@ -40,6 +41,7 @@ func TestERPLayersComposeWithoutDanglingLinks(t *testing.T) {
 }
 
 func TestERPLayersShareOneRoleDefinition(t *testing.T) {
+	skipParkedPacks(t)
 	seen := map[string]Role{}
 	for _, pack := range erpPackLayers {
 		roles, _, err := ParseRolesDirectory(filepath.Join("..", "..", "config", pack, "doctypes"))
@@ -251,6 +253,7 @@ func TestERPLinkTargetsHaveSearchableTitles(t *testing.T) {
 // resources and resource_bindings (copied from retail-pos). The retail-shop
 // setup, which groups the product grid by its own field, is the one that renders.
 func TestERPRegisterViewsKeepToTheCategorySetupThatRenders(t *testing.T) {
+	skipParkedPacks(t)
 	for _, pack := range erpPackLayers {
 		views, err := ParseViewsDirectory(filepath.Join("..", "..", "config", pack, "views"))
 		if err != nil {
@@ -276,6 +279,7 @@ func TestERPRegisterViewsKeepToTheCategorySetupThatRenders(t *testing.T) {
 // matches package request" was only the last symptom). Other findings that the
 // proven retail-shop view also has are not treated as blocking here.
 func TestERPViewsHaveNoBlockingPageFindings(t *testing.T) {
+	skipParkedPacks(t)
 	all := loadERPLayers(t)
 	reg := NewRegistry()
 	reg.LoadFull(all, []*Role{{Name: AdminRole}}, nil)
@@ -301,6 +305,7 @@ func TestERPViewsHaveNoBlockingPageFindings(t *testing.T) {
 // The reason on a stock adjustment decides whether stock goes up or down, so a
 // shopkeeper never has to type a minus sign for a loss.
 func TestStockAdjustmentReasonsDecideDirection(t *testing.T) {
+	skipParkedPacks(t)
 	doctypes, err := ParseConfigTree("../../config/erp-inventory")
 	if err != nil {
 		t.Fatal(err)

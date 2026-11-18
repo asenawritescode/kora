@@ -20,23 +20,3 @@ func TestParsePageManifestsDirectoryReadsNativeYAML(t *testing.T) {
 		t.Fatalf("unexpected parsed manifests: %#v", manifests)
 	}
 }
-
-func TestKoraSitePOSPackReferencesResolve(t *testing.T) {
-	doctypeDir := filepath.Join("..", "..", "config", "kora-1ab2e6")
-	doctypes, err := ParseConfigTree(filepath.Join(doctypeDir, "doctypes"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	manifests, err := ParsePageManifestsDirectory(filepath.Join(doctypeDir, "pages"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	views := make([]*View, 0, len(manifests))
-	for _, manifest := range manifests {
-		views = append(views, manifest.ToView())
-	}
-	snapshot := &ConfigSnapshot{DocTypes: doctypes, Views: views}
-	if findings := ValidateSnapshotReferences(snapshot, nil); len(findings) != 0 {
-		t.Fatalf("POS pack has unresolved references: %#v", findings)
-	}
-}

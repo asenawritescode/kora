@@ -10,6 +10,7 @@ import (
 // The Menu report must use only models, measures and dimensions the Engine
 // offers for the pack's record types.
 func TestMenuReportsOnlyUseWhatTheEngineOffers(t *testing.T) {
+	skipParkedPacks(t, "menu-tables")
 	pack := filepath.Join("..", "..", "config", "menu-tables")
 	docTypes, err := doctype.ParseConfigTree(pack)
 	if err != nil {

@@ -27,6 +27,9 @@ func TestConfigPacksMeetUATFoundationContract(t *testing.T) {
 		if err != nil || !info.IsDir() {
 			continue
 		}
+		if strings.HasPrefix(filepath.Base(root), "_") {
+			continue // parked packs are not maintained (config/_parked)
+		}
 		if filepath.Base(root) == "v0" {
 			legacyPacks, err := filepath.Glob(filepath.Join(root, "*"))
 			if err != nil {

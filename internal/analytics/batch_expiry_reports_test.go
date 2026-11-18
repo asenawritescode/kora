@@ -10,6 +10,7 @@ import (
 // The Dispensary report must use only models, measures and dimensions the Engine
 // offers for the pack's record types.
 func TestDispensaryReportsOnlyUseWhatTheEngineOffers(t *testing.T) {
+	skipParkedPacks(t, "batch-expiry")
 	pack := filepath.Join("..", "..", "config", "batch-expiry")
 	docTypes, err := doctype.ParseConfigTree(pack)
 	if err != nil {

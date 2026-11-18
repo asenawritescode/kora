@@ -10,6 +10,7 @@ import (
 // The Produce report must use only models, measures and dimensions the Engine
 // offers for the pack's record types.
 func TestProduceReportsOnlyUseWhatTheEngineOffers(t *testing.T) {
+	skipParkedPacks(t)
 	root := filepath.Join("..", "..", "config")
 	docTypes, err := doctype.ParseConfigTree(filepath.Join(root, "farm-produce"))
 	if err != nil {

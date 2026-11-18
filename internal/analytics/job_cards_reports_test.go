@@ -10,6 +10,7 @@ import (
 // The Workshop report must use only models, measures and dimensions the Engine
 // offers for the pack's record types.
 func TestWorkshopReportsOnlyUseWhatTheEngineOffers(t *testing.T) {
+	skipParkedPacks(t, "job-cards")
 	pack := filepath.Join("..", "..", "config", "job-cards")
 	docTypes, err := doctype.ParseConfigTree(pack)
 	if err != nil {

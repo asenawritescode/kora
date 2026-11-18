@@ -15,9 +15,9 @@ import (
 // narrower roles are exercised: loaded together into one MySQL (which also shows the packs coexist), every role
 // is refused exactly what its permission rows withhold, and nothing more.
 var rolePermissionPacks = []string{
-	"crm", "people", "documents", "assets", "projects", "fleet", "manufacturing", "subscriptions",
-	"menu-tables", "batch-expiry", "farm-produce", "students", "shipments", "properties", "appointments",
-	"job-cards", "members-savings", "grants-donors", "rooms-bookings",
+	"crm", "people", "documents", "assets", "projects", "fleet", "subscriptions",
+	"students", "shipments", "properties", "appointments",
+	"members-savings", "grants-donors", "rooms-bookings",
 }
 
 type rolePerm struct{ read, create, write, delete bool }
@@ -54,7 +54,7 @@ func TestNicheRolesGetExactlyTheirDeclaredPermissions(t *testing.T) {
 		permissions = append(permissions, packPermissions...)
 	}
 
-	handler, db, reg, site := newPackLayersHandlerWithRoles(t, roles, permissions, append(append([]string{}, rolePermissionPacks...), "pos-base")...)
+	handler, db, reg, site := newPackLayersHandlerWithRoles(t, roles, permissions, rolePermissionPacks...)
 
 	declared := map[string]map[string]rolePerm{} // role -> record type -> what it may do
 	for _, p := range permissions {

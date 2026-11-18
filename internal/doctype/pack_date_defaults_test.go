@@ -19,7 +19,7 @@ func TestMaintainedPacksAvoidDateDefaultsThatBreakMySQL(t *testing.T) {
 	}
 	checked := 0
 	for _, entry := range entries {
-		if !entry.IsDir() || entry.Name() == "v0" {
+		if !entry.IsDir() || entry.Name() == "v0" || strings.HasPrefix(entry.Name(), "_") {
 			continue
 		}
 		recordTypes, err := ParseConfigTree(filepath.Join(root, entry.Name()))

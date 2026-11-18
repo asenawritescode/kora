@@ -1,12 +1,21 @@
 package site
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 // requireComposes validates and imports packs together the way a niche template
 // installs them: no clashing resource names, no clashing role definitions, no
 // dangling links. Roles and permissions are merged as composition merges them.
 func requireComposes(t *testing.T, name string, packs ...string) {
 	t.Helper()
+	for _, pack := range packs {
+		if _, err := os.Stat(filepath.Join("..", "..", "config", pack)); err != nil {
+			t.Skipf("%s is parked in config/_parked until it is rebuilt on Item (#647)", pack)
+		}
+	}
 	var all []PackFile
 	for _, pack := range packs {
 		for _, file := range erpModuleFiles(t, pack) {
