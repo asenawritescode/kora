@@ -42,6 +42,7 @@ transaction:
         difference_reason: $input.difference_reason
         difference_note: $input.difference_note
         left_in_drawer: $input.left_in_drawer
+        closing_counts: $input.closing_counts
   - update:
       record: Shift
       name: $input.shift

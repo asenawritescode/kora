@@ -1,0 +1,24 @@
+name: Till Count Line
+module_owner_id: pos.core
+module_ownership_mode: commands_only
+module_access: published
+module: POS
+is_child_table: true
+title_field: denomination
+fields:
+  - fieldname: denomination
+    fieldtype: Currency
+    label: Denomination
+    reqd: true
+    in_list_view: true
+  - fieldname: quantity
+    fieldtype: Int
+    label: Count
+    reqd: true
+    in_list_view: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    computed: "denomination * quantity"
+    read_only: true
+    in_list_view: true

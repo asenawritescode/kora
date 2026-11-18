@@ -428,3 +428,21 @@
 - doctype: module.pos.core.operation.record_cash_movement
   role: Cashier
   write: true
+- doctype: Till Count Line
+  role: Owner
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Till Count Line
+  role: Manager
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Till Count Line
+  role: Cashier
+  read: true
+  write: false
+  create: false
+  delete: false

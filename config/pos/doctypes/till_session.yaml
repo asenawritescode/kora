@@ -38,6 +38,16 @@ fields:
   - fieldname: closing_count
     fieldtype: Currency
     label: Closing Count
+  - fieldname: opening_counts
+    fieldtype: Table
+    options: Till Count Line
+    label: Opening Count
+    description: Notes and coins counted into the till at open. Optional.
+  - fieldname: closing_counts
+    fieldtype: Table
+    options: Till Count Line
+    label: Closing Count Lines
+    description: Notes and coins counted out of the till at close. Optional.
   - fieldname: expected_cash
     fieldtype: Currency
     label: Expected Cash
@@ -133,3 +143,11 @@ doc_constraints:
     condition: '(and (== status "Closed") (or (> (- closing_count expected_cash) 100) (> (- expected_cash closing_count) 100)))'
     require_fields: [difference_reason]
     message: Pick a reason before closing.
+  - type: predicate
+    condition: '(> (count "opening_counts") 0)'
+    predicate: '(== (round opening_float 2) (round (sum "opening_counts" "amount") 2))'
+    message: Counted notes and coins don't add up to the total.
+  - type: predicate
+    condition: '(> (count "closing_counts") 0)'
+    predicate: '(== (round closing_count 2) (round (sum "closing_counts" "amount") 2))'
+    message: Counted notes and coins don't add up to the total.
