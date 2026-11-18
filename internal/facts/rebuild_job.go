@@ -289,12 +289,12 @@ func readSequence(ctx context.Context, tx *sql.Tx) (int64, error) {
 	return seq, nil
 }
 
-// inList returns the placeholders and bound values of an IN list of statuses.
-func inList(list []JobStatus) (string, []any) {
+// inList returns the placeholders and bound values of an IN list.
+func inList[T ~string](list []T) (string, []any) {
 	marks := make([]string, len(list))
 	args := make([]any, len(list))
-	for i, s := range list {
-		marks[i], args[i] = "?", string(s)
+	for i, v := range list {
+		marks[i], args[i] = "?", string(v)
 	}
 	return strings.Join(marks, ", "), args
 }
