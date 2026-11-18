@@ -1,0 +1,52 @@
+name: Cash Movement
+module_owner_id: pos.core
+module_ownership_mode: commands_only
+module_access: published
+module: POS
+title_field: reason
+search_fields: reason, cashier
+fields:
+  - fieldname: till_session
+    fieldtype: Link
+    options: Till Session
+    label: Till Session
+    reqd: true
+    search_index: true
+    in_list_view: true
+  - fieldname: direction
+    fieldtype: Select
+    label: Direction
+    options: |
+      In
+      Out
+    reqd: true
+    in_list_view: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+  - fieldname: reason
+    fieldtype: Select
+    label: Reason
+    options: |
+      Stock purchase
+      Transport
+      Wages
+      Owner took cash
+      Change from bank
+      Other
+    reqd: true
+    in_list_view: true
+  - fieldname: note
+    fieldtype: Data
+    label: Note
+  - fieldname: cashier
+    fieldtype: Data
+    label: Cashier
+    read_only: true
+    search_index: true
+doc_constraints:
+  - type: predicate
+    predicate: '(if (== direction "Out") (<= amount 1000) 1)'
+    message: Needs owner approval (coming soon)

@@ -1838,8 +1838,8 @@
    "cyclomatic": 17
   },
   "internal/kernel::applyAdjustments": {
-   "cognitive": 26,
-   "cyclomatic": 18
+   "cognitive": 22,
+   "cyclomatic": 17
   },
   "internal/kernel::applyData": {
    "cognitive": 27

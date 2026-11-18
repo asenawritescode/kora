@@ -46,11 +46,13 @@ func NewServer(handler http.Handler, addr string, cfg *TLSConfig) *Server {
 
 	srv := &Server{
 		Server: &http.Server{
-			Addr:         addr,
-			Handler:      handler,
-			ReadTimeout:  30 * time.Second,
-			WriteTimeout: 30 * time.Second,
-			IdleTimeout:  120 * time.Second,
+			Addr:              addr,
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
+			MaxHeaderBytes:    1 << 20,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       120 * time.Second,
 		},
 		tlsConfig: cfg,
 	}
