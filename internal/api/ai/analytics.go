@@ -553,6 +553,9 @@ func executeAnalyticsInsights(tx *orm.TxManager, reg *doctype.Registry, doctypeN
 		}
 		entries = append(entries, e)
 	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return fmt.Sprintf("Error querying analytics: %v", rowsErr)
+	}
 	if len(entries) == 0 {
 		return fmt.Sprintf("No analytics data for %s yet. Create some %s documents first.", doctypeName, doctypeName)
 	}
@@ -648,6 +651,9 @@ func listRollupDoctypes(tx *orm.TxManager, siteName, doctypeName string, readabl
 		if _, allowed := readable[d]; allowed {
 			dts = append(dts, d)
 		}
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return "Analytics not available. Create documents first."
 	}
 	if len(dts) == 0 {
 		return "No analytics data yet. Create documents and metrics will appear within seconds."

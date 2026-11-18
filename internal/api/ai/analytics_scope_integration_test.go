@@ -4,6 +4,7 @@ package ai
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"strings"
 	"testing"
@@ -34,6 +35,13 @@ func TestAIInsightRollupIsBoundToLegalEntityScope(t *testing.T) {
 				t.Skipf("set %s to run the rollup scope test against %s", tc.envVar, tc.name)
 			}
 			const tenant = "scope-site"
+			if probe, err := sql.Open(tc.driver, dsn); err == nil {
+				pingErr := probe.Ping()
+				_ = probe.Close()
+				if pingErr != nil {
+					t.Skipf("%s unavailable: %v", tc.name, pingErr)
+				}
+			}
 			database := disposabledb.Open(t, tc.driver, dsn)
 			dialect := kdb.Resolve(tc.dialect)
 			if err := analytics.BootstrapTables(context.Background(), database.DB, dialect); err != nil {
