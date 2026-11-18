@@ -1777,12 +1777,9 @@
   "internal/kernel::(*CommandResource).validateCompute": {
    "cognitive": 17
   },
-  "internal/kernel::(*CommandResource).validateGuardRefs": {
-   "cognitive": 16
-  },
   "internal/kernel::(*CommandResource).validateGuards": {
-   "cognitive": 43,
-   "cyclomatic": 22
+   "cognitive": 34,
+   "cyclomatic": 19
   },
   "internal/kernel::(*CommandResource).validateStepReferences": {
    "cognitive": 56,
@@ -1805,8 +1802,7 @@
    "cyclomatic": 21
   },
   "internal/kernel::(*Kernel).checkCommandGuards": {
-   "cognitive": 33,
-   "cyclomatic": 16
+   "cognitive": 23
   },
   "internal/kernel::(*Kernel).execDefinedCommand": {
    "cognitive": 151,

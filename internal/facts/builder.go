@@ -143,13 +143,12 @@ func (b *Builder) decode(event contract.EventEnvelope) (*doctype.DocType, Change
 		return nil, Change{}, fmt.Errorf("facts: parse source sequence: %w", err)
 	}
 	return dt, Change{
-		RecordID:    p.RecordID,
-		LegalEntity: event.BusinessScope.LegalEntityID,
-		Sequence:    seq,
-		OccurredAt:  event.OccurredAt,
-		Deleted:     strings.HasSuffix(event.Type, ".after_delete"),
-		Data:        p.Data,
-		OldData:     p.OldData,
+		RecordID:   p.RecordID,
+		Sequence:   seq,
+		OccurredAt: event.OccurredAt,
+		Deleted:    strings.HasSuffix(event.Type, ".after_delete"),
+		Data:       p.Data,
+		OldData:    p.OldData,
 	}, nil
 }
 
@@ -194,18 +193,16 @@ func (b *Builder) writeRow(ctx context.Context, tx *sql.Tx, table string, row Ro
 	return b.exec(ctx, tx, update, append(args, row.RecordID, row.LineID))
 }
 
-// markDirty records that a partition needs recomputing. Duplicates are ignored.
+// markDirty records that a partition needs recomputing. One upsert: a first mark inserts version 1,
+// and each later mark bumps version, the value a refresher's fence checks.
 func (b *Builder) markDirty(ctx context.Context, tx *sql.Tx, model string, d tenanttime.Date) error {
-	var n int
-	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE model = ? AND business_date = ?", b.Dialect.QuoteIdent(dirtyTable))
-	if err := tx.QueryRowContext(ctx, db.Rebind(b.Dialect, query), model, d.String()).Scan(&n); err != nil {
-		return fmt.Errorf("facts: read dirty marker: %w", err)
+	inc, ok := b.Dialect.(db.TableQualifiedIncrementDialect)
+	if !ok {
+		return errors.New("facts: dialect has no table-qualified increment")
 	}
-	if n > 0 {
-		return nil
-	}
-	insert := fmt.Sprintf("INSERT INTO %s (model, business_date) VALUES (?, ?)", b.Dialect.QuoteIdent(dirtyTable))
-	return b.exec(ctx, tx, insert, []any{model, d.String()})
+	upsert := fmt.Sprintf("INSERT INTO %s (model, business_date, version) VALUES (?, ?, 1) %s",
+		b.Dialect.QuoteIdent(dirtyTable), inc.UpsertIncrementForTable(dirtyTable, []string{"model", "business_date"}, []string{"version"}))
+	return b.exec(ctx, tx, upsert, []any{model, d.String()})
 }
 
 // exec runs one statement with ? placeholders, rebound for the dialect.
@@ -224,7 +221,10 @@ func (b *Builder) ensure(ctx context.Context, dt *doctype.DocType) error {
 	if b.ready[dt] {
 		return nil
 	}
-	if err := b.execDDL(ctx, []string{dirtyDDL(b.Dialect)}); err != nil {
+	if err := b.execDDL(ctx, []string{dirtyDDL(b.Dialect), summaryDDL(b.Dialect, dt)}); err != nil {
+		return err
+	}
+	if err := b.migrateDirty(ctx); err != nil {
 		return err
 	}
 	var stmts []string
@@ -258,7 +258,7 @@ func (b *Builder) tableExists(ctx context.Context, table string) bool {
 	return err == nil
 }
 
-// dirtyDDL creates the dirty-partition table; IF NOT EXISTS keeps it safe to repeat.
+// dirtyDDL creates the dirty-partition table with its key. Columns added later are in dirtyColumns.
 func dirtyDDL(dialect db.Dialect) string {
 	ddl := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n  %s,\n  %s,\n  PRIMARY KEY (%s, %s)\n)",
 		dialect.QuoteIdent(dirtyTable), columnDef(dialect, "model", "Data"), columnDef(dialect, "business_date", "Date"),
@@ -267,6 +267,23 @@ func dirtyDDL(dialect db.Dialect) string {
 		ddl += " " + suffix
 	}
 	return ddl
+}
+
+// dirtyColumns are added with the dialect's AddColumn when an existing table lacks them.
+var dirtyColumns = []doctype.Field{{Fieldname: "version", Fieldtype: "Int", Reqd: true, Default: "0"}, {Fieldname: "lease_owner", Fieldtype: "Data"}, {Fieldname: "lease_at", Fieldtype: "Datetime"}}
+
+// migrateDirty adds each dirty column the table lacks. The probe is dialect-neutral; LoadSchema skips _kora_ tables.
+func (b *Builder) migrateDirty(ctx context.Context) error {
+	for _, f := range dirtyColumns {
+		probe := fmt.Sprintf("SELECT %s FROM %s WHERE 1 = 0", b.Dialect.QuoteIdent(f.Fieldname), b.Dialect.QuoteIdent(dirtyTable)) //nolint:gosec // identifiers only, quoted by the dialect
+		if _, err := b.DB.ExecContext(ctx, probe); err == nil {
+			continue
+		}
+		if err := b.execDDL(ctx, []string{b.Dialect.AddColumn(dirtyTable, &f)}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // rowColumns returns every column of row with its value, sorted by column name.

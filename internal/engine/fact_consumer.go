@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/facts"
 	knet "github.com/asenawritescode/kora/internal/net"
@@ -24,6 +25,7 @@ func registerFactConsumer(config TenantServiceConfig, loaded *knet.LoadedSite, s
 	dispatcher := outbox.NewDispatcher(loaded.DB, dialect)
 	dispatcher.WorkAdmission = services.WorkAdmission
 	builder := &facts.Builder{DB: loaded.DB, Dialect: dialect, Registry: loaded.Registry}
+	refresher := &facts.Refresher{DB: loaded.DB, Dialect: dialect, Registry: loaded.Registry, Admission: services.WorkAdmission, Owner: contract.NewEventID()}
 	if err := dispatcher.RegisterTransactionalForTypes(facts.ConsumerName, types, builder.Consume); err != nil {
 		return fmt.Errorf("register fact events: %w", err)
 	}
@@ -31,6 +33,9 @@ func registerFactConsumer(config TenantServiceConfig, loaded *knet.LoadedSite, s
 		if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
 			RunWorkflowTriggerDispatcher(ctx, dispatcher)
 		}) {
+			return errors.New("tenant runtime is stopping")
+		}
+		if !loaded.StartWorker(config.ProcessContext, refresher.Run) {
 			return errors.New("tenant runtime is stopping")
 		}
 		return nil

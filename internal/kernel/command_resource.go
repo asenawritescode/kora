@@ -175,6 +175,11 @@ type StepCreate struct {
 	Record string            `yaml:"record"        json:"record"`
 	Scope  string            `yaml:"business_scope" json:"business_scope,omitempty"`
 	Values map[string]string `yaml:"values"         json:"values"`
+	// Name, a $input or $steps reference, presets the record's name. It is
+	// honoured only for an unused number inside an open number block that the
+	// Block owner reserved; otherwise the command is refused. Name and Block go together.
+	Name  string `yaml:"name,omitempty"     json:"name,omitempty"`
+	Block string `yaml:"in_block,omitempty" json:"in_block,omitempty"`
 }
 
 type StepUpdate struct {
@@ -257,6 +262,9 @@ func (c *CommandResource) validateInputExtras() error {
 func (c *CommandResource) validateCreate(i int, cr *StepCreate) error {
 	if cr.Record == "" || len(cr.Values) == 0 {
 		return fmt.Errorf("command %q: step %d create requires record and values", c.Name, i)
+	}
+	if (cr.Name == "") != (cr.Block == "") {
+		return fmt.Errorf("command %q: step %d create sets name and in_block together or not at all", c.Name, i)
 	}
 	return nil
 }
