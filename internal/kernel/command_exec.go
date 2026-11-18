@@ -546,21 +546,9 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			if dt == nil {
 				return nil, contract.NewError(contract.CodeNotFound, fmt.Sprintf("command %q: record %q not found", def.Name, create.Record))
 			}
-			doc := doctype.NewDocument(dt.Name)
-			for field, ref := range create.Values {
-				v, rerr := resolveEnvRef(ref, env)
-				if errors.Is(rerr, errRefAbsent) {
-					continue
-				}
-				if rerr != nil {
-					return nil, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", i, rerr))
-				}
-				if tf := dt.GetField(field); tf != nil && tf.Fieldtype == "Table" {
-					if rows, ok := v.([]any); ok {
-						v = childDocuments(tf.Options, rows)
-					}
-				}
-				doc.Set(field, v)
+			doc, valueErr := createDocumentValues(dt, create.Values, env, i)
+			if valueErr != nil {
+				return nil, valueErr
 			}
 			if err := dt.BindBusinessScope(doc, txMgr.BusinessScope, true, nil); err != nil {
 				return nil, contract.NewError(contract.CodePermissionDenied, err.Error())
@@ -575,10 +563,8 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			if err := txMgr.PrepareInsert(dt, doc); err != nil {
 				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 			}
-			if op.Context.IdempotencyKey != "" && def.IdempotentByKey && len(outcomes) == 0 {
-				if cerr := k.claimReceipt(dbTx, op, def, opID, payloadHash(op.Payload)); cerr != nil {
-					return nil, cerr
-				}
+			if cerr := k.claimFirstWriteReceipt(dbTx, op, def, opID, len(outcomes)); cerr != nil {
+				return nil, cerr
 			}
 			owner := op.Context.Owner
 			if owner == "" {
@@ -594,11 +580,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 				return nil, hookErr
 			}
 			doc.IsNew = false
-			completeTx := *txMgr
-			completeTx.ScriptMutationExecutor = nil
-			completeTx.PostCommitHooks = nil
-			completeTx.Transaction = nil
-			completeTx.SkipHookScripts = nil
+			completeTx := postCommitCopy(txMgr)
 			txMgr.PostCommitHooks = append(txMgr.PostCommitHooks, func() { completeTx.CompleteInsert(dt, doc) })
 			outcomes = append(outcomes, stepOutcome{Record: dt.Name, Name: doc.Name, Created: true})
 			lastRecord, lastName = dt.Name, doc.Name
@@ -617,11 +599,8 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 				return nil, targetErr
 			}
 			if len(step.Update.Adjust) > 0 {
-				if err := lockRecordRow(dbTx, k.dialect(), dt, targetName); err != nil {
-					if err == sql.ErrNoRows {
-						return nil, contract.NewError(contract.CodeNotFound, fmt.Sprintf("record %q not found", targetName))
-					}
-					return nil, contract.NewError(contract.CodeDependencyUnavailable, "lock document failed")
+				if lockErr := lockAdjustTarget(dbTx, k.dialect(), dt, targetName); lockErr != nil {
+					return nil, lockErr
 				}
 			}
 			oldDoc, err := txMgr.GetDocWithScope(dt, targetName, scope)
@@ -662,10 +641,8 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			if err := txMgr.PrepareSave(dt, doc, oldDoc); err != nil {
 				return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 			}
-			if op.Context.IdempotencyKey != "" && def.IdempotentByKey && len(outcomes) == 0 {
-				if cerr := k.claimReceipt(dbTx, op, def, opID, payloadHash(op.Payload)); cerr != nil {
-					return nil, cerr
-				}
+			if cerr := k.claimFirstWriteReceipt(dbTx, op, def, opID, len(outcomes)); cerr != nil {
+				return nil, cerr
 			}
 			if err := txMgr.SaveInTxWithScope(dbTx, dt, doc, user, scope, oldDoc); err != nil {
 				return nil, wrapExpectedVersionORMError(err, op, k.dialect())
@@ -673,11 +650,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, oldDoc}); hookErr != nil {
 				return nil, hookErr
 			}
-			completeTx := *txMgr
-			completeTx.ScriptMutationExecutor = nil
-			completeTx.PostCommitHooks = nil
-			completeTx.Transaction = nil
-			completeTx.SkipHookScripts = nil
+			completeTx := postCommitCopy(txMgr)
 			txMgr.PostCommitHooks = append(txMgr.PostCommitHooks, func() { completeTx.CompleteSave(dt, doc, oldDoc) })
 			outcomes = append(outcomes, stepOutcome{Record: dt.Name, Name: targetName, Created: false})
 			lastRecord, lastName = dt.Name, targetName
