@@ -345,7 +345,7 @@ func TestShippedPackCommandInputsCoverReferences(t *testing.T) {
 				}
 			}
 			if cmd.Name == "open_session" {
-				want := map[string]string{"register": "string", "location": "string", "opening_float": "number", "opening_note": "string"}
+				want := map[string]string{"register": "string", "location": "string", "opening_float": "number", "opening_note": "string", "opening_counts": "array"}
 				if len(s.Properties) != len(want) || !slices.Equal(s.Required, []string{"location", "opening_float", "register"}) {
 					t.Errorf("open_session required=%v properties=%v", s.Required, s.Properties)
 				}

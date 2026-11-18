@@ -448,3 +448,21 @@
   role: Cashier
   read: true
   if_owner: true
+- doctype: Till Count Line
+  role: Owner
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Till Count Line
+  role: Manager
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Till Count Line
+  role: Cashier
+  read: true
+  write: false
+  create: false
+  delete: false
