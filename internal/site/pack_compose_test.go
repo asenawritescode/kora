@@ -18,7 +18,7 @@ func requireComposes(t *testing.T, name string, packs ...string) {
 	}
 	var all []PackFile
 	for _, pack := range packs {
-		for _, file := range erpModuleFiles(t, pack) {
+		for _, file := range packFiles(t, pack) {
 			if file.ContentType == "roles" || file.ContentType == "permissions" {
 				continue
 			}
@@ -28,7 +28,7 @@ func requireComposes(t *testing.T, name string, packs ...string) {
 	for _, kind := range []string{"roles", "permissions"} {
 		merged := ""
 		for _, pack := range packs {
-			for _, file := range erpModuleFiles(t, pack) {
+			for _, file := range packFiles(t, pack) {
 				if file.ContentType == kind {
 					merged += file.Content
 				}

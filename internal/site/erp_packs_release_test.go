@@ -12,9 +12,9 @@ import (
 // exactly as the publish step sends it, alone and composed, so a bad pack is
 // found here and not at publish time.
 
-var erpModules = []string{"pos-base", "erp-inventory", "erp-purchasing", "erp-accounting"}
+var baseModules = []string{"pos", "inventory"}
 
-func erpModuleFiles(t *testing.T, pack string) []PackFile {
+func packFiles(t *testing.T, pack string) []PackFile {
 	t.Helper()
 	skipParkedPacks(t, pack)
 	root := filepath.Join("..", "..", "config", pack)
@@ -59,10 +59,9 @@ func requireValidPack(t *testing.T, name string, files []PackFile) {
 }
 
 func TestEachERPModulePassesMarketplaceValidation(t *testing.T) {
-	skipParkedPacks(t)
-	for _, pack := range erpModules {
+	for _, pack := range baseModules {
 		t.Run(pack, func(t *testing.T) {
-			requireValidPack(t, pack, erpModuleFiles(t, pack))
+			requireValidPack(t, pack, packFiles(t, pack))
 		})
 	}
 }
@@ -70,10 +69,9 @@ func TestEachERPModulePassesMarketplaceValidation(t *testing.T) {
 // The template installs the modules together, so they must also validate and
 // import as one: no clashing paths, no dangling links, no conflicting roles.
 func TestERPModulesPassValidationAndImportWhenComposed(t *testing.T) {
-	skipParkedPacks(t)
 	var all []PackFile
-	for _, pack := range erpModules {
-		for _, file := range erpModuleFiles(t, pack) {
+	for _, pack := range baseModules {
+		for _, file := range packFiles(t, pack) {
 			if file.ContentType == "roles" || file.ContentType == "permissions" {
 				continue // merged below, as composition does
 			}
@@ -82,8 +80,8 @@ func TestERPModulesPassValidationAndImportWhenComposed(t *testing.T) {
 	}
 	for _, kind := range []string{"roles", "permissions"} {
 		merged := ""
-		for _, pack := range erpModules {
-			for _, file := range erpModuleFiles(t, pack) {
+		for _, pack := range baseModules {
+			for _, file := range packFiles(t, pack) {
 				if file.ContentType == kind {
 					merged += file.Content
 				}
