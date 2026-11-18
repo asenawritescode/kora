@@ -57,3 +57,7 @@ fields:
     fieldtype: Currency
     label: Variance
     computed: "closing_count - expected_cash"
+  - fieldname: opening_note
+    fieldtype: Data
+    label: Opening Note
+    description: Why the opening float differs from what the last till left in the drawer.

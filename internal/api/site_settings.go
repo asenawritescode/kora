@@ -45,20 +45,26 @@ func (h *Handler) readSiteSettings(c *gin.Context) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	denominations, err := h.denominationsFor(c, currency)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"currency":            currency,
 		"currency_precision":  SupportedCurrencies[currency],
 		"time_zone":           clock.Location.String(),
 		"business_day_cutoff": tenanttime.FormatCutoff(clock.Cutoff),
+		"denominations":       denominations,
 	}, nil
 }
 
 // siteSettingsRequest is a partial update: only fields present are validated
 // and stored.
 type siteSettingsRequest struct {
-	Currency          *string `json:"currency"`
-	TimeZone          *string `json:"time_zone"`
-	BusinessDayCutoff *string `json:"business_day_cutoff"`
+	Currency          *string         `json:"currency"`
+	TimeZone          *string         `json:"time_zone"`
+	BusinessDayCutoff *string         `json:"business_day_cutoff"`
+	Denominations     *[]denomination `json:"denominations"`
 }
 
 // HandleSiteSettings returns safe, non-secret settings for the current site.
@@ -84,7 +90,16 @@ func (h *Handler) HandleSiteSettingsUpdate(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid settings", nil)
 		return
 	}
-	updates, err := request.updates()
+	var currency string
+	if request.Denominations != nil {
+		current, err := h.effectiveCurrency(c, request)
+		if err != nil {
+			internalError(c, "reading site currency", err)
+			return
+		}
+		currency = current
+	}
+	updates, err := request.updates(currency)
 	if err != nil {
 		var settingErr *settingError
 		if errors.As(err, &settingErr) {
@@ -115,8 +130,8 @@ type settingError struct{ field, code, message string }
 func (e *settingError) Error() string { return e.message }
 
 // updates validates the fields present and returns normalised rows. Absent
-// fields are left unchanged.
-func (r siteSettingsRequest) updates() ([]siteSetting, error) {
+// fields are left unchanged. currency is the currency Denominations apply to.
+func (r siteSettingsRequest) updates(currency string) ([]siteSetting, error) {
 	var rows []siteSetting
 	if r.Currency != nil {
 		currency := strings.ToUpper(strings.TrimSpace(*r.Currency))
@@ -138,6 +153,13 @@ func (r siteSettingsRequest) updates() ([]siteSetting, error) {
 			return nil, &settingError{"business_day_cutoff", "validation.invalid_business_day_cutoff", "Use a time from 00:00 to 06:00"}
 		}
 		rows = append(rows, siteSetting{tenanttime.KeyBusinessDayCutoff, tenanttime.FormatCutoff(cutoff)})
+	}
+	if r.Denominations != nil {
+		row, err := denominationRow(currency, *r.Denominations)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, row)
 	}
 	return rows, nil
 }

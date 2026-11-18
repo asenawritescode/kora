@@ -19,6 +19,7 @@ import (
 	"github.com/asenawritescode/kora/internal/kernel"
 	"github.com/asenawritescode/kora/internal/outbox"
 	"github.com/asenawritescode/kora/internal/policy"
+	"github.com/asenawritescode/kora/internal/query"
 )
 
 func TestPOSCommandFeaturesAcrossDialects(t *testing.T) {
@@ -160,5 +161,32 @@ func runPOSCommandFeatures(t *testing.T, driver string, conn *sql.DB, dbName str
 	if got := q("SELECT ended_at FROM "+table("Shift")+" WHERE name = ?", shift); got == "" {
 		t.Fatal("close_session did not set ended_at via $now")
 	}
+	// E1: the next session on the register stores its opening note, and
+	// last_close reads the session that closed before it.
+	must("pos.open_session", "", map[string]any{"data": map[string]any{"register": register, "location": loc, "opening_float": 480, "opening_note": "Short 20 from the bag"}})
+	session := q("SELECT shift FROM "+table("Till Session")+" WHERE register = ? AND status = ?", register, "Open")
+	if got := q("SELECT opening_note FROM "+table("Till Session")+" WHERE shift = ?", session); got != "Short 20 from the bag" {
+		t.Fatalf("opening_note = %q", got)
+	}
+	must("pos.close_session", "", map[string]any{"data": map[string]any{"shift": session, "closing_count": 470}})
+	defs, err := query.LoadDir(filepath.Join("..", "..", "config", "pos", "queries"), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lastClose *query.Definition
+	for _, d := range defs {
+		if d.Name == "last_close" {
+			lastClose = d
+		}
+	}
+	page, err := query.Run(ctx, conn, dialect, lastClose, query.Request{FullRead: true, Now: time.Now(), Input: map[string]any{"register": register}})
+	if err != nil || len(page.Rows) != 1 {
+		t.Fatalf("last_close = %v, %v", page, err)
+	}
+	row := page.Rows[0]
+	if fmt.Sprint(row["cashier"]) != "cashier-1" || !strings.HasPrefix(fmt.Sprint(row["closing_count"]), "470") || fmt.Sprint(row["closed_at"]) == "" {
+		t.Fatalf("last_close row = %v", row)
+	}
+
 	must("pos.open_session", "open-4", map[string]any{"data": map[string]any{"register": register, "location": loc, "opening_float": 0}})
 }
