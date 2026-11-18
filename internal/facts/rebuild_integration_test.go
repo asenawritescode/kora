@@ -47,7 +47,7 @@ func TestRebuildResumesToCleanRebuild(t *testing.T) {
 			}
 
 			// First attempt: the context is cancelled after the first chunk commits.
-			job, err := store.Enqueue(ctx, "Sale")
+			job, err := store.Enqueue(ctx, "Sale", Window{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -87,7 +87,7 @@ func TestRebuildResumesToCleanRebuild(t *testing.T) {
 					t.Fatalf("drop %s: %v", table, err)
 				}
 			}
-			clean, err := store.Enqueue(ctx, "Sale")
+			clean, err := store.Enqueue(ctx, "Sale", Window{})
 			if err != nil {
 				t.Fatal(err)
 			}

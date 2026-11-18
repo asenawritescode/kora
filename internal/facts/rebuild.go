@@ -82,7 +82,7 @@ func (r *Rebuilder) chunk(ctx context.Context, job *Job, dt *doctype.DocType) (b
 	if size == 0 {
 		size = rebuildChunk
 	}
-	names, err := r.names(ctx, tx, dt, job.Checkpoint, size)
+	names, err := r.names(ctx, tx, dt, job, size)
 	if err != nil || len(names) == 0 {
 		return false, err
 	}
@@ -132,10 +132,25 @@ func (r *Rebuilder) writeChunk(ctx context.Context, tx *sql.Tx, job *Job, dt *do
 	return nil
 }
 
+// windowBounds is the source axis range searched for a window: driftWindowDays either side, end exclusive.
+func windowBounds(w Window) (time.Time, time.Time) {
+	start := time.Date(w.From.Year, w.From.Month, w.From.Day, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -driftWindowDays)
+	end := time.Date(w.To.Year, w.To.Month, w.To.Day, 0, 0, 0, 0, time.UTC).AddDate(0, 0, driftWindowDays+1)
+	return start, end
+}
+
 // names returns the next size record names after checkpoint, in name order.
-func (r *Rebuilder) names(ctx context.Context, tx *sql.Tx, dt *doctype.DocType, checkpoint string, size int) ([]string, error) {
-	query := fmt.Sprintf("SELECT name FROM %s WHERE name > ? ORDER BY name LIMIT ?", r.Dialect.QuoteIdent(dt.RawTableName()))
-	rows, err := tx.QueryContext(ctx, db.Rebind(r.Dialect, query), checkpoint, size)
+func (r *Rebuilder) names(ctx context.Context, tx *sql.Tx, dt *doctype.DocType, job *Job, size int) ([]string, error) {
+	axis := r.Dialect.QuoteIdent(dt.Facts.Time)
+	query := fmt.Sprintf("SELECT name FROM %s WHERE name > ?", r.Dialect.QuoteIdent(dt.RawTableName())) //nolint:gosec // identifiers only, quoted by the dialect
+	args := []any{job.Checkpoint}
+	if !job.Window.isZero() {
+		start, end := windowBounds(job.Window)
+		query += fmt.Sprintf(" AND %s >= ? AND %s < ?", axis, axis) //nolint:gosec // identifiers only, quoted by the dialect
+		args = append(args, start, end)
+	}
+	query += " ORDER BY name LIMIT ?"
+	rows, err := tx.QueryContext(ctx, db.Rebind(r.Dialect, query), append(args, size)...)
 	if err != nil {
 		return nil, fmt.Errorf("facts: read rebuild chunk: %w", err)
 	}
