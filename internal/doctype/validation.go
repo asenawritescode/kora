@@ -77,7 +77,10 @@ func ValidateDocumentWithReferenceResolver(dt *DocType, doc *Document, registry 
 // ValidateDocumentWithResolvers validates local links, provider references and
 // captured snapshots through the caller's existing persistence/runtime services.
 func ValidateDocumentWithResolvers(dt *DocType, doc *Document, registry *Registry, oldDoc *Document, resolver LinkedDocumentResolver, referenceResolver contract.BusinessReferenceValidator, snapshotValidator contract.HistoricalSnapshotValidator) ValidationErrors {
-	var errors ValidationErrors
+	// Child computed fields (an amount per count line) are filled before any
+	// constraint reads them: a total over a child column must see the value the
+	// save will store, not what the client sent.
+	errors := computeChildFields(dt, doc, registry)
 
 	// Evaluate predicate-based document constraints.
 	var sandbox *LispSandbox
@@ -95,7 +98,7 @@ func ValidateDocumentWithResolvers(dt *DocType, doc *Document, registry *Registr
 			sandbox = NewLispSandbox()
 			defer sandbox.Close()
 		}
-		result, err := sandbox.Eval(dc.Predicate, doc.Fields, nil)
+		result, err := sandbox.Eval(dc.Predicate, doc.Fields, childTablesOf(doc))
 		if err != nil {
 			errors = append(errors, &ValidationError{
 				Type:    "ValidationError",
@@ -787,4 +790,25 @@ func predicateResult(result any) bool {
 	}
 	// Non-nil, non-float64 results (strings, etc.) are considered truthy.
 	return true
+}
+
+// computeChildFields fills the computed fields of each child row of doc, the
+// same values the save computes, so validation sees them.
+func computeChildFields(dt *DocType, doc *Document, registry *Registry) ValidationErrors {
+	var errors ValidationErrors
+	if registry == nil {
+		return nil
+	}
+	for _, f := range dt.TableFields() {
+		childDT := registry.Get(f.Options)
+		if childDT == nil {
+			continue
+		}
+		for _, child := range doc.GetTable(f.Fieldname) {
+			if err := ComputeFields(childDT, child); err != nil {
+				errors = append(errors, &ValidationError{Type: "ValidationError", Message: err.Error(), Field: f.Fieldname, DocType: dt.Name})
+			}
+		}
+	}
+	return errors
 }

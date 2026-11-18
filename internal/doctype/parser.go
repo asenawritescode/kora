@@ -602,24 +602,15 @@ func (d *DocType) Validate() error {
 		if dc.Type == "" {
 			return fmt.Errorf("doctype %s: doc_constraint %d has no type", d.Name, i)
 		}
+		if err := infixCondition(dc.Condition).validateForm(); err != nil {
+			return fmt.Errorf("doctype %s: doc_constraint %d: %w", d.Name, i, err)
+		}
 		if dc.Message == "" {
 			return fmt.Errorf("doctype %s: doc_constraint %d has no message", d.Name, i)
 		}
 		if dc.Type == "linked_cross_field" {
-			if dc.Field == "" || dc.LinkField == "" || dc.RelatedField == "" || dc.Operator == "" {
-				return fmt.Errorf("doctype %s: linked_cross_field constraint %d requires field, link_field, related_field, and operator", d.Name, i)
-			}
-			field := d.GetField(dc.LinkField)
-			if field == nil || field.Fieldtype != "Link" {
-				return fmt.Errorf("doctype %s: linked_cross_field constraint %d link_field %q must be a Link field", d.Name, i, dc.LinkField)
-			}
-			if d.GetField(dc.Field) == nil {
-				return fmt.Errorf("doctype %s: linked_cross_field constraint %d field %q does not exist", d.Name, i, dc.Field)
-			}
-			switch dc.Operator {
-			case "<=", "<", ">=", ">", "==", "!=":
-			default:
-				return fmt.Errorf("doctype %s: linked_cross_field constraint %d has unsupported operator %q", d.Name, i, dc.Operator)
+			if err := d.validateLinkedCrossField(i, dc); err != nil {
+				return err
 			}
 		}
 		// Validate nested constraints in immutable_after.
@@ -1162,4 +1153,25 @@ func selectHasOption(field *Field, value string) bool {
 // KeySuggestion is the "did you mean" detail for an unknown YAML key, or "" when nothing is close.
 func KeySuggestion(unknown string, known map[string]bool) string {
 	return suggestionFor(unknown, known)
+}
+
+// validateLinkedCrossField checks that linked_cross_field constraint i names a
+// Link field, an existing field and a supported operator.
+func (d *DocType) validateLinkedCrossField(i int, dc DocConstraint) error {
+	if dc.Field == "" || dc.LinkField == "" || dc.RelatedField == "" || dc.Operator == "" {
+		return fmt.Errorf("doctype %s: linked_cross_field constraint %d requires field, link_field, related_field, and operator", d.Name, i)
+	}
+	field := d.GetField(dc.LinkField)
+	if field == nil || field.Fieldtype != "Link" {
+		return fmt.Errorf("doctype %s: linked_cross_field constraint %d link_field %q must be a Link field", d.Name, i, dc.LinkField)
+	}
+	if d.GetField(dc.Field) == nil {
+		return fmt.Errorf("doctype %s: linked_cross_field constraint %d field %q does not exist", d.Name, i, dc.Field)
+	}
+	switch dc.Operator {
+	case "<=", "<", ">=", ">", "==", "!=":
+		return nil
+	default:
+		return fmt.Errorf("doctype %s: linked_cross_field constraint %d has unsupported operator %q", d.Name, i, dc.Operator)
+	}
 }
