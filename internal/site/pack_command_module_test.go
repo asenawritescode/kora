@@ -358,3 +358,67 @@ func TestShippedPackCommandInputsCoverReferences(t *testing.T) {
 		}
 	}
 }
+
+// TestCommandInputEnumNarrowsSelect: an input enum narrows a Select field to
+// listed options. The published property carries the narrowed list, and a value
+// the field does not offer fails the pack load.
+func TestCommandInputEnumNarrowsSelect(t *testing.T) {
+	records := map[string]*doctype.DocType{"Cash Movement": {Name: "Cash Movement", Fields: []doctype.Field{
+		{Fieldname: "reason", Fieldtype: "Select", Options: "Stock purchase\nChange from the bank\nOwner added cash"},
+		{Fieldname: "note", Fieldtype: "Data"},
+	}}}
+	const base = `
+name: record_pay_in
+namespace: pos
+version: 1
+module_owner_id: pos.core
+capability: pos.drawer
+operation: record_pay_in
+input_schema: {id: pos.record_pay_in.input, version: 1}
+output_schema: {id: pos.record_pay_in.output, version: 1}
+input: {record: Cash Movement, enum: {%s}%s}
+transaction:
+  - create: {record: Cash Movement, values: {reason: $input.reason, note: $input.note}}
+`
+	tests := []struct {
+		name, enum, extra string
+		wantErr           string
+		wantEnum          string // JSON of the reason property, "" when checked by wantErr only
+	}{
+		{"subset narrows the published enum", `reason: [Change from the bank, Owner added cash]`, "",
+			"", `{"enum":["Change from the bank","Owner added cash"],"type":"string"}`},
+		{"value not an option of the field", `reason: [Transport]`, "",
+			`value "Transport" is not an option of Cash Movement.reason`, ""},
+		{"enum on a field that is not a Select", `note: [x]`, "",
+			`names no Select field of "Cash Movement"`, ""},
+		{"enum on an unknown name", `ghost: [x]`, "",
+			`names no Select field of "Cash Movement"`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, err := kernel.ParseCommandResource([]byte(strings.Replace(strings.Replace(base, "%s", tt.enum, 1), "%s", tt.extra, 1)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = checkInputEnums(cmd, records)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var schema struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			}
+			if err := json.Unmarshal(commandInputSchema(cmd, records), &schema); err != nil {
+				t.Fatal(err)
+			}
+			if got := string(schema.Properties["reason"]); got != tt.wantEnum {
+				t.Fatalf("reason = %s, want %s", got, tt.wantEnum)
+			}
+		})
+	}
+}

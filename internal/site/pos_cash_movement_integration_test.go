@@ -24,7 +24,8 @@ import (
 // TestPOSCashMovementAcrossDialects records pay-ins and pay-outs on an open
 // till and checks expected_cash and the E5 counters on both dialects. A
 // pay-out over the limit is refused with the owner-approval message in the
-// error details.
+// error details. record_pay_in and record_pay_out refuse the other direction's
+// reasons on the reason field.
 func TestPOSCashMovementAcrossDialects(t *testing.T) {
 	for _, tc := range []struct{ driver, env string }{
 		{"mysql", "KORA_POS_E2E_MYSQL_DSN"},
@@ -172,5 +173,49 @@ func runPOSCashMovement(t *testing.T, driver string, conn *sql.DB, dbName string
 
 	if n := str("SELECT COUNT(*) FROM "+table("Cash Movement")+" WHERE till_session = ?", till); n != "3" {
 		t.Fatalf("cash movements recorded = %s, want 3", n)
+	}
+
+	// record_pay_in and record_pay_out take their direction from the operation
+	// and accept only their own reason list.
+	direction := func(reason string) string {
+		return str("SELECT direction FROM "+table("Cash Movement")+" WHERE till_session = ? AND reason = ? AND note = ?", till, reason, "per-direction")
+	}
+	payment := func(command, reason string, amount int) (map[string]any, *contract.Error) {
+		return exec(command, map[string]any{"data": map[string]any{
+			"till_session": till, "reason": reason, "amount": amount, "note": "per-direction"}})
+	}
+	if _, cerr := payment("pos.record_pay_in", "Owner added cash", 100); cerr != nil {
+		t.Fatalf("pay-in with a pay-in reason: %+v", cerr)
+	}
+	if got := direction("Owner added cash"); got != "In" {
+		t.Fatalf("pay-in direction = %q, want In", got)
+	}
+	want("after per-direction pay-in", "expected_cash", 2000)
+	want("after per-direction pay-in", "payin_count", 3)
+	want("after per-direction pay-in", "payin_total", 1800)
+
+	if _, cerr := payment("pos.record_pay_in", "Transport", 50); cerr == nil || cerr.Field != "reason" || !strings.Contains(cerr.Message, "must be one of") {
+		t.Fatalf("pay-out reason on pay-in not refused on reason: %+v", cerr)
+	}
+	if _, cerr := payment("pos.record_pay_out", "Owner added cash", 50); cerr == nil || cerr.Field != "reason" {
+		t.Fatalf("pay-in reason on pay-out not refused on reason: %+v", cerr)
+	}
+	if _, cerr := payment("pos.record_pay_out", "Stock purchase", 1500); cerr == nil || !strings.Contains(string(cerr.Details), "Needs owner approval (coming soon)") {
+		t.Fatalf("pay-out over limit via record_pay_out not refused: %+v", cerr)
+	}
+	want("after refused per-direction moves", "expected_cash", 2000)
+	want("after refused per-direction moves", "payout_count", 1)
+
+	if _, cerr := payment("pos.record_pay_out", "Transport", 100); cerr != nil {
+		t.Fatalf("pay-out with a pay-out reason: %+v", cerr)
+	}
+	if got := direction("Transport"); got != "Out" {
+		t.Fatalf("pay-out direction = %q, want Out", got)
+	}
+	want("after per-direction pay-out", "expected_cash", 1900)
+	want("after per-direction pay-out", "payout_count", 2)
+	want("after per-direction pay-out", "payout_total", 400)
+	if n := str("SELECT COUNT(*) FROM "+table("Cash Movement")+" WHERE till_session = ?", till); n != "5" {
+		t.Fatalf("cash movements recorded = %s, want 5", n)
 	}
 }

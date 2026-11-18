@@ -1,7 +1,9 @@
 package kernel
 
 import (
+	"maps"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -81,15 +83,28 @@ func (c *CommandResource) RequiredInputs() []string {
 	return out
 }
 
-// missingInput returns the field-level validation error for the first
-// required input absent from the payload, or nil.
-func (c *CommandResource) missingInput(input map[string]any) *contract.Error {
+// inputError returns the field-level validation error for the first required
+// input absent from the payload, then for the first enum input whose value is
+// not one of its values, or nil.
+func (c *CommandResource) inputError(input map[string]any) *contract.Error {
 	for _, name := range c.RequiredInputs() {
 		if _, ok := input[name]; !ok {
 			err := contract.NewError(contract.CodeValidationFailed, "input "+name+" is required")
 			err.Field = name
 			return err
 		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(c.Input.Enum)) {
+		value, present := input[name]
+		if !present {
+			continue
+		}
+		if s, ok := value.(string); ok && slices.Contains(c.Input.Enum[name], s) {
+			continue
+		}
+		err := contract.NewError(contract.CodeValidationFailed, "input "+name+" must be one of: "+strings.Join(c.Input.Enum[name], ", "))
+		err.Field = name
+		return err
 	}
 	return nil
 }

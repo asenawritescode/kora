@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -69,7 +70,7 @@ func addPackCommands(core, app *contract.ModuleDescriptor, snapshot *doctype.Con
 		if cmd.Presentation != nil {
 			po.Presentation = contract.SurfacePresentation(*cmd.Presentation)
 		}
-		if po.Payment, err = packPaymentBinding(cmd, records); err != nil {
+		if po.Payment, err = packOperationBinding(cmd, records); err != nil {
 			return err
 		}
 		core.PublishedOperations = append(core.PublishedOperations, po)
@@ -102,13 +103,7 @@ func fieldSchema(f doctype.Field, records map[string]*doctype.DocType) map[strin
 		return map[string]any{"type": "array", "items": items}
 	case "Select":
 		out := map[string]any{"type": "string"}
-		var enum []string
-		for _, o := range strings.Split(f.Options, "\n") {
-			if o = strings.TrimSpace(o); o != "" {
-				enum = append(enum, o)
-			}
-		}
-		if len(enum) > 0 {
+		if enum := selectOptions(f.Options); len(enum) > 0 {
 			out["enum"] = enum
 		}
 		return out
@@ -116,6 +111,60 @@ func fieldSchema(f doctype.Field, records map[string]*doctype.DocType) map[strin
 		return map[string]any{"type": "string"}
 	}
 	return map[string]any{}
+}
+
+// selectOptions splits the newline-separated options of a Select field.
+func selectOptions(raw string) []string {
+	var out []string
+	for _, o := range strings.Split(raw, "\n") {
+		if o = strings.TrimSpace(o); o != "" {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// withEnum narrows a property schema to the listed values. No values leave it
+// unchanged.
+func withEnum(schema map[string]any, values []string) map[string]any {
+	if values != nil {
+		schema["enum"] = values
+	}
+	return schema
+}
+
+// checkInputEnums checks that each input enum of cmd narrows a Select field of
+// its record, and that every value is one of that field's options. An enum on
+// an extra input needs no options check (the kernel checks its type).
+func checkInputEnums(cmd *kernel.CommandResource, records map[string]*doctype.DocType) error {
+	for name, values := range cmd.Input.Enum {
+		if _, isExtra := cmd.Input.Extra[name]; isExtra {
+			continue
+		}
+		options := selectFieldOptions(records[cmd.Input.Record], name)
+		if options == nil {
+			return fmt.Errorf("command %q: input.enum.%s names no Select field of %q", cmd.Name, name, cmd.Input.Record)
+		}
+		for _, v := range values {
+			if !slices.Contains(options, v) {
+				return fmt.Errorf("command %q: input.enum.%s value %q is not an option of %s.%s", cmd.Name, name, v, cmd.Input.Record, name)
+			}
+		}
+	}
+	return nil
+}
+
+// selectFieldOptions returns the options of the Select field name of dt, or nil.
+func selectFieldOptions(dt *doctype.DocType, name string) []string {
+	if dt == nil {
+		return nil
+	}
+	for _, f := range dt.Fields {
+		if f.Fieldname == name && f.Fieldtype == "Select" {
+			return selectOptions(f.Options)
+		}
+	}
+	return nil
 }
 
 func commandInputSchema(cmd *kernel.CommandResource, records map[string]*doctype.DocType) json.RawMessage {
@@ -131,10 +180,10 @@ func commandInputSchema(cmd *kernel.CommandResource, records map[string]*doctype
 	for _, m := range inputRef.FindAllSubmatch(raw, -1) {
 		name := string(m[1])
 		if extra, ok := cmd.Input.Extra[name]; ok {
-			props[name] = map[string]any{"type": extra.Type}
+			props[name] = withEnum(map[string]any{"type": extra.Type}, cmd.Input.Enum[name])
 			required[name] = extra.Required
 		} else if f, ok := fields[name]; ok {
-			props[name] = fieldSchema(f, records)
+			props[name] = withEnum(fieldSchema(f, records), cmd.Input.Enum[name])
 			required[name] = f.Reqd && f.Default == "" && f.Computed == "" && f.LinkedField == ""
 		} else {
 			props[name] = map[string]any{}
@@ -176,9 +225,13 @@ func commandOutputSchema(cmd *kernel.CommandResource) json.RawMessage {
 	return out
 }
 
-// packPaymentBinding derives the published payment descriptor of a command with
-// a payment guard from the guard and input.record. It is nil without a guard.
-func packPaymentBinding(cmd *kernel.CommandResource, records map[string]*doctype.DocType) (*contract.PaymentOperationContract, error) {
+// packOperationBinding checks the input enums of a command and derives its
+// published payment descriptor from the payment guard and input.record. The
+// descriptor is nil without a guard.
+func packOperationBinding(cmd *kernel.CommandResource, records map[string]*doctype.DocType) (*contract.PaymentOperationContract, error) {
+	if err := checkInputEnums(cmd, records); err != nil {
+		return nil, fmt.Errorf("pack.command_invalid: %w", err)
+	}
 	for _, g := range cmd.Require {
 		if g.Payment == nil {
 			continue

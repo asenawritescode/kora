@@ -78,6 +78,11 @@ type CommandInput struct {
 	// Extra declares operation inputs that are not fields of Record, so the
 	// published input schema can type them.
 	Extra map[string]CommandExtraInput `yaml:"extra,omitempty" json:"extra,omitempty"`
+	// Enum narrows one input to the listed values. The key names a Select field
+	// of Record (its options must include every value, checked when the pack
+	// loads) or a string extra input. The published input schema lists the
+	// values, and the executor refuses any other.
+	Enum map[string][]string `yaml:"enum,omitempty" json:"enum,omitempty"`
 }
 
 // CommandExtraInput types one input that is not a record field. Type is a
@@ -286,13 +291,26 @@ func (c *CommandResource) validateHeader() error {
 	return nil
 }
 
-// validateInputExtras checks that each extra input declares a scalar type.
-func (c *CommandResource) validateInputExtras() error {
+// validateInputs checks that each extra input declares a scalar type, and that
+// each input enum belongs to a module-owned command, lists values and, for an
+// extra input, is a string.
+func (c *CommandResource) validateInputs() error {
 	for name, extra := range c.Input.Extra {
 		switch extra.Type {
 		case "string", "integer", "number", "boolean":
 		default:
 			return fmt.Errorf("command %q: input.extra.%s type %q must be string, integer, number or boolean", c.Name, name, extra.Type)
+		}
+	}
+	for name, values := range c.Input.Enum {
+		if c.ModuleOwnerID == "" {
+			return fmt.Errorf("command %q: input.enum.%s requires a module-owned command", c.Name, name)
+		}
+		if len(values) == 0 {
+			return fmt.Errorf("command %q: input.enum.%s lists no values", c.Name, name)
+		}
+		if extra, ok := c.Input.Extra[name]; ok && extra.Type != "string" {
+			return fmt.Errorf("command %q: input.enum.%s must be a string input", c.Name, name)
 		}
 	}
 	return nil
@@ -374,7 +392,7 @@ func (c *CommandResource) validateWith(needSchemas bool) error {
 	if c.Input.Record == "" {
 		return fmt.Errorf("command %q: input.record required in this slice", c.Name)
 	}
-	if err := c.validateInputExtras(); err != nil {
+	if err := c.validateInputs(); err != nil {
 		return err
 	}
 	if err := c.validateCompute(); err != nil {

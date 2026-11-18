@@ -1,0 +1,48 @@
+name: record_pay_in
+namespace: pos
+version: 1
+module_owner_id: pos.core
+capability: pos.drawer
+operation: record_pay_in
+presentation:
+  title: Pay in
+permission: create
+input:
+  record: Cash Movement
+  # The board's pay-in reasons (WS-Till pay-out). Narrows the Cash Movement reason
+  # field for this operation only; the doctype keeps the union of both lists.
+  enum:
+    reason: [Change from the bank, Owner added cash, Other]
+  extra:
+    till_session: {type: string, required: true}
+require:
+  - lock:
+      record: Till Session
+      name: $input.till_session
+  - exists:
+      record: Till Session
+      where:
+        name: $input.till_session
+        status: Open
+        cashier: $actor
+    message: Till is not open for you
+transaction:
+  - as: movement
+    create:
+      record: Cash Movement
+      values:
+        till_session: $input.till_session
+        direction: "In"
+        amount: $input.amount
+        reason: $input.reason
+        note: $input.note
+        cashier: $actor
+  - update:
+      record: Till Session
+      name: $input.till_session
+      adjust:
+        expected_cash: { increase: $input.amount }
+        payin_count: { increase: "1" }
+        payin_total: { increase: $input.amount }
+output:
+  reference: $steps.movement.name

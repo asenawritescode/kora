@@ -466,9 +466,9 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 		return nil, cerr
 	}
 	if cmd.ModuleOwnerID != "" {
-		// Owner commands publish their inputs: a missing one is the caller's
-		// field-level mistake, reported before the opaque schema failure.
-		if cerr := cmd.missingInput(input); cerr != nil {
+		// Owner commands publish their inputs: a missing or out-of-enum one is the
+		// caller's field-level mistake, reported before the opaque schema failure.
+		if cerr := cmd.inputError(input); cerr != nil {
 			return nil, cerr
 		}
 		if k.CommandSchemas == nil || !k.CommandSchemas.Registered(cmd.InputSchema) || !k.CommandSchemas.Registered(cmd.OutputSchema) {
