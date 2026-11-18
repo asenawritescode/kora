@@ -175,6 +175,34 @@ func (c *CommandResource) validateEnsure(i int, e *StepEnsure) error {
 	return nil
 }
 
+// validateInputExtras checks that each extra input declares a scalar type.
+func (c *CommandResource) validateInputExtras() error {
+	for name, extra := range c.Input.Extra {
+		switch extra.Type {
+		case "string", "integer", "number", "boolean":
+		default:
+			return fmt.Errorf("command %q: input.extra.%s type %q must be string, integer, number or boolean", c.Name, name, extra.Type)
+		}
+	}
+	return nil
+}
+
+// validateCreate checks that a create step names a record and sets values.
+func (c *CommandResource) validateCreate(i int, cr *StepCreate) error {
+	if cr.Record == "" || len(cr.Values) == 0 {
+		return fmt.Errorf("command %q: step %d create requires record and values", c.Name, i)
+	}
+	return nil
+}
+
+// validateUpdate checks that an update step names one record and sets values or adjustments.
+func (c *CommandResource) validateUpdate(i int, u *StepUpdate) error {
+	if u.Record == "" || (u.Name == "") == (len(u.Where) == 0) || len(u.Values)+len(u.Adjust) == 0 {
+		return fmt.Errorf("command %q: step %d update requires record, exactly one of name or where, and values or adjust", c.Name, i)
+	}
+	return c.validateAdjustments(i, u)
+}
+
 // validateAdjustments checks that each adjusted field is set only by adjust
 // and that its adjustment is well formed.
 func (c *CommandResource) validateAdjustments(i int, u *StepUpdate) error {
@@ -230,14 +258,11 @@ func (c *CommandResource) validateWith(needSchemas bool) error {
 				return err
 			}
 		case s.Create != nil:
-			if s.Create.Record == "" || len(s.Create.Values) == 0 {
-				return fmt.Errorf("command %q: step %d create requires record and values", c.Name, i)
+			if err := c.validateCreate(i, s.Create); err != nil {
+				return err
 			}
 		case s.Update != nil:
-			if s.Update.Record == "" || (s.Update.Name == "") == (len(s.Update.Where) == 0) || len(s.Update.Values)+len(s.Update.Adjust) == 0 {
-				return fmt.Errorf("command %q: step %d update requires record, exactly one of name or where, and values or adjust", c.Name, i)
-			}
-			if err := c.validateAdjustments(i, s.Update); err != nil {
+			if err := c.validateUpdate(i, s.Update); err != nil {
 				return err
 			}
 		default:
@@ -247,12 +272,8 @@ func (c *CommandResource) validateWith(needSchemas bool) error {
 	if c.Input.Record == "" {
 		return fmt.Errorf("command %q: input.record required in this slice", c.Name)
 	}
-	for name, extra := range c.Input.Extra {
-		switch extra.Type {
-		case "string", "integer", "number", "boolean":
-		default:
-			return fmt.Errorf("command %q: input.extra.%s type %q must be string, integer, number or boolean", c.Name, name, extra.Type)
-		}
+	if err := c.validateInputExtras(); err != nil {
+		return err
 	}
 	if err := c.validateCompute(); err != nil {
 		return err

@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/orm"
+	"github.com/asenawritescode/kora/internal/script"
 )
 
 // lockAdjustTarget locks the row an adjusting update changes, so concurrent
@@ -63,4 +65,21 @@ func createDocumentValues(dt *doctype.DocType, values map[string]string, env ref
 		doc.Set(field, v)
 	}
 	return doc, nil
+}
+
+// commandOwner returns the record owner a command writes: the operation's
+// owner when it names one, otherwise the acting user.
+func commandOwner(op Operation, user string) string {
+	if op.Context.Owner != "" {
+		return op.Context.Owner
+	}
+	return user
+}
+
+// captureInsertHooks runs the after-insert and after-save hooks of a new record.
+func captureInsertHooks(ctx context.Context, txMgr *orm.TxManager, dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Document) *contract.Error {
+	if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterInsert, doc, nil}); hookErr != nil {
+		return hookErr
+	}
+	return captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, nil})
 }

@@ -566,17 +566,10 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			if cerr := k.claimFirstWriteReceipt(dbTx, op, def, opID, len(outcomes)); cerr != nil {
 				return nil, cerr
 			}
-			owner := op.Context.Owner
-			if owner == "" {
-				owner = user
-			}
-			if err := txMgr.InsertInTx(dbTx, dt, doc, owner, user); err != nil {
+			if err := txMgr.InsertInTx(dbTx, dt, doc, commandOwner(op, user), user); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
 				return nil, wrapORMError(err, k.dialect())
 			}
-			if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterInsert, doc, nil}); hookErr != nil {
-				return nil, hookErr
-			}
-			if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, nil}); hookErr != nil {
+			if hookErr := captureInsertHooks(ctx, txMgr, dbTx, dt, doc); hookErr != nil {
 				return nil, hookErr
 			}
 			doc.IsNew = false
