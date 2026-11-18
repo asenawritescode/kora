@@ -305,11 +305,16 @@ func TestEventDateNormalizesBusinessDateAndFallsBack(t *testing.T) {
 
 func TestSemanticFilterMatchesRollupDimensionValues(t *testing.T) {
 	rows := []map[string]any{
-		{"dimension": "status=Active", "value": 4},
-		{"dimension": "status=Closed", "value": 2},
+		{"dimension": "Active", "value": 4},
+		{"dimension": "Closed", "value": 2},
+		{"dimension": "a=b", "value": 1},
 	}
 	filtered := filterSemanticRows(rows, "status", []SemanticFilter{{Field: "status", Operator: "=", Values: []string{"Active"}}})
-	if len(filtered) != 1 || filtered[0]["dimension"] != "status=Active" {
+	if len(filtered) != 1 || filtered[0]["dimension"] != "Active" {
+		t.Fatalf("unexpected filtered rows: %#v", filtered)
+	}
+	filtered = filterSemanticRows(rows, "status", []SemanticFilter{{Field: "status", Operator: "=", Values: []string{"a=b"}}})
+	if len(filtered) != 1 || filtered[0]["dimension"] != "a=b" {
 		t.Fatalf("unexpected filtered rows: %#v", filtered)
 	}
 }

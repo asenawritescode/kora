@@ -186,3 +186,34 @@ func TestAnalyticsPeriodExpressionIsDialectSpecific(t *testing.T) {
 		})
 	}
 }
+
+func TestPlainCategoryValuesStripsOnlyTheDimensionPrefix(t *testing.T) {
+	cases := []struct {
+		name      string
+		dimension string
+		row       map[string]any
+		want      any
+	}{
+		{name: "rollup key", dimension: "status", row: map[string]any{"dimension": "status=Paid"}, want: "Paid"},
+		{name: "value containing equals", dimension: "status", row: map[string]any{"dimension": "status=a=b"}, want: "a=b"},
+		{name: "plain value kept", dimension: "status", row: map[string]any{"dimension": "Paid"}, want: "Paid"},
+		{name: "other field prefix kept", dimension: "status", row: map[string]any{"dimension": "customer=CUST-1"}, want: "customer=CUST-1"},
+		{name: "bucket row untouched", dimension: "status", row: map[string]any{"bucket": "2026-01-05", "value": 1.0}, want: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := []map[string]any{tc.row}
+			plainCategoryValues(rows, tc.dimension)
+			got, present := rows[0]["dimension"]
+			if tc.want == nil {
+				if present {
+					t.Fatalf("dimension added to bucket row: %#v", rows[0])
+				}
+				return
+			}
+			if got != tc.want {
+				t.Fatalf("dimension = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
