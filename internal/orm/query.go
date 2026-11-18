@@ -22,6 +22,7 @@ import (
 	"github.com/asenawritescode/kora/internal/outbox"
 	"github.com/asenawritescode/kora/internal/policy"
 	"github.com/asenawritescode/kora/internal/script"
+	"github.com/asenawritescode/kora/internal/tenanttime"
 	"github.com/asenawritescode/kora/internal/workflow"
 )
 
@@ -129,6 +130,9 @@ type TxManager struct {
 	// change event of each mutation with the authenticated origin, which
 	// record-triggered workflows require.
 	EventOrigin *EventOrigin
+	// clock memoises the tenant business clock used for "today" defaults; see
+	// businessClock. Nil until first read.
+	clock *tenanttime.Clock
 	// WorkflowStatusPolicies resolves published status policies for every
 	// request-scoped kernel mutation path.
 	WorkflowStatusPolicies workflow.StatusPolicyRepository
@@ -267,7 +271,7 @@ func (tx *TxManager) writeOutbox(dbTx *sql.Tx, op eventstream.EventOp, dt *docty
 		Doctype:       dt.Name,
 		DocName:       docName,
 		Operation:     op,
-		Timestamp:     time.Now(),
+		Timestamp:     time.Now().UTC(),
 		ModifiedBy:    modifiedBy,
 		Data:          data,
 		OldData:       oldData,
@@ -348,7 +352,7 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 
 		val := doc.Get(f.Fieldname)
 		if val == nil && f.Default != "" {
-			val = convertDefault(f.Default, f.Fieldtype)
+			val = convertDefault(f.Default, f.Fieldtype, tx.todayDefault(f.Fieldtype, f.Default))
 			doc.Set(f.Fieldname, val)
 		}
 		val, err := canonicalizeDecimal(doc, f, val)
@@ -390,7 +394,7 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 		if childDT == nil {
 			return fmt.Errorf("child doctype %q not found", f.Options)
 		}
-		if err := insertChildrenBatch(dbTx, dt, f.Fieldname, childDT, children, doc.Name, tx.Dialect); err != nil {
+		if err := tx.insertChildRows(dbTx, dt, f, children, doc.Name); err != nil {
 			if validationErr := tx.Dialect.ParseError(err, childDT); validationErr != nil {
 				if validationErr.Type == "UniqueConstraint" {
 					return fmt.Errorf("%w: %w", ErrDuplicate, validationErr)
@@ -697,7 +701,7 @@ func (tx *TxManager) SaveInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, doc *d
 			if newChildren == nil {
 				continue
 			}
-			if err := insertChildrenBatch(dbTx, dt, f.Fieldname, childDT, newChildren, doc.Name, tx.Dialect); err != nil {
+			if err := tx.insertChildRows(dbTx, dt, f, newChildren, doc.Name); err != nil {
 				return fmt.Errorf("inserting child rows in %s: %w", f.Fieldname, err)
 			}
 		} else {
@@ -1335,7 +1339,43 @@ func intVal(v any) int {
 	return 0
 }
 
-func convertDefault(def string, fieldtype string) any {
+// businessClock returns the tenant business clock for this TxManager (one
+// request or kernel operation), read once. A read failure logs a warning and
+// falls back to tenanttime.Default.
+func (tx *TxManager) businessClock() tenanttime.Clock {
+	if tx.clock == nil {
+		clock := tenanttime.Default()
+		var q tenanttime.Querier
+		if tx.Transaction != nil {
+			q = tx.Transaction
+		} else if tx.DB != nil {
+			q = tx.DB
+		}
+		if q != nil {
+			loaded, err := tenanttime.Load(tx.queryContext(), q, tx.Dialect, tx.SiteName)
+			if err != nil {
+				slog.Warn("tenant business clock unavailable, using default", "site", tx.SiteName, "error", err)
+			} else {
+				clock = loaded
+			}
+		}
+		tx.clock = &clock
+	}
+	return *tx.clock
+}
+
+// todayDefault returns the tenant's business day for a Date field whose default
+// is "today", and "" for every other field.
+func (tx *TxManager) todayDefault(fieldtype, def string) string {
+	if fieldtype != "Date" || !strings.EqualFold(def, "today") {
+		return ""
+	}
+	return tx.businessClock().BusinessDate(time.Now()).String()
+}
+
+// convertDefault turns a field's default into a bound value. today is the
+// tenant business day, used only for a Date default of "today".
+func convertDefault(def string, fieldtype string, today string) any {
 	switch fieldtype {
 	case "Int":
 		var n int64
@@ -1352,7 +1392,7 @@ func convertDefault(def string, fieldtype string) any {
 		return def == "1" || def == "true"
 	case "Date":
 		if strings.EqualFold(def, "today") {
-			return time.Now().Format("2006-01-02")
+			return today
 		}
 	case "Datetime":
 		if strings.EqualFold(def, "now") || strings.EqualFold(def, "today") {

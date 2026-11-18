@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,34 @@ import (
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/oklog/ulid/v2"
 )
+
+// insertChildRows resolves the child doctype of table field f, applies the
+// tenant's "today" defaults to its rows, and inserts them.
+func (tx *TxManager) insertChildRows(dbTx *sql.Tx, parent *doctype.DocType, f doctype.Field, children []*doctype.Document, parentName string) error {
+	childDT := tx.Registry.Get(f.Options)
+	if childDT == nil {
+		return fmt.Errorf("child doctype %q not found", f.Options)
+	}
+	tx.applyChildTodayDefaults(childDT, children)
+	return insertChildrenBatch(dbTx, parent, f.Fieldname, childDT, children, parentName, tx.Dialect)
+}
+
+// applyChildTodayDefaults sets a Date field defaulting to "today" on each child
+// row that lacks a value, to the tenant's business day. It runs before
+// insertChildrenBatch, which has no TxManager to resolve the clock.
+func (tx *TxManager) applyChildTodayDefaults(childDT *doctype.DocType, children []*doctype.Document) {
+	for _, f := range childDT.DataFields() {
+		today := tx.todayDefault(f.Fieldtype, f.Default)
+		if today == "" {
+			continue
+		}
+		for _, child := range children {
+			if child.Get(f.Fieldname) == nil {
+				child.Set(f.Fieldname, today)
+			}
+		}
+	}
+}
 
 // insertChildrenBatch inserts multiple child rows in a single multi-row INSERT statement.
 // Chunked at 100 rows to stay safely within MySQL's max_allowed_packet.
@@ -68,7 +97,8 @@ func insertChildrenBatch(ex db.Queryer, parentDT *doctype.DocType, parentField s
 				}
 				val := child.Get(f.Fieldname)
 				if val == nil && f.Default != "" {
-					val = convertDefault(f.Default, f.Fieldtype)
+					// "today" was already filled by applyChildTodayDefaults.
+					val = convertDefault(f.Default, f.Fieldtype, "")
 					child.Set(f.Fieldname, val)
 				}
 				val, err := canonicalizeDecimal(child, f, val)
