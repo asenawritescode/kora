@@ -64,7 +64,7 @@ func (c *CommandResource) RequiredInputs() []string {
 			add(s.Update.Name)
 			addMap(s.Update.Where)
 			for _, a := range s.Update.Adjust {
-				add(a.Increase, a.Decrease)
+				add(a.Increase, a.Decrease, a.By, a.SignFrom)
 			}
 		}
 	}

@@ -212,7 +212,7 @@ func (c *CommandResource) validateStepReferences() error {
 				refs = append(refs, ref)
 			}
 			for _, change := range step.Update.Adjust {
-				refs = append(refs, change.Increase, change.Decrease)
+				refs = append(refs, change.Increase, change.Decrease, change.By, change.SignFrom)
 			}
 		}
 		for _, ref := range values {

@@ -76,7 +76,7 @@ func (c *CommandResource) fieldReadAliases() []string {
 				refs = append(refs, ref)
 			}
 			for _, change := range step.Update.Adjust {
-				refs = append(refs, change.Increase, change.Decrease)
+				refs = append(refs, change.Increase, change.Decrease, change.By, change.SignFrom)
 			}
 		}
 	}
