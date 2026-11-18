@@ -63,6 +63,15 @@ fields:
       Return
     default: Draft
     in_list_view: true
+  - fieldname: return_reason
+    fieldtype: Select
+    label: Return Reason
+    options: |
+      Damaged
+      Wrong item
+      Changed their mind
+      Other
+    description: Why the items came back. Set by return_sale on Return sales.
   - fieldname: held_name
     fieldtype: Data
     label: Held Name
@@ -73,6 +82,14 @@ fields:
   - fieldname: held_by
     fieldtype: Data
     label: Held By
+doc_constraints:
+  # Returns over the limit need owner approval; the approval flow is not built yet.
+  # Same limit and message as pay-outs (cash_movement.yaml). The refund total is the
+  # sum of the refund payment lines, which return_sale requires to equal the return total.
+  - type: predicate
+    condition: '(== status "Return")'
+    predicate: '(<= (sum "payments" "amount") 1000)'
+    message: Needs owner approval (coming soon)
 facts:
   time: creation
   lines: items

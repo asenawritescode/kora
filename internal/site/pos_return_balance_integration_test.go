@@ -20,6 +20,7 @@ import (
 	"github.com/asenawritescode/kora/internal/kernel"
 	"github.com/asenawritescode/kora/internal/outbox"
 	"github.com/asenawritescode/kora/internal/policy"
+	"github.com/asenawritescode/kora/internal/query"
 )
 
 func TestPOSReturnBalancesAcrossDialects(t *testing.T) {
@@ -133,7 +134,15 @@ func runPOSReturnBalances(t *testing.T, driver string, conn *sql.DB, dbName stri
 			"register": reg, "till_session": till, "location": location, "return_against": sale,
 			"items":    []map[string]any{{"item": tea, "quantity": qty, "unit_price": price, "amount": price * float64(qty)}},
 			"payments": []map[string]any{{"method": "Cash", "amount": price * float64(qty), "reference": "refund"}},
+			"reason":   "Damaged",
 		}})
+	}
+	retReason := func(sale, reason string, qty int) (contract.CommandResult, *contract.Error) {
+		return exec("pos.return_sale", "", map[string]any{"data": map[string]any{
+			"register": register, "till_session": till, "location": loc, "return_against": sale,
+			"items":    []map[string]any{{"item": tea, "quantity": qty, "unit_price": 19.99, "amount": 19.99 * float64(qty)}},
+			"payments": []map[string]any{{"method": "Cash", "amount": 19.99 * float64(qty), "reference": "refund"}},
+			"reason":   reason}})
 	}
 	stock := func() string { return q("SELECT quantity FROM "+table("Stock Balance")+" WHERE item = ?", tea) }
 	counts := func() string {
@@ -238,5 +247,72 @@ func runPOSReturnBalances(t *testing.T, driver string, conn *sql.DB, dbName stri
 	wg.Wait()
 	if ok != 1 || num(remaining(s2)) != 0 {
 		t.Fatalf("concurrent commits=%d remaining=%s", ok, remaining(s2))
+	}
+
+	// 8. reason: a reason off the board list is refused on "reason" and writes nothing.
+	s5 := sell(2)
+	before = counts()
+	_, cerr = retReason(s5, "Because", 1)
+	if cerr == nil || cerr.Field != "reason" || counts() != before {
+		t.Fatalf("unlisted reason: %+v", cerr)
+	}
+	// a listed reason completes and is stored on the Return sale.
+	res, cerr = retReason(s5, "Wrong item", 1)
+	if cerr != nil {
+		t.Fatalf("listed reason: %+v", cerr)
+	}
+	var out map[string]any
+	_ = json.Unmarshal(res.Data, &out)
+	retSale := fmt.Sprint(out["output"].(map[string]any)["reference"])
+	if got := q("SELECT return_reason FROM "+table("Sale")+" WHERE name = ?", retSale); got != "Wrong item" {
+		t.Fatalf("return_reason = %q", got)
+	}
+
+	// 9. over the limit (KES 1,000) is refused like a pay-out; at or under it completes.
+	pricey := id("Item", map[string]any{"item_name": "Pricey", "uom": "Nos", "price": 600})
+	id("Stock Balance", map[string]any{"item": pricey, "location": loc, "quantity": 5, "reorder_level": 1})
+	big := fmt.Sprint(must("pos.record_sale", "", map[string]any{"data": map[string]any{
+		"register": register, "till_session": till, "location": loc,
+		"items":    []map[string]any{{"item": pricey, "quantity": 2, "unit_price": 600, "amount": 1200}},
+		"currency": "KES", "payments": []map[string]any{pay("cash", 1200)}}})["output"].(map[string]any)["reference"])
+	bigReturn := func(qty int) (contract.CommandResult, *contract.Error) {
+		return exec("pos.return_sale", "", map[string]any{"data": map[string]any{
+			"register": register, "till_session": till, "location": loc, "return_against": big,
+			"items":    []map[string]any{{"item": pricey, "quantity": qty, "unit_price": 600, "amount": 600 * float64(qty)}},
+			"payments": []map[string]any{{"method": "Cash", "amount": 600 * float64(qty), "reference": "refund"}},
+			"reason":   "Damaged"}})
+	}
+	before = counts()
+	_, cerr = bigReturn(2)
+	if cerr == nil || !strings.Contains(string(cerr.Details), "Needs owner approval (coming soon)") || counts() != before || num(remaining(big)) != 2 {
+		t.Fatalf("over-limit return: %+v", cerr)
+	}
+	if _, cerr := bigReturn(1); cerr != nil || num(remaining(big)) != 1 {
+		t.Fatalf("return at the limit: %+v remaining=%s", cerr, remaining(big))
+	}
+
+	// 10. refund_lookup finds a paid receipt by number within its location only.
+	defs, err := query.LoadDir(filepath.Join("..", "..", "config", "pos", "queries"), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lookup *query.Definition
+	for _, d := range defs {
+		if d.Name == "refund_lookup" {
+			lookup = d
+		}
+	}
+	if lookup == nil {
+		t.Fatal("refund_lookup missing")
+	}
+	find := func(receipt, at string) int {
+		page, err := query.Run(ctx, conn, dialect, lookup, query.Request{FullRead: true, Input: map[string]any{"receipt": receipt, "location": at}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(page.Rows)
+	}
+	if find(s5, loc) != 1 || find(s5, otherLoc) != 0 || find("SALE-NOPE", loc) != 0 {
+		t.Fatalf("lookup here=%d other=%d unknown=%d", find(s5, loc), find(s5, otherLoc), find("SALE-NOPE", loc))
 	}
 }

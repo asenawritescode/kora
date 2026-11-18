@@ -9,6 +9,11 @@ presentation:
 permission: create
 input:
   record: Sale
+  # The board's refund reasons (WS-Till refund). Stored on the Return sale.
+  enum:
+    reason: [Damaged, Wrong item, Changed their mind, Other]
+  extra:
+    reason: {type: string, required: true}
 require:
   - lock:
       record: Sale
@@ -66,6 +71,7 @@ transaction:
         items: $input.items
         payments: $input.payments
         status: Return
+        return_reason: $input.reason
   - for_each: $input.items
     update:
       record: Stock Balance
