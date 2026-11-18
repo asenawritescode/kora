@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/asenawritescode/kora/internal/eventstream"
 	"regexp"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -650,3 +651,74 @@ func TestWorker_DeltaOnly_NoDBRequired(t *testing.T) {
 
 // sqlOpenPlaceholder prevents unused import error.
 var _ = sql.Open
+
+// countingWorkAdmission counts ordinary flush admissions. Maintenance runs
+// use AcquireMaintenance, so the run loop's startup work does not count.
+type countingWorkAdmission struct{ flushes atomic.Int32 }
+
+func (a *countingWorkAdmission) Acquire(context.Context) (func(), error) {
+	a.flushes.Add(1)
+	return func() {}, nil
+}
+
+func (a *countingWorkAdmission) AcquireMaintenance(context.Context) (func(), error) {
+	return func() {}, nil
+}
+
+func TestRequestFlushNeverBlocks(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		worker func() *Worker
+	}{
+		{name: "constructed worker with no reader", worker: func() *Worker {
+			return NewWorker(newFakeBus(), nil, nil, doctype.NewRegistry(), "tenant", LoadConfig())
+		}},
+		{name: "zero-value worker", worker: func() *Worker { return &Worker{} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := tc.worker()
+			done := make(chan struct{})
+			go func() {
+				for range 1000 {
+					w.RequestFlush()
+				}
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("RequestFlush blocked")
+			}
+		})
+	}
+}
+
+func TestRequestFlushRunsExactlyOneFlush(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectBegin().WillReturnError(errors.New("database unavailable"))
+	cfg := &Config{FlushInterval: "1h", BatchSize: 100}
+	w := NewWorker(newFakeBus(), database, db.Resolve("mysql"), doctype.NewRegistry(), "tenant", cfg)
+	admission := &countingWorkAdmission{}
+	w.SetWorkAdmission(admission)
+	w.addDelta("Invoice", "count", "", "2026-10-13", 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	w.StartAsyncContext(ctx)
+	defer func() {
+		cancel()
+		<-w.done
+	}()
+
+	w.RequestFlush()
+	deadline := time.Now().Add(2 * time.Second)
+	for admission.flushes.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := admission.flushes.Load(); got != 1 {
+		t.Fatalf("flushes after one RequestFlush = %d, want 1", got)
+	}
+}

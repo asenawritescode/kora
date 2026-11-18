@@ -64,6 +64,8 @@ type Worker struct {
 	retentionDays int
 	walPending    bool
 	stopCh        chan struct{}
+	// flushRequests holds at most one pending RequestFlush; extra requests are dropped.
+	flushRequests chan struct{}
 	stopped       bool
 	started       bool
 	done          chan struct{}
@@ -182,6 +184,7 @@ func NewWorker(bus eventstream.Bus, database *sql.DB, dialect db.QueryDialect, r
 		flushEvery:        d,
 		retentionDays:     cfg.RetentionDays,
 		stopCh:            make(chan struct{}),
+		flushRequests:     make(chan struct{}, 1),
 		done:              make(chan struct{}),
 		metrics:           make(map[string][]*Metric),
 		pendingEventIDSet: make(map[string]struct{}),
@@ -228,6 +231,9 @@ func (w *Worker) markStarted(parent context.Context) (context.Context, bool) {
 	return w.ctx, true
 }
 
+// run consumes events until shutdown. It flushes on three triggers: a batch
+// reaching batchSize, the flushTicker interval, and RequestFlush. Shutdown
+// (ctx cancel, Stop, or a closed bus) runs a final flush and returns.
 func (w *Worker) run(ctx context.Context) {
 	defer close(w.done)
 	if w.cancel != nil {
@@ -295,11 +301,11 @@ func (w *Worker) run(ctx context.Context) {
 			}
 
 		case <-flushTicker.C:
-			if walDriven {
-				w.drainWAL(ctx)
-			} else {
-				w.flushAndLog(ctx)
-			}
+			w.flushTick(ctx, walDriven)
+			count = 0
+
+		case <-w.flushRequests:
+			w.flushAndLog(ctx)
 			count = 0
 
 		case <-retentionTicker.C:
@@ -338,6 +344,25 @@ func (w *Worker) Flush() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	return w.flush(ctx)
+}
+
+// flushTick is the periodic flush: a WAL drain for WAL-driven buses, otherwise
+// an in-memory flush.
+func (w *Worker) flushTick(ctx context.Context, walDriven bool) {
+	if walDriven {
+		w.drainWAL(ctx)
+		return
+	}
+	w.flushAndLog(ctx)
+}
+
+// RequestFlush asks the run loop to flush soon and returns without waiting.
+// A request already pending absorbs this one, so bursts coalesce into one flush.
+func (w *Worker) RequestFlush() {
+	select {
+	case w.flushRequests <- struct{}{}:
+	default:
+	}
 }
 
 func (w *Worker) flushAndLog(ctx context.Context) {
