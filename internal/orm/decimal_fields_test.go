@@ -56,10 +56,10 @@ func TestDecimalColumnsReadExactly(t *testing.T) {
 }
 
 func TestDecimalDefaultsAreExact(t *testing.T) {
-	if got := convertDefault("0.1", "Currency"); got != json.Number("0.1") {
+	if got := convertDefault("0.1", "Currency", ""); got != json.Number("0.1") {
 		t.Fatalf("default = %#v", got)
 	}
-	if got := convertDefault("not-a-number", "Float"); got != nil {
+	if got := convertDefault("not-a-number", "Float", ""); got != nil {
 		t.Fatalf("invalid default = %#v, want nil", got)
 	}
 }
