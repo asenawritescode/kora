@@ -15,17 +15,16 @@ import (
 	"github.com/asenawritescode/kora/internal/tenanttime"
 )
 
-// refreshLeaseSeconds is how long a claimed partition stays with its refresher before another may take it.
-const refreshLeaseSeconds = 60
-
-// refreshEvery is the pause between due scans of one tenant; jitter adds up to half of it again.
-const refreshEvery = 30 * time.Second
+// refreshLeaseSeconds is a claim's lease; refreshEvery is the scan pause (plus up to half as jitter).
+const (
+	refreshLeaseSeconds = 60
+	refreshEvery        = 30 * time.Second
+)
 
 // errLeaseLost reports that the partition was re-marked or retaken during its recompute.
 var errLeaseLost = errors.New("facts: summary lease lost")
 
-// Refresher recomputes daily summaries for dirty partitions, one partition per maintenance unit.
-// Markers are durable: work the maintenance lane defers stays in the table for a later scan.
+// Refresher recomputes daily summaries for dirty partitions; markers are durable until refreshed.
 type Refresher struct {
 	DB        *sql.DB
 	Dialect   db.Dialect
@@ -36,15 +35,14 @@ type Refresher struct {
 	Owner string // lease owner; unique per process
 }
 
-// dirtyMarker is one claimed partition with the version its claim saw.
+// dirtyMarker is one claimed partition and the version its claim saw.
 type dirtyMarker struct {
 	model   string
 	day     tenanttime.Date
 	version int64
 }
 
-// RefreshDue recomputes every due partition the maintenance lane admits and returns how many it refreshed.
-// A full lane defers the rest.
+// RefreshDue recomputes the due partitions the maintenance lane admits; a full lane defers the rest.
 func (r *Refresher) RefreshDue(ctx context.Context) (int, error) {
 	refreshed := 0
 	for {
@@ -72,8 +70,7 @@ func (r *Refresher) RefreshDue(ctx context.Context) (int, error) {
 	}
 }
 
-// Run scans for due partitions until ctx ends, pausing refreshEvery plus jitter between scans.
-// A failed scan is logged; its markers are still durable and the next scan retries them.
+// Run scans for due partitions until ctx ends. Failed scans are logged; their markers stay for the next scan.
 func (r *Refresher) Run(ctx context.Context) {
 	for {
 		if n, err := r.RefreshDue(ctx); err != nil && ctx.Err() == nil {
@@ -88,8 +85,7 @@ func (r *Refresher) Run(ctx context.Context) {
 	}
 }
 
-// claim leases one due marker. Lease times come from the database clock, so no process clock
-// decides whether a lease has expired.
+// claim leases one due marker; lease times come from the database clock.
 func (r *Refresher) claim(ctx context.Context) (dirtyMarker, bool, error) {
 	table := r.Dialect.QuoteIdent(dirtyTable)
 	var mk dirtyMarker
@@ -115,11 +111,8 @@ func (r *Refresher) claim(ctx context.Context) (dirtyMarker, bool, error) {
 		return dirtyMarker{}, false, fmt.Errorf("facts: lease dirty partition: %w", err)
 	}
 	n, err := res.RowsAffected()
-	if err != nil {
-		return dirtyMarker{}, false, fmt.Errorf("facts: lease dirty partition: %w", err)
-	}
-	if n == 0 {
-		return dirtyMarker{}, false, nil // another refresher took it first; the next scan retries
+	if err != nil || n == 0 {
+		return dirtyMarker{}, false, err // n == 0: another refresher took it first; the next scan retries
 	}
 	read := fmt.Sprintf("SELECT version FROM %s WHERE model = ? AND business_date = ? AND lease_owner = ?", table)
 	if err = r.DB.QueryRowContext(ctx, db.Rebind(r.Dialect, read), mk.model, mk.day.String(), r.Owner).Scan(&mk.version); err != nil {
@@ -128,9 +121,8 @@ func (r *Refresher) claim(ctx context.Context) (dirtyMarker, bool, error) {
 	return mk, true, nil
 }
 
-// recompute rebuilds one day's summary and clears its marker in one transaction. The clear is
-// fenced by owner and version: a builder that re-marked the day during the rebuild makes the
-// delete match nothing, so the whole recompute rolls back and the day is redone on a later scan.
+// recompute rebuilds one day and clears its marker in one transaction. The clear is fenced by
+// owner and version, so a re-mark during the rebuild rolls it back and the day is redone later.
 func (r *Refresher) recompute(ctx context.Context, mk dirtyMarker) error {
 	dt := r.Registry.Get(mk.model)
 	if dt == nil || dt.Facts == nil {

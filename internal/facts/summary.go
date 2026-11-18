@@ -56,11 +56,7 @@ func rebuildInsert(dialect db.Dialect, dt *doctype.DocType, day tenanttime.Date)
 		partArgs = append(partArgs, day.String(), db.BoolParam(dialect, false))
 	}
 	// grain "" is the day total; each dimension is its own grain.
-	type grain struct{ name, column string }
-	grains := []grain{{}}
-	for _, d := range f.Dimensions {
-		grains = append(grains, grain{name: d.ColumnName(), column: d.ColumnName()})
-	}
+	grains := append([]string{""}, inner[3:len(inner)-len(f.Measures)]...)
 	sums := []string{"SUM(CASE WHEN f.line_id = '' THEN 1 ELSE 0 END)"}
 	for _, m := range f.Measures {
 		sums = append(sums, "SUM(f."+q(m.ColumnName())+")")
@@ -69,12 +65,11 @@ func rebuildInsert(dialect db.Dialect, dt *doctype.DocType, day tenanttime.Date)
 	var args []any
 	for _, g := range grains {
 		value, group := "''", q("business_date")+", "+q("legal_entity")
-		if g.column != "" {
-			value = "f." + q(g.column)
-			group += ", f." + q(g.column)
+		if g != "" {
+			value, group = "f."+q(g), group+", f."+q(g)
 		}
 		selects = append(selects, fmt.Sprintf("SELECT f.%s, f.%s, '%s', %s, %s FROM (%s) AS f GROUP BY %s",
-			q("business_date"), q("legal_entity"), g.name, value, strings.Join(sums, ", "), source, group))
+			q("business_date"), q("legal_entity"), g, value, strings.Join(sums, ", "), source, group))
 		args = append(args, partArgs...)
 	}
 	cols := []string{"business_date", "legal_entity", "grain", "grain_value", "row_count"}

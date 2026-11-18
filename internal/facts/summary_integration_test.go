@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -19,6 +20,7 @@ import (
 	"github.com/asenawritescode/kora/internal/disposabledb"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/eventstream"
+	"github.com/asenawritescode/kora/internal/tenanttime"
 )
 
 // fullLane rejects every maintenance unit, as a saturated lane does.
@@ -217,4 +219,107 @@ func norm(t *testing.T, s string) string {
 		t.Fatalf("decimal %q: %v", s, err)
 	}
 	return d.String()
+}
+
+// TestDirtyMarksAreOneRow marks the same day from ten transactions at once: no mark may fail,
+// and exactly one marker must remain with version 10.
+func TestDirtyMarksAreOneRow(t *testing.T) {
+	for _, tc := range []struct{ driver, dialect, envVar string }{
+		{"mysql", "mysql", "KORA_FACTS_DISPOSABLE_MYSQL_DSN"},
+		{"postgres", "postgres", "KORA_FACTS_DISPOSABLE_POSTGRES_DSN"},
+	} {
+		t.Run(tc.driver, func(t *testing.T) {
+			dsn := os.Getenv(tc.envVar)
+			if dsn == "" {
+				t.Skipf("set %s to run", tc.envVar)
+			}
+			database := disposabledb.Open(t, tc.driver, dsn)
+			dialect := db.Resolve(tc.dialect)
+			reg := doctype.NewRegistry()
+			reg.Register(saleFacts())
+			b := &Builder{DB: database.DB, Dialect: dialect, Registry: reg}
+			if err := b.ensure(context.Background(), saleFacts()); err != nil {
+				t.Fatal(err)
+			}
+			day := tenanttime.Date{Year: 2026, Month: 11, Day: 18}
+			var wg sync.WaitGroup
+			errs := make(chan error, 10)
+			for range 10 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					tx, err := database.DB.BeginTx(context.Background(), nil)
+					if err != nil {
+						errs <- err
+						return
+					}
+					if err := b.markDirty(context.Background(), tx, "Sale", day); err != nil {
+						_ = tx.Rollback()
+						errs <- err
+						return
+					}
+					errs <- tx.Commit()
+				}()
+			}
+			wg.Wait()
+			close(errs)
+			for err := range errs {
+				if err != nil {
+					t.Fatalf("concurrent mark: %v", err)
+				}
+			}
+			var n int
+			var version int64
+			query := fmt.Sprintf("SELECT COUNT(*), MAX(%s) FROM %s", dialect.QuoteIdent("version"), dialect.QuoteIdent(dirtyTable))
+			if err := database.DB.QueryRow(query).Scan(&n, &version); err != nil {
+				t.Fatal(err)
+			}
+			if n != 1 || version != 10 {
+				t.Fatalf("markers = %d, version = %d; want 1 and 10", n, version)
+			}
+		})
+	}
+}
+
+// TestDirtyTableGainsColumns upgrades a dirty table created before the version and lease columns.
+func TestDirtyTableGainsColumns(t *testing.T) {
+	for _, tc := range []struct{ driver, dialect, envVar string }{
+		{"mysql", "mysql", "KORA_FACTS_DISPOSABLE_MYSQL_DSN"},
+		{"postgres", "postgres", "KORA_FACTS_DISPOSABLE_POSTGRES_DSN"},
+	} {
+		t.Run(tc.driver, func(t *testing.T) {
+			dsn := os.Getenv(tc.envVar)
+			if dsn == "" {
+				t.Skipf("set %s to run", tc.envVar)
+			}
+			database := disposabledb.Open(t, tc.driver, dsn)
+			dialect := db.Resolve(tc.dialect)
+			old := fmt.Sprintf("CREATE TABLE %s (model VARCHAR(140) NOT NULL, business_date DATE NOT NULL, PRIMARY KEY (model, business_date))", dialect.QuoteIdent(dirtyTable))
+			if _, err := database.DB.Exec(old); err != nil {
+				t.Fatal(err)
+			}
+			reg := doctype.NewRegistry()
+			reg.Register(saleFacts())
+			b := &Builder{DB: database.DB, Dialect: dialect, Registry: reg}
+			if err := b.ensure(context.Background(), saleFacts()); err != nil {
+				t.Fatalf("ensure over old table: %v", err)
+			}
+			tx, err := database.DB.BeginTx(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := b.markDirty(context.Background(), tx, "Sale", tenanttime.Date{Year: 2026, Month: 11, Day: 18}); err != nil {
+				_ = tx.Rollback()
+				t.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			var version int64
+			query := fmt.Sprintf("SELECT %s FROM %s", dialect.QuoteIdent("version"), dialect.QuoteIdent(dirtyTable))
+			if err := database.DB.QueryRow(query).Scan(&version); err != nil || version != 1 {
+				t.Fatalf("version = %d, %v; want 1", version, err)
+			}
+		})
+	}
 }
