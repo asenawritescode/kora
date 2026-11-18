@@ -253,6 +253,7 @@ func RunOutboxPublisher(ctx context.Context, p *outbox.Publisher, admission *dba
 	if len(backlog) > 0 {
 		snapshot = backlog[0]
 	}
+	p.Failures = snapshot
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	var refreshAt time.Time

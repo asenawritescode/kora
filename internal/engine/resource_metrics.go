@@ -15,6 +15,7 @@ import (
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/internal/natsprovider"
 	knet "github.com/asenawritescode/kora/internal/net"
+	"github.com/asenawritescode/kora/internal/outbox"
 	"github.com/asenawritescode/kora/internal/script"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
@@ -81,6 +82,8 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 		"kora.scheduler.durable.active", "kora.scheduler.durable.claims", "kora.scheduler.durable.claim_failures", "kora.scheduler.durable.lease_renew_failures", "kora.scheduler.durable.lease_lost", "kora.scheduler.durable.uncertain_outcomes", "kora.scheduler.durable.completion_failures", "kora.scheduler.durable.pending_occurrences", "kora.scheduler.durable.oldest_pending_age_ns", "kora.scheduler.durable.backlog_sample_failures",
 		"kora.analytics.rebuild.active", "kora.analytics.rebuild.claims", "kora.analytics.rebuild.claim_failures", "kora.analytics.rebuild.admission_deferrals", "kora.analytics.rebuild.execution_failures", "kora.analytics.rebuild.lease_renew_failures", "kora.analytics.rebuild.lease_lost", "kora.analytics.rebuild.completion_failures",
 		"kora.outbox.pending_sampled", "kora.outbox.failed_sampled", "kora.outbox.publishing_sampled", "kora.outbox.sample_saturated", "kora.outbox.oldest_unpublished_age_ns", "kora.outbox.metrics_refresh_failures", "kora.outbox.lease_lost",
+		"kora.outbox.blocked_sampled", "kora.outbox.publish_failures.full", "kora.outbox.publish_failures.other",
+		"kora.event_stream.messages", "kora.event_stream.bytes", "kora.event_stream.max_messages", "kora.event_stream.max_bytes", "kora.event_stream.usage_ratio_bps",
 		"kora.platform.deletion.cleanup_attempts", "kora.platform.deletion.cleanup_failures", "kora.platform.deletion.admission_rejections",
 		"kora.analytics.wal.pending", "kora.analytics.wal.oldest_age_ns", "kora.analytics.wal.age_unknown", "kora.analytics.wal.bytes", "kora.analytics.wal.bytes_unknown", "kora.analytics.wal.cold_bytes", "kora.analytics.wal.cold_bytes_unknown",
 		"kora.cloud.product_events.queue_items", "kora.cloud.product_events.queue_capacity", "kora.cloud.product_events.dropped",
@@ -109,6 +112,8 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 		"Durable scheduled occurrences currently executing", "Durable scheduled occurrences claimed", "Durable scheduled occurrence claim failures", "Durable scheduler lease renewal failures", "Durable scheduler claims fenced by lease loss", "Durable scheduled occurrences requiring reconciliation", "Durable scheduled occurrence completion failures", "Sampled pending durable scheduled occurrence count across resident tenants", "Oldest sampled pending durable scheduled occurrence age across resident tenants", "Cumulative durable scheduler backlog sample failures",
 		"Analytics rebuild jobs currently executing across resident tenants", "Analytics rebuild jobs claimed by resident workers", "Analytics rebuild claim query failures", "Analytics rebuild jobs deferred by active-work admission", "Analytics rebuild execution failures", "Analytics rebuild lease renewal failures", "Analytics rebuild worker claims lost to a newer fencing token", "Analytics rebuild durable completion or release failures",
 		"Sampled unpublished pending outbox rows across resident tenants; saturates at the per-state sample limit", "Sampled failed outbox rows across resident tenants; saturates at the per-state sample limit", "Sampled publishing outbox rows across resident tenants; saturates at the per-state sample limit", "Whether any resident tenant outbox state reached the bounded sample limit", "Age of the oldest sampled unpublished outbox event across resident tenants", "Cumulative outbox backlog metric refresh failures", "Cumulative outbox publisher claims fenced by a newer owner",
+		"Sampled blocked outbox rows across resident tenants; they wait for destination capacity and do not consume attempts", "Cumulative outbox deliveries refused for destination capacity", "Cumulative outbox deliveries that failed for a reason other than destination capacity",
+		"Messages retained in the event stream", "Bytes retained in the event stream", "Event stream message limit", "Event stream byte limit", "Event stream bytes as basis points of the byte limit; zero when no byte limit is configured",
 		"Pending tenant-deletion cleanup attempts", "Pending tenant-deletion cleanup failures", "Pending tenant-deletion cleanup operations deferred by database admission",
 		"Whether any scanned analytics WAL backlog is pending", "Age of the oldest known persisted analytics WAL record", "Whether an oldest pending analytics WAL timestamp is unknown", "Bytes retained by resident analytics WAL files", "Whether resident analytics WAL bytes could not be fully measured", "Bytes retained by cold active tenant analytics WAL files in the last completed directory sweep", "Whether cold active tenant analytics WAL bytes could not be fully measured during the last completed sweep",
 		"Best-effort Cloud product telemetry events waiting in resident tenant relay queues", "Configured capacity of resident tenant Cloud product telemetry queues", "Cloud product telemetry events dropped because payloads were oversized, unsupported, or queues were full",
@@ -145,6 +150,7 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 		"kora.analytics.rebuild.admission_deferrals": true, "kora.analytics.rebuild.execution_failures": true,
 		"kora.analytics.rebuild.lease_renew_failures": true, "kora.analytics.rebuild.lease_lost": true, "kora.analytics.rebuild.completion_failures": true,
 		"kora.outbox.metrics_refresh_failures": true, "kora.outbox.lease_lost": true,
+		"kora.outbox.publish_failures.full": true, "kora.outbox.publish_failures.other": true,
 		"kora.platform.deletion.cleanup_attempts": true, "kora.platform.deletion.cleanup_failures": true,
 		"kora.platform.deletion.admission_rejections": true,
 		"kora.cloud.product_events.dropped":           true,
@@ -247,6 +253,7 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 			values["kora.platform.deletion.cleanup_failures"] = int64(snapshot.Failures)
 			values["kora.platform.deletion.admission_rejections"] = int64(snapshot.AdmissionRejections)
 		}
+		addEventStreamUsage(values, source.NATSRealtime)
 		if source.NATSRealtime != nil {
 			snapshot := source.NATSRealtime.RealtimeBudget()
 			values["kora.realtime.nats.subscriptions.active"] = int64(snapshot.Subscriptions)
@@ -316,20 +323,7 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 					values["kora.analytics.rebuild.lease_lost"] += snapshot.LeaseLost
 					values["kora.analytics.rebuild.completion_failures"] += snapshot.CompletionFailures
 				}
-				if backlog := loaded.RuntimeServiceSnapshot().OutboxBacklog; backlog != nil {
-					snapshot := backlog.Snapshot(time.Now())
-					values["kora.outbox.pending_sampled"] += snapshot.Pending
-					values["kora.outbox.failed_sampled"] += snapshot.Failed
-					values["kora.outbox.publishing_sampled"] += snapshot.Publishing
-					if snapshot.Saturated {
-						values["kora.outbox.sample_saturated"] = 1
-					}
-					values["kora.outbox.metrics_refresh_failures"] += snapshot.RefreshFailures
-					values["kora.outbox.lease_lost"] += snapshot.LeaseLost
-					if age := snapshot.OldestUnpublishedAge.Nanoseconds(); age > values["kora.outbox.oldest_unpublished_age_ns"] {
-						values["kora.outbox.oldest_unpublished_age_ns"] = age
-					}
-				}
+				addOutboxBacklog(values, loaded.RuntimeServiceSnapshot().OutboxBacklog)
 				if loaded.SessionManager != nil {
 					sessionCache := loaded.SessionManager.CacheSnapshot()
 					values["kora.session_cache.entries"] += int64(sessionCache.Entries)
@@ -475,3 +469,45 @@ func (m *ResourceMetrics) Unregister() error {
 }
 
 func int64Pair(a, b int) (int64, int64) { return int64(a), int64(b) }
+
+// addEventStreamUsage copies the last event stream usage sample into values.
+// The sample is taken off the collection path by natsprovider's sampler, so
+// this performs no I/O; the gauges are omitted until a sample succeeds.
+func addEventStreamUsage(values map[string]int64, provider *natsprovider.Provider) {
+	if provider == nil {
+		return
+	}
+	usage, ok := provider.StreamUsage()
+	if !ok {
+		return
+	}
+	values["kora.event_stream.messages"] = int64(usage.StreamMsgs)
+	values["kora.event_stream.bytes"] = int64(usage.StreamBytes)
+	values["kora.event_stream.max_messages"] = int64(usage.StreamMaxMsgs)
+	values["kora.event_stream.max_bytes"] = int64(usage.StreamMaxBytes)
+	if usage.StreamMaxBytes > 0 {
+		values["kora.event_stream.usage_ratio_bps"] = int64(usage.StreamBytes) * 10000 / int64(usage.StreamMaxBytes)
+	}
+}
+
+// addOutboxBacklog copies one tenant's cached outbox backlog sample into values.
+func addOutboxBacklog(values map[string]int64, backlog *outbox.BacklogMetrics) {
+	if backlog == nil {
+		return
+	}
+	snapshot := backlog.Snapshot(time.Now())
+	values["kora.outbox.pending_sampled"] += snapshot.Pending
+	values["kora.outbox.failed_sampled"] += snapshot.Failed
+	values["kora.outbox.publishing_sampled"] += snapshot.Publishing
+	if snapshot.Saturated {
+		values["kora.outbox.sample_saturated"] = 1
+	}
+	values["kora.outbox.metrics_refresh_failures"] += snapshot.RefreshFailures
+	values["kora.outbox.lease_lost"] += snapshot.LeaseLost
+	values["kora.outbox.blocked_sampled"] += snapshot.Blocked
+	values["kora.outbox.publish_failures.full"] += snapshot.PublishFailuresFull
+	values["kora.outbox.publish_failures.other"] += snapshot.PublishFailuresOther
+	if age := snapshot.OldestUnpublishedAge.Nanoseconds(); age > values["kora.outbox.oldest_unpublished_age_ns"] {
+		values["kora.outbox.oldest_unpublished_age_ns"] = age
+	}
+}
