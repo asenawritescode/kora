@@ -18,7 +18,7 @@ import (
 const posBasePath = "../../config/pos-base"
 
 func loadPOSBase(t *testing.T) map[string]*DocType {
-	skipParkedERPLayers(t)
+	skipParkedPacks(t)
 	t.Helper()
 	doctypes, err := ParseConfigTree(posBasePath)
 	if err != nil {
@@ -32,7 +32,7 @@ func loadPOSBase(t *testing.T) map[string]*DocType {
 }
 
 func TestPOSBaseHasNoDanglingLinks(t *testing.T) {
-	skipParkedERPLayers(t)
+	skipParkedPacks(t)
 	doctypes, err := ParseConfigTree(posBasePath)
 	if err != nil {
 		t.Fatalf("parse pos-base: %v", err)
@@ -52,7 +52,7 @@ var posBaseMoneyRecords = map[string]string{
 }
 
 func TestPOSBaseMoneyRecordsCarryCurrencyAndFrozenRate(t *testing.T) {
-	skipParkedERPLayers(t)
+	skipParkedPacks(t)
 	dts := loadPOSBase(t)
 	for name, amountField := range posBaseMoneyRecords {
 		dt := dts[name]
@@ -99,7 +99,7 @@ func hasMinConstraintAboveZero(f *Field) bool {
 }
 
 func TestPOSBaseCurrencyIsOnlyChangedByManagers(t *testing.T) {
-	skipParkedERPLayers(t)
+	skipParkedPacks(t)
 	_, permissions, err := ParseRolesDirectory(filepath.Join(posBasePath, "doctypes"))
 	if err != nil {
 		t.Fatalf("parse permissions: %v", err)
@@ -124,7 +124,7 @@ func TestPOSBaseCurrencyIsOnlyChangedByManagers(t *testing.T) {
 // Nothing in the pack may name a currency in code or views. Currencies are data
 // the owner enters, and the base currency is whichever record is ticked.
 func TestPOSBaseViewsAndDoctypesNameNoCurrency(t *testing.T) {
-	skipParkedERPLayers(t)
+	skipParkedPacks(t)
 	banned := []string{"KES", "USD", "EUR", "UGX", "TZS", "KSh"}
 	for _, dir := range []string{"doctypes", "views", "reports"} {
 		entries, err := os.ReadDir(filepath.Join(posBasePath, dir))
@@ -156,7 +156,7 @@ func TestPOSBaseViewsAndDoctypesNameNoCurrency(t *testing.T) {
 // The base currency is chosen once, in site Settings. The pack must not carry
 // a second copy of that choice that could disagree with it.
 func TestPOSBaseHasNoSecondBaseCurrencySetting(t *testing.T) {
-	skipParkedERPLayers(t)
+	skipParkedPacks(t)
 	if loadPOSBase(t)["Currency"].GetField("is_base") != nil {
 		t.Errorf("Currency must not have a base flag: the base currency is the site setting")
 	}
@@ -185,7 +185,7 @@ func TestPOSBaseHasNoSecondBaseCurrencySetting(t *testing.T) {
 // is "today" (it emits DEFAULT CURRENT_DATE without parentheses), so a pack
 // that uses it cannot be set up at all. Fill dates when the record is made.
 func TestPOSBaseAvoidsDateDefaultsThatBreakMySQL(t *testing.T) {
-	skipParkedERPLayers(t)
+	skipParkedPacks(t)
 	for name, dt := range loadPOSBase(t) {
 		for _, f := range dt.Fields {
 			if f.Fieldtype == "Date" && strings.EqualFold(strings.TrimSpace(f.Default), "today") {
@@ -198,7 +198,7 @@ func TestPOSBaseAvoidsDateDefaultsThatBreakMySQL(t *testing.T) {
 // The base total must be worked out whether the rate arrives as a number (from
 // an API call) or as the text default the Engine fills in when none is sent.
 func TestPOSBaseBaseTotalIsComputedFromDefaultAndTypedRates(t *testing.T) {
-	skipParkedERPLayers(t)
+	skipParkedPacks(t)
 	sale := loadPOSBase(t)["Sale"]
 	cases := []struct {
 		name string

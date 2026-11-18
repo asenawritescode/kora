@@ -10,6 +10,7 @@ import (
 // The Manufacturing report must use only models, measures and dimensions the Engine
 // offers for the pack's record types.
 func TestManufacturingReportsOnlyUseWhatTheEngineOffers(t *testing.T) {
+	skipParkedPacks(t, "manufacturing")
 	pack := filepath.Join("..", "..", "config", "manufacturing")
 	docTypes, err := doctype.ParseConfigTree(pack)
 	if err != nil {

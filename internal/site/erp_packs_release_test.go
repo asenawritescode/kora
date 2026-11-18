@@ -16,6 +16,7 @@ var erpModules = []string{"pos-base", "erp-inventory", "erp-purchasing", "erp-ac
 
 func erpModuleFiles(t *testing.T, pack string) []PackFile {
 	t.Helper()
+	skipParkedPacks(t, pack)
 	root := filepath.Join("..", "..", "config", pack)
 	types := map[string]string{"doctypes": "doctype", "views": "view", "reports": "report"}
 	var files []PackFile
@@ -58,7 +59,7 @@ func requireValidPack(t *testing.T, name string, files []PackFile) {
 }
 
 func TestEachERPModulePassesMarketplaceValidation(t *testing.T) {
-	skipParkedERPLayers(t)
+	skipParkedPacks(t)
 	for _, pack := range erpModules {
 		t.Run(pack, func(t *testing.T) {
 			requireValidPack(t, pack, erpModuleFiles(t, pack))
@@ -69,7 +70,7 @@ func TestEachERPModulePassesMarketplaceValidation(t *testing.T) {
 // The template installs the modules together, so they must also validate and
 // import as one: no clashing paths, no dangling links, no conflicting roles.
 func TestERPModulesPassValidationAndImportWhenComposed(t *testing.T) {
-	skipParkedERPLayers(t)
+	skipParkedPacks(t)
 	var all []PackFile
 	for _, pack := range erpModules {
 		for _, file := range erpModuleFiles(t, pack) {

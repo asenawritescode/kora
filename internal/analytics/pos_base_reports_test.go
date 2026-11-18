@@ -11,7 +11,7 @@ import (
 // dimensions the Engine really offers for the pack's record types, so a rename
 // of a field cannot leave a report quietly empty.
 func TestPOSBaseReportsOnlyUseWhatTheEngineOffers(t *testing.T) {
-	skipParkedERPLayers(t)
+	skipParkedPacks(t)
 	pack := filepath.Join("..", "..", "config", "pos-base")
 	docTypes, err := doctype.ParseConfigTree(pack)
 	if err != nil {

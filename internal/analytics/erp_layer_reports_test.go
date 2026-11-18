@@ -10,7 +10,7 @@ import (
 // The reports the Stock and Buying packs ship must use only models, measures and
 // dimensions the Engine offers for their own record types.
 func TestERPLayerReportsOnlyUseWhatTheEngineOffers(t *testing.T) {
-	skipParkedERPLayers(t)
+	skipParkedPacks(t)
 	for pack, want := range map[string]int{"erp-inventory": 1, "erp-purchasing": 1} {
 		t.Run(pack, func(t *testing.T) {
 			root := filepath.Join("..", "..", "config", pack)
