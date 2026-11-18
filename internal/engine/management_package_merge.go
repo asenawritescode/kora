@@ -178,6 +178,12 @@ func packageContainsResource(snapshot *doctype.ConfigSnapshot, namespace, name s
 				return true
 			}
 		}
+	case "metric_definition":
+		for _, value := range snapshot.Metrics {
+			if n, err := metricName(value); err == nil && n == name {
+				return true
+			}
+		}
 	}
 	return false
 }

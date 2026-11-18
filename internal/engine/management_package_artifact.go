@@ -243,6 +243,12 @@ func bindOwnedPackageResource(snapshot *doctype.ConfigSnapshot, owner contract.M
 				return true, nil
 			}
 		}
+	case "metric_definition":
+		for _, value := range snapshot.Metrics {
+			if name, err := metricName(value); err == nil && name == resource.Ref.Name {
+				return true, nil
+			}
+		}
 	}
 	return false, nil
 }

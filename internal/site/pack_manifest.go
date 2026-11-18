@@ -217,6 +217,7 @@ type packResourceNames struct {
 	views            map[string]string
 	scripts          map[string]string
 	reports          map[string]string
+	metrics          map[string]string
 	queries          map[string]string
 	commands         map[string]string
 	printFormats     map[string]string
@@ -225,7 +226,7 @@ type packResourceNames struct {
 func newPackResourceNames() packResourceNames {
 	return packResourceNames{
 		doctypes: map[string]string{}, doctypeResources: map[string]string{}, roles: map[string]string{}, permissions: map[string]string{},
-		workflows: map[string]string{}, views: map[string]string{}, scripts: map[string]string{}, reports: map[string]string{},
+		workflows: map[string]string{}, views: map[string]string{}, scripts: map[string]string{}, reports: map[string]string{}, metrics: map[string]string{},
 		queries: map[string]string{}, commands: map[string]string{}, printFormats: map[string]string{},
 	}
 }
@@ -312,17 +313,30 @@ func (names packResourceNames) add(file PackFile) error {
 			return err
 		}
 		return register(names.printFormats, definition.Name, "print format")
-	case "report":
-		definition, err := analytics.ParseReportYAML([]byte(file.Content), file.Path)
+	case "report", "metric":
+		return names.addReportOrMetric(file, register)
+	}
+	return nil
+}
+
+// addReportOrMetric claims the names of a report (and its route) or of a metric definition.
+func (names packResourceNames) addReportOrMetric(file PackFile, register func(map[string]string, string, string) error) error {
+	if file.ContentType == "metric" {
+		definition, err := metrics.ParseYAML([]byte(file.Content), file.Path)
 		if err != nil {
 			return err
 		}
-		if err := register(names.reports, definition.Name, "report"); err != nil {
-			return err
-		}
-		if definition.Route != "" {
-			return register(names.views, "route:"+definition.Route, "report route")
-		}
+		return register(names.metrics, definition.Name, "metric")
+	}
+	definition, err := analytics.ParseReportYAML([]byte(file.Content), file.Path)
+	if err != nil {
+		return err
+	}
+	if err := register(names.reports, definition.Name, "report"); err != nil {
+		return err
+	}
+	if definition.Route != "" {
+		return register(names.views, "route:"+definition.Route, "report route")
 	}
 	return nil
 }
