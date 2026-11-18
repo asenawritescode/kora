@@ -178,6 +178,16 @@ jobs:
           KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
         run: go test -tags=integration ./internal/site -run TestPOSExpectedCashAcrossDialects -count=1 -timeout=10m
 
+      - name: Test held sales on disposable MySQL
+        env:
+          KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+        run: go test -tags=integration ./internal/site -run TestPOSHeldSalesAcrossDialects -count=1 -timeout=10m
+
+      - name: Test held sales on disposable Postgres
+        env:
+          KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
+        run: go test -tags=integration ./internal/site -run TestPOSHeldSalesAcrossDialects -count=1 -timeout=10m
+
       - name: Test cash movements on disposable MySQL
         env:
           KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
@@ -219,6 +229,16 @@ jobs:
         env:
           KORA_KERNEL_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
         run: go test -tags=integration ./internal/kernel -run TestPresetSaleNumberAndCountLimitAcrossDialects -count=1 -timeout=5m
+
+      - name: Test upsert steps and count limit exception on disposable MySQL
+        env:
+          KORA_KERNEL_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+        run: go test -tags=integration ./internal/kernel -run TestUpsertStepCreatesThenUpdatesAcrossDialects -count=1 -timeout=5m
+
+      - name: Test upsert steps and count limit exception on disposable Postgres
+        env:
+          KORA_KERNEL_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
+        run: go test -tags=integration ./internal/kernel -run TestUpsertStepCreatesThenUpdatesAcrossDialects -count=1 -timeout=5m
 
       - name: Test module snapshot fence on disposable SQL dialects
         env:

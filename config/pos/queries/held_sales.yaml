@@ -1,0 +1,16 @@
+name: held_sales
+module_owner_id: pos.core
+capability: pos.sales
+operation: held_sales
+source: Sale
+permission: read
+scope: tenant
+owner_field: owner
+input:
+  till_session: {type: string, max_length: 140}
+filters:
+  - {field: till_session, op: eq, value: $input.till_session}
+  - {field: status, op: eq, value: Held}
+fields: [name, register, customer, total, held_name, held_at, held_by, owner, creation]
+sort: [{field: held_at, dir: asc}]
+limit: 20

@@ -108,6 +108,18 @@ type CommandStep struct {
 	// Reserve takes a block of numbers from Record's naming series for Owner.
 	// As names the block's first record name, so later steps can reference it.
 	Reserve *StepReserve `yaml:"reserve,omitempty" json:"reserve,omitempty"`
+	// Upsert creates Record under Name when no record has that name, and
+	// otherwise updates that record. Which one runs is decided per call.
+	Upsert *StepUpsert `yaml:"upsert,omitempty" json:"upsert,omitempty"`
+}
+
+// StepUpsert writes one record of Record under the name Name. A new record takes
+// a reserved number from InBlock, as a create with name and in_block does.
+type StepUpsert struct {
+	Record  string            `yaml:"record"   json:"record"`
+	Name    string            `yaml:"name"     json:"name"`
+	InBlock string            `yaml:"in_block" json:"in_block"`
+	Values  map[string]string `yaml:"values"   json:"values"`
 }
 
 // StepReserve reserves Size numbers from the naming series of Record. Owner is
@@ -133,7 +145,7 @@ type StepEnsure struct {
 // kindCount returns how many of create, update, ensure and reserve the step sets.
 func (s CommandStep) kindCount() int {
 	kinds := 0
-	for _, present := range []bool{s.Create != nil, s.Update != nil, s.Ensure != nil, s.Reserve != nil} {
+	for _, present := range []bool{s.Create != nil, s.Update != nil, s.Ensure != nil, s.Reserve != nil, s.Upsert != nil} {
 		if present {
 			kinds++
 		}
@@ -155,6 +167,9 @@ func (s CommandStep) reserveOwner() string {
 // A reserve step names its record too: it writes numbers in that record's
 // series, so it needs the same create permission.
 func (s CommandStep) createSpec() *StepCreate {
+	if s.Upsert != nil {
+		return &StepCreate{Record: s.Upsert.Record, Values: s.Upsert.Values, Name: s.Upsert.Name, Block: s.Upsert.InBlock}
+	}
 	if s.Reserve != nil {
 		return &StepCreate{Record: s.Reserve.Record}
 	}
@@ -193,6 +208,23 @@ type StepUpdate struct {
 	Adjust map[string]FieldAdjust `yaml:"adjust,omitempty" json:"adjust,omitempty"`
 }
 
+// updateSpec returns the update this step may perform: its update, or an upsert's
+// update when the record exists. Nil for other steps.
+func (s CommandStep) updateSpec() *StepUpdate {
+	if s.Upsert != nil {
+		return &StepUpdate{Record: s.Upsert.Record, Name: s.Upsert.Name, Values: s.Upsert.Values}
+	}
+	return s.Update
+}
+
+// validateUpsert checks that an upsert names its record, name, block and values.
+func (c *CommandResource) validateUpsert(i int, u *StepUpsert) error {
+	if u.Record == "" || u.Name == "" || u.InBlock == "" || len(u.Values) == 0 {
+		return fmt.Errorf("command %q: step %d upsert requires record, name, in_block and values", c.Name, i)
+	}
+	return nil
+}
+
 // validateReserve checks that a reserve step names a record, an owner and a size.
 func (c *CommandResource) validateReserve(i int, r *StepReserve) error {
 	if r.Record == "" || r.Owner == "" || r.Size < 1 {
@@ -213,6 +245,10 @@ func (c *CommandResource) validateStep(i int, s CommandStep) error {
 		}
 	case s.Reserve != nil:
 		if err := c.validateReserve(i, s.Reserve); err != nil {
+			return err
+		}
+	case s.Upsert != nil:
+		if err := c.validateUpsert(i, s.Upsert); err != nil {
 			return err
 		}
 	case s.Create != nil:
@@ -390,8 +426,8 @@ func commandStepScope(step CommandStep) string {
 	if create := step.createSpec(); create != nil {
 		return create.Scope
 	}
-	if step.Update != nil {
-		return step.Update.Scope
+	if step.updateSpec() != nil {
+		return step.updateSpec().Scope
 	}
 	return ""
 }
@@ -414,8 +450,8 @@ func (c *CommandResource) TouchedRecords() []string {
 		if create := s.createSpec(); create != nil {
 			add(create.Record)
 		}
-		if s.Update != nil {
-			add(s.Update.Record)
+		if u := s.updateSpec(); u != nil {
+			add(u.Record)
 		}
 	}
 	return out

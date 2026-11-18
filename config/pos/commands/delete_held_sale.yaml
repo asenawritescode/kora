@@ -1,0 +1,48 @@
+# Voids a held sale (Held to Void). It takes no stock and no cash, so nothing else moves.
+name: delete_held_sale
+namespace: pos
+version: 1
+module_owner_id: pos.core
+capability: pos.checkout
+operation: delete_held_sale
+offline_eligible: true
+presentation:
+  title: Delete held sale
+permission: write
+input:
+  record: Sale
+  extra:
+    sale: {type: string, required: true}
+    till_session: {type: string, required: true}
+require:
+  - lock:
+      record: Sale
+      name: $input.sale
+  - exists:
+      record: Sale
+      where:
+        name: $input.sale
+        till_session: $input.till_session
+        status: Held
+    message: Only a held sale of this till can be deleted
+  - exists:
+      record: Till Session
+      where:
+        name: $input.till_session
+        status: Open
+    message: Till is not open
+  - exists:
+      record: Till Session
+      where:
+        name: $input.till_session
+        cashier: $actor
+    unless_role: [Owner, Manager, Administrator]
+    message: This till belongs to another cashier
+transaction:
+  - update:
+      record: Sale
+      name: $input.sale
+      values:
+        status: Void
+output:
+  reference: $input.sale

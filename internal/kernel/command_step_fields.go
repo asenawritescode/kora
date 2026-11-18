@@ -30,8 +30,8 @@ func (c *CommandResource) stepAliases() map[string]stepAlias {
 			continue
 		}
 		switch {
-		case step.Update != nil:
-			out[step.As] = stepAlias{record: step.Update.Record, step: step}
+		case step.updateSpec() != nil:
+			out[step.As] = stepAlias{record: step.updateSpec().Record, step: step}
 		case step.Reserve != nil:
 			out[step.As] = stepAlias{record: step.Reserve.Record, step: step}
 		case step.createSpec() != nil:
@@ -67,15 +67,15 @@ func (c *CommandResource) fieldReadAliases() []string {
 				refs = append(refs, ref)
 			}
 		}
-		if step.Update != nil {
-			refs = append(refs, step.Update.Name)
-			for _, ref := range step.Update.Where {
+		if step.updateSpec() != nil {
+			refs = append(refs, step.updateSpec().Name)
+			for _, ref := range step.updateSpec().Where {
 				refs = append(refs, ref)
 			}
-			for _, ref := range step.Update.Values {
+			for _, ref := range step.updateSpec().Values {
 				refs = append(refs, ref)
 			}
-			for _, change := range step.Update.Adjust {
+			for _, change := range step.updateSpec().Adjust {
 				refs = append(refs, change.Increase, change.Decrease, change.By, change.SignFrom)
 			}
 		}
