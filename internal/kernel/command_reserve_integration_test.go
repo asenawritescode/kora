@@ -36,6 +36,25 @@ output:
 // dialect. It is a separate fixture because newSite is MySQL-only.
 func newReserveFixture(t *testing.T, driver, dsnEnv string) *siteFixture {
 	t.Helper()
+	saleDT := &doctype.DocType{
+		Name: "Sale", Module: "Kernel Test", NamingSeries: "SALE-.YYYY.-.#####",
+		Fields: []doctype.Field{{Fieldname: "register", Fieldtype: "Data", Label: "Register"}},
+	}
+	sessionDT := &doctype.DocType{
+		Name: "Till Session", Module: "Kernel Test",
+		Fields: []doctype.Field{{Fieldname: "status", Fieldtype: "Data", Label: "Status"}},
+	}
+	perms := []*doctype.Permission{
+		{Doctype: "Sale", Role: "Administrator", Read: true, Write: true, Create: true, Delete: true},
+		{Doctype: "Till Session", Role: "Administrator", Read: true, Write: true, Create: true, Delete: true},
+	}
+	return newDisposableFixture(t, driver, dsnEnv, []*doctype.DocType{saleDT, sessionDT}, perms)
+}
+
+// newDisposableFixture creates the system tables and the given doctypes on a
+// disposable server of the named driver, and returns a site over them.
+func newDisposableFixture(t *testing.T, driver, dsnEnv string, types []*doctype.DocType, perms []*doctype.Permission) *siteFixture {
+	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv(dsnEnv))
 	if dsn == "" {
 		t.Skipf("set %s to a disposable %s server", dsnEnv, driver)
@@ -61,21 +80,9 @@ func newReserveFixture(t *testing.T, driver, dsnEnv string) *siteFixture {
 		t.Fatalf("seed config revision: %v", err)
 	}
 
-	saleDT := &doctype.DocType{
-		Name: "Sale", Module: "Kernel Test", NamingSeries: "SALE-.YYYY.-.#####",
-		Fields: []doctype.Field{{Fieldname: "register", Fieldtype: "Data", Label: "Register"}},
-	}
-	sessionDT := &doctype.DocType{
-		Name: "Till Session", Module: "Kernel Test",
-		Fields: []doctype.Field{{Fieldname: "status", Fieldtype: "Data", Label: "Status"}},
-	}
 	roles := []*doctype.Role{{Name: "Administrator"}}
-	perms := []*doctype.Permission{
-		{Doctype: "Sale", Role: "Administrator", Read: true, Write: true, Create: true, Delete: true},
-		{Doctype: "Till Session", Role: "Administrator", Read: true, Write: true, Create: true, Delete: true},
-	}
 	reg := doctype.NewRegistry()
-	reg.LoadFull([]*doctype.DocType{saleDT, sessionDT}, roles, perms)
+	reg.LoadFull(types, roles, perms)
 	if err := schema.MigrateSiteFromRegistry(database.DB, database.Name, reg, dialect); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

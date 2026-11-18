@@ -14,25 +14,79 @@ import (
 	"github.com/asenawritescode/kora/internal/policy"
 )
 
-// FieldAdjust changes one numeric field relative to its stored value. Exactly
-// one of Increase or Decrease is set; Min, when set, is a floor the result may
-// not fall below. Arithmetic is exact decimal, never float.
+// FieldAdjust changes one numeric field relative to its stored value. It takes
+// one of two forms:
+//
+//   - plain: exactly one of Increase or Decrease is set to the amount reference,
+//     e.g. `{ increase: $input.amount }`.
+//   - signed: By is the amount reference and SignFrom names a value that picks
+//     the direction. A value equal to IncreaseWhen adds the amount, a value equal
+//     to DecreaseWhen subtracts it, and any other value fails the command, e.g.
+//     `{ by: $input.amount, sign_from: $input.direction, increase_when: In,
+//     decrease_when: Out }`. All four signed keys are required together.
+//
+// Min, when set, is a floor the result may not fall below. Arithmetic is exact
+// decimal, never float.
 type FieldAdjust struct {
-	Increase string `yaml:"increase,omitempty" json:"increase,omitempty"`
-	Decrease string `yaml:"decrease,omitempty" json:"decrease,omitempty"`
-	Min      string `yaml:"min,omitempty" json:"min,omitempty"`
+	Increase     string `yaml:"increase,omitempty" json:"increase,omitempty"`
+	Decrease     string `yaml:"decrease,omitempty" json:"decrease,omitempty"`
+	Min          string `yaml:"min,omitempty" json:"min,omitempty"`
+	By           string `yaml:"by,omitempty" json:"by,omitempty"`
+	SignFrom     string `yaml:"sign_from,omitempty" json:"sign_from,omitempty"`
+	IncreaseWhen string `yaml:"increase_when,omitempty" json:"increase_when,omitempty"`
+	DecreaseWhen string `yaml:"decrease_when,omitempty" json:"decrease_when,omitempty"`
+}
+
+// signed reports whether the change uses the signed form.
+func (a FieldAdjust) signed() bool {
+	return a.By != "" || a.SignFrom != "" || a.IncreaseWhen != "" || a.DecreaseWhen != ""
 }
 
 func (a FieldAdjust) validate() error {
-	if (a.Increase == "") == (a.Decrease == "") {
-		return fmt.Errorf("adjust needs exactly one of increase or decrease")
-	}
 	if a.Min != "" {
 		if _, ok := new(big.Rat).SetString(a.Min); !ok {
 			return fmt.Errorf("adjust min %q must be a number", a.Min)
 		}
 	}
+	if !a.signed() {
+		if (a.Increase == "") == (a.Decrease == "") {
+			return fmt.Errorf("adjust needs exactly one of increase or decrease")
+		}
+		return nil
+	}
+	if a.Increase != "" || a.Decrease != "" {
+		return fmt.Errorf("signed adjust cannot also set increase or decrease")
+	}
+	if a.By == "" || a.SignFrom == "" || a.IncreaseWhen == "" || a.DecreaseWhen == "" {
+		return fmt.Errorf("signed adjust needs by, sign_from, increase_when and decrease_when")
+	}
+	if a.IncreaseWhen == a.DecreaseWhen {
+		return fmt.Errorf("signed adjust needs two different direction values")
+	}
 	return nil
+}
+
+// amountRef returns the amount reference and whether the change adds to the
+// stored value. A signed change reads SignFrom and fails the command when its
+// value matches neither direction.
+func (a FieldAdjust) amountRef(env refEnv, index int) (string, bool, *contract.Error) {
+	if !a.signed() {
+		if a.Increase != "" {
+			return a.Increase, true, nil
+		}
+		return a.Decrease, false, nil
+	}
+	direction, err := resolveEnvRef(a.SignFrom, env)
+	if err != nil {
+		return "", false, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %v", index, err))
+	}
+	switch fmt.Sprint(direction) {
+	case a.IncreaseWhen:
+		return a.By, true, nil
+	case a.DecreaseWhen:
+		return a.By, false, nil
+	}
+	return "", false, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %s must be %q or %q", index, a.SignFrom, a.IncreaseWhen, a.DecreaseWhen))
 }
 
 // stepEnv is a command step's reference environment and its position, which
@@ -86,9 +140,9 @@ func applyAdjustments(dt *doctype.DocType, oldDoc, doc *doctype.Document, adjust
 		if definition == nil || (definition.Fieldtype != "Int" && definition.Fieldtype != "Float" && definition.Fieldtype != "Currency" && definition.Fieldtype != "Percent") {
 			return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("step %d: %s.%s is not a numeric field", index, dt.Name, field))
 		}
-		ref := change.Increase
-		if ref == "" {
-			ref = change.Decrease
+		ref, increase, cerr := change.amountRef(env, index)
+		if cerr != nil {
+			return cerr
 		}
 		raw, err := resolveEnvRef(ref, env)
 		if err != nil {
@@ -103,7 +157,7 @@ func applyAdjustments(dt *doctype.DocType, oldDoc, doc *doctype.Document, adjust
 			current = new(big.Rat)
 		}
 		next := new(big.Rat)
-		if change.Increase != "" {
+		if increase {
 			next.Add(current, delta)
 		} else {
 			next.Sub(current, delta)

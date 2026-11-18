@@ -56,3 +56,67 @@ func TestApplyAdjustmentsIsExactAndHonoursFloor(t *testing.T) {
 		t.Fatal("fractional change to an Int field was accepted")
 	}
 }
+
+func TestFieldAdjustValidateAcceptsOnlyWellFormedForms(t *testing.T) {
+	cases := []struct {
+		name   string
+		change FieldAdjust
+		ok     bool
+	}{
+		{"plain increase", FieldAdjust{Increase: "$input.n"}, true},
+		{"plain decrease with floor", FieldAdjust{Decrease: "$input.n", Min: "0"}, true},
+		{"plain needs one side", FieldAdjust{}, false},
+		{"plain both sides", FieldAdjust{Increase: "$input.n", Decrease: "$input.n"}, false},
+		{"signed", FieldAdjust{By: "$input.n", SignFrom: "$input.d", IncreaseWhen: "In", DecreaseWhen: "Out"}, true},
+		{"signed with floor", FieldAdjust{By: "$input.n", SignFrom: "$input.d", IncreaseWhen: "In", DecreaseWhen: "Out", Min: "0"}, true},
+		{"signed missing sign_from", FieldAdjust{By: "$input.n", IncreaseWhen: "In", DecreaseWhen: "Out"}, false},
+		{"signed missing decrease_when", FieldAdjust{By: "$input.n", SignFrom: "$input.d", IncreaseWhen: "In"}, false},
+		{"signed missing by", FieldAdjust{SignFrom: "$input.d", IncreaseWhen: "In", DecreaseWhen: "Out"}, false},
+		{"signed with increase too", FieldAdjust{Increase: "$input.n", By: "$input.n", SignFrom: "$input.d", IncreaseWhen: "In", DecreaseWhen: "Out"}, false},
+		{"signed same direction values", FieldAdjust{By: "$input.n", SignFrom: "$input.d", IncreaseWhen: "In", DecreaseWhen: "In"}, false},
+		{"signed bad floor", FieldAdjust{By: "$input.n", SignFrom: "$input.d", IncreaseWhen: "In", DecreaseWhen: "Out", Min: "lots"}, false},
+	}
+	for _, tc := range cases {
+		if err := tc.change.validate(); (err == nil) != tc.ok {
+			t.Errorf("%s: validate() = %v, want ok=%v", tc.name, err, tc.ok)
+		}
+	}
+}
+
+func TestApplySignedAdjustmentsFollowsDirectionValue(t *testing.T) {
+	dt := &doctype.DocType{Name: "Till Session", Fields: []doctype.Field{{Fieldname: "expected_cash", Fieldtype: "Currency"}}}
+	signed := map[string]FieldAdjust{"expected_cash": {By: "$input.amount", SignFrom: "$input.direction", IncreaseWhen: "In", DecreaseWhen: "Out", Min: "0"}}
+	cases := []struct {
+		name, direction string
+		start           float64
+		want            string
+		wantErr         string
+	}{
+		{"in adds", "In", 100, "112.5", ""},
+		{"out subtracts", "Out", 100, "87.5", ""},
+		{"out to exact floor", "Out", 12.5, "0", ""},
+		{"out below floor refused", "Out", 10, "", "CONFLICT"},
+		{"unknown direction refused", "Sideways", 100, "", "VALIDATION_FAILED"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			old := doctype.NewDocument("Till Session")
+			old.Set("expected_cash", tc.start)
+			doc := doctype.NewDocument("Till Session")
+			env := refEnv{input: map[string]any{"amount": "12.5", "direction": tc.direction}}
+			err := applyAdjustments(dt, old, doc, signed, stepEnv{env: env})
+			if tc.wantErr != "" {
+				if err == nil || string(err.Type) != tc.wantErr {
+					t.Fatalf("err = %v, want %s", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := doc.Get("expected_cash"); got != tc.want {
+				t.Fatalf("expected_cash = %v, want %s", got, tc.want)
+			}
+		})
+	}
+}
