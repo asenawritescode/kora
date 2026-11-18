@@ -34,6 +34,10 @@ func TestSiteSettingsExposeCurrencyPrecision(t *testing.T) {
 			} else {
 				query.WillReturnRows(sqlmock.NewRows([]string{"setting_value"}).AddRow(*tt.stored))
 			}
+			for _, key := range []string{"time_zone", "business_day_cutoff"} {
+				mock.ExpectQuery("SELECT setting_value FROM _kora_site_setting").WithArgs("s1", key).
+					WillReturnRows(sqlmock.NewRows([]string{"setting_value"}))
+			}
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
 			c.Request = httptest.NewRequest(http.MethodGet, "/api/system/settings", nil)
@@ -50,6 +54,12 @@ func TestSiteSettingsExposeCurrencyPrecision(t *testing.T) {
 			}
 			if body.Data["currency"] != tt.currency || body.Data["currency_precision"] != tt.precision {
 				t.Fatalf("settings = %#v", body.Data)
+			}
+			if body.Data["time_zone"] != "Africa/Nairobi" || body.Data["business_day_cutoff"] != "00:00" {
+				t.Fatalf("clock defaults = %#v", body.Data)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
