@@ -83,3 +83,24 @@ func captureInsertHooks(ctx context.Context, txMgr *orm.TxManager, dbTx *sql.Tx,
 	}
 	return captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, nil})
 }
+
+// bindStepOperation returns the operation a command step runs as, and binds
+// the transaction to its business scope for cross-entity commands.
+func bindStepOperation(txMgr *orm.TxManager, op Operation, cmd *CommandResource, step CommandStep) (Operation, *contract.Error) {
+	stepOp, scopeErr := operationForCommandStep(op, cmd, step)
+	if scopeErr != nil {
+		return Operation{}, scopeErr
+	}
+	if cmd.CrossEntity != nil {
+		txMgr.BusinessScope = stepOp.Context.BusinessScope
+	}
+	return stepOp, nil
+}
+
+// bindStepName records the record name a step produced under its As alias.
+// A step without an alias binds nothing.
+func bindStepName(stepNames map[string]string, as, name string) {
+	if as != "" {
+		stepNames[as] = name
+	}
+}

@@ -517,12 +517,9 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 	for _, instance := range instances {
 		i, step := instance.index, instance.step
 		env := refEnv{input: input, item: instance.item, steps: stepNames, fieldReader: fieldReader, computed: computed, now: pinnedNow, actor: user}
-		stepOp, scopeErr := operationForCommandStep(op, cmd, step)
+		stepOp, scopeErr := bindStepOperation(txMgr, op, cmd, step)
 		if scopeErr != nil {
 			return nil, scopeErr
-		}
-		if cmd.CrossEntity != nil {
-			txMgr.BusinessScope = stepOp.Context.BusinessScope
 		}
 		lastBusinessScope = stepOp.Context.BusinessScope
 		if step.Ensure != nil {
@@ -533,9 +530,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			if existing != "" {
 				// Finding a record is not a write: no outcome, and the idempotency
 				// receipt is still claimed by the first step that writes.
-				if step.As != "" {
-					stepNames[step.As] = existing
-				}
+				bindStepName(stepNames, step.As, existing)
 				continue
 			}
 		}
@@ -577,9 +572,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			txMgr.PostCommitHooks = append(txMgr.PostCommitHooks, func() { completeTx.CompleteInsert(dt, doc) })
 			outcomes = append(outcomes, stepOutcome{Record: dt.Name, Name: doc.Name, Created: true})
 			lastRecord, lastName = dt.Name, doc.Name
-			if step.As != "" {
-				stepNames[step.As] = doc.Name
-			}
+			bindStepName(stepNames, step.As, doc.Name)
 
 		case step.Update != nil:
 			dt := reg.Get(step.Update.Record)
@@ -647,9 +640,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			txMgr.PostCommitHooks = append(txMgr.PostCommitHooks, func() { completeTx.CompleteSave(dt, doc, oldDoc) })
 			outcomes = append(outcomes, stepOutcome{Record: dt.Name, Name: targetName, Created: false})
 			lastRecord, lastName = dt.Name, targetName
-			if step.As != "" {
-				stepNames[step.As] = targetName
-			}
+			bindStepName(stepNames, step.As, targetName)
 		}
 	}
 

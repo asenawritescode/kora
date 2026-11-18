@@ -175,6 +175,23 @@ func (c *CommandResource) validateEnsure(i int, e *StepEnsure) error {
 	return nil
 }
 
+// validateHeader checks the name, namespace, preconditions and steps presence.
+func (c *CommandResource) validateHeader() error {
+	if c.Name == "" {
+		return fmt.Errorf("command definition: missing name")
+	}
+	if len(c.Preconditions) != 0 {
+		return fmt.Errorf("command %q: free-form preconditions are not supported; use require", c.FullName())
+	}
+	if strings.Count(c.Name, ".") == 0 && c.Namespace == "" {
+		return fmt.Errorf("command %q: namespaced name or namespace required", c.Name)
+	}
+	if len(c.Steps) == 0 {
+		return fmt.Errorf("command %q: empty transaction", c.Name)
+	}
+	return nil
+}
+
 // validateInputExtras checks that each extra input declares a scalar type.
 func (c *CommandResource) validateInputExtras() error {
 	for name, extra := range c.Input.Extra {
@@ -236,17 +253,8 @@ func ParseCommandResource(raw []byte) (*CommandResource, error) {
 // validateWith checks the definition. With needSchemas false (config YAML) the
 // versioned schema refs may be absent: the pack generator fills them.
 func (c *CommandResource) validateWith(needSchemas bool) error {
-	if c.Name == "" {
-		return fmt.Errorf("command definition: missing name")
-	}
-	if len(c.Preconditions) != 0 {
-		return fmt.Errorf("command %q: free-form preconditions are not supported; use require", c.FullName())
-	}
-	if strings.Count(c.Name, ".") == 0 && c.Namespace == "" {
-		return fmt.Errorf("command %q: namespaced name or namespace required", c.Name)
-	}
-	if len(c.Steps) == 0 {
-		return fmt.Errorf("command %q: empty transaction", c.Name)
+	if err := c.validateHeader(); err != nil {
+		return err
 	}
 	for i, s := range c.Steps {
 		if s.kindCount() > 1 {
