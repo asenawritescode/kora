@@ -12,6 +12,8 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/tenanttime"
 )
 
 const jobTable = "_kora_fact_rebuild_job"
@@ -62,10 +64,26 @@ func sourcesOf(to JobStatus) []JobStatus {
 // ErrLeaseLost means the caller no longer holds the job (lease expired and taken over, or cancelled).
 var ErrLeaseLost = errors.New("facts: rebuild lease lost")
 
+// Window bounds a rebuild to business days From through To, inclusive. The zero Window rebuilds the model.
+type Window struct {
+	From, To tenanttime.Date
+}
+
+func (w Window) isZero() bool { return w.From == (tenanttime.Date{}) }
+
+// scopeValue is the stored form of one window bound: NULL for the zero Window.
+func scopeValue(w Window, d tenanttime.Date) any {
+	if w.isZero() {
+		return nil
+	}
+	return d.String()
+}
+
 // Job is one rebuild job; owner and token are the lease a Claim took.
 type Job struct {
 	ID            string
 	Model         string
+	Window        Window
 	Status        JobStatus
 	StartSequence int64 // newest outbox sequence the rebuild covers; fixed at enqueue
 	Checkpoint    string
@@ -85,7 +103,7 @@ type JobStore struct {
 }
 
 // Enqueue stores a queued job for model and captures the outbox sequence under its lock.
-func (s *JobStore) Enqueue(ctx context.Context, model string) (*Job, error) {
+func (s *JobStore) Enqueue(ctx context.Context, model string, window Window) (*Job, error) {
 	if err := s.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -98,11 +116,12 @@ func (s *JobStore) Enqueue(ctx context.Context, model string) (*Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	job := &Job{ID: contract.NewEventID(), Model: model, Status: JobQueued, StartSequence: start}
+	job := &Job{ID: contract.NewEventID(), Model: model, Status: JobQueued, StartSequence: start, Window: window}
 	now := time.Now().UTC()
-	insert := fmt.Sprintf(`INSERT INTO %s (id, model, status, start_sequence, checkpoint, processed, error, lease_owner, fencing_token, lease_until, created_at, updated_at)
-		VALUES (?, ?, ?, ?, '', 0, '', '', 0, %s, ?, ?)`, s.table(), s.Dialect.NowTimestamp())
-	if _, err = tx.ExecContext(ctx, db.Rebind(s.Dialect, insert), job.ID, model, string(job.Status), start, now, now); err != nil {
+	insert := fmt.Sprintf(`INSERT INTO %s (id, model, status, start_sequence, checkpoint, processed, error, lease_owner, fencing_token, lease_until, created_at, updated_at, scope_from, scope_to)
+		VALUES (?, ?, ?, ?, '', 0, '', '', 0, %s, ?, ?, ?, ?)`, s.table(), s.Dialect.NowTimestamp())
+	args := []any{job.ID, model, string(job.Status), start, now, now, scopeValue(window, window.From), scopeValue(window, window.To)}
+	if _, err = tx.ExecContext(ctx, db.Rebind(s.Dialect, insert), args...); err != nil {
 		return nil, fmt.Errorf("facts: insert rebuild job: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
@@ -171,6 +190,24 @@ func (s *JobStore) Finish(ctx context.Context, job *Job, to JobStatus, failure s
 		return fmt.Errorf("facts: rebuild job cannot move from %s to %s", JobRunning, to)
 	}
 	return s.move(ctx, job, to, "error = ?, updated_at = ?", failure, time.Now().UTC())
+}
+
+// covers reports whether a queued or running job of model already rebuilds day: a whole-model job or one
+// whose window contains day.
+func (s *JobStore) covers(ctx context.Context, model string, day tenanttime.Date) (bool, error) {
+	if err := s.ensure(ctx); err != nil {
+		return false, err
+	}
+	marks, statuses := inList([]JobStatus{JobQueued, JobRunning})
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE model = ? AND status IN (%s) AND (scope_from IS NULL OR (scope_from <= ? AND scope_to >= ?))",
+		s.table(), marks)
+	args := append([]any{model}, statuses...)
+	args = append(args, day.String(), day.String())
+	var n int
+	if err := s.DB.QueryRowContext(ctx, db.Rebind(s.Dialect, query), args...).Scan(&n); err != nil {
+		return false, fmt.Errorf("facts: read covering rebuild jobs: %w", err)
+	}
+	return n > 0, nil
 }
 
 // Cancel moves a queued or running job to cancelled; a running worker stops on its next write.
@@ -242,6 +279,15 @@ func (s *JobStore) ensure(ctx context.Context) error {
 	if _, err := s.DB.ExecContext(ctx, jobDDL(s.Dialect)); err != nil {
 		return fmt.Errorf("facts: create rebuild job table: %w", err)
 	}
+	for _, col := range []string{"scope_from", "scope_to"} {
+		probe := fmt.Sprintf("SELECT %s FROM %s WHERE 1 = 0", s.Dialect.QuoteIdent(col), s.table()) //nolint:gosec // identifiers only, quoted by the dialect
+		if _, err := s.DB.ExecContext(ctx, probe); err == nil {
+			continue
+		}
+		if _, err := s.DB.ExecContext(ctx, s.Dialect.AddColumn(jobTable, &doctype.Field{Fieldname: col, Fieldtype: "Data"})); err != nil {
+			return fmt.Errorf("facts: add rebuild job column %s: %w", col, err)
+		}
+	}
 	s.ready = true
 	return nil
 }
@@ -255,6 +301,8 @@ func jobDDL(dialect db.Dialect) string {
 		columnDef(dialect, "lease_owner", "Data"), columnDef(dialect, "fencing_token", "Int"),
 		columnDef(dialect, "lease_until", "Datetime"), columnDef(dialect, "created_at", "Datetime"),
 		columnDef(dialect, "updated_at", "Datetime"),
+		dialect.QuoteIdent("scope_from") + " " + dialect.ColumnType(&doctype.Field{Fieldtype: "Data"}) + " NULL",
+		dialect.QuoteIdent("scope_to") + " " + dialect.ColumnType(&doctype.Field{Fieldtype: "Data"}) + " NULL",
 		fmt.Sprintf("PRIMARY KEY (%s)", dialect.QuoteIdent("id")),
 	}
 	ddl := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n  %s\n)", dialect.QuoteIdent(jobTable), strings.Join(cols, ",\n  "))
@@ -264,17 +312,34 @@ func jobDDL(dialect db.Dialect) string {
 	return ddl
 }
 
-const jobColumns = "id, model, status, start_sequence, checkpoint, processed, error, fencing_token"
+const jobColumns = "id, model, status, start_sequence, checkpoint, processed, error, fencing_token, scope_from, scope_to"
 
 // scanJob reads one row selected with jobColumns.
 func scanJob(row *sql.Row) (*Job, error) {
 	var job Job
 	var status string
-	if err := row.Scan(&job.ID, &job.Model, &status, &job.StartSequence, &job.Checkpoint, &job.Processed, &job.Error, &job.token); err != nil {
+	var from, to sql.NullString
+	if err := row.Scan(&job.ID, &job.Model, &status, &job.StartSequence, &job.Checkpoint, &job.Processed, &job.Error, &job.token, &from, &to); err != nil {
 		return nil, err
 	}
 	job.Status = JobStatus(status)
-	return &job, nil
+	var err error
+	if from.Valid && from.String != "" {
+		if job.Window.From, err = parseWindowDate(from.String); err != nil {
+			return nil, err
+		}
+		job.Window.To, err = parseWindowDate(to.String)
+	}
+	return &job, err
+}
+
+// parseWindowDate reads a stored YYYY-MM-DD bound.
+func parseWindowDate(s string) (tenanttime.Date, error) {
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return tenanttime.Date{}, fmt.Errorf("facts: parse window date %q: %w", s, err)
+	}
+	return tenanttime.Date{Year: t.Year(), Month: t.Month(), Day: t.Day()}, nil
 }
 
 func readSequence(ctx context.Context, tx *sql.Tx) (int64, error) {

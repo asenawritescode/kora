@@ -42,7 +42,7 @@ func TestJobStoreLifecycle(t *testing.T) {
 			store := &JobStore{DB: database.DB, Dialect: dialect}
 
 			// Enqueue captures the outbox sequence at the start.
-			first, err := store.Enqueue(ctx, "Sale")
+			first, err := store.Enqueue(ctx, "Sale", Window{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,7 +84,7 @@ func TestJobStoreLifecycle(t *testing.T) {
 			assertJob(t, store, first.ID, JobDone, "")
 
 			// Failure keeps its message; cancel moves a running job and fences its worker.
-			failed, err := store.Enqueue(ctx, "Sale")
+			failed, err := store.Enqueue(ctx, "Sale", Window{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,7 +97,7 @@ func TestJobStoreLifecycle(t *testing.T) {
 			}
 			assertJob(t, store, failed.ID, JobFailed, "boom")
 
-			queued, err := store.Enqueue(ctx, "Sale")
+			queued, err := store.Enqueue(ctx, "Sale", Window{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -108,7 +108,7 @@ func TestJobStoreLifecycle(t *testing.T) {
 			if err = store.Cancel(ctx, queued.ID); err == nil {
 				t.Fatal("second cancel was accepted")
 			}
-			cancelled, err := store.Enqueue(ctx, "Sale")
+			cancelled, err := store.Enqueue(ctx, "Sale", Window{})
 			if err != nil {
 				t.Fatal(err)
 			}
