@@ -105,8 +105,8 @@ func TestSummariesFollowFactChanges(t *testing.T) {
 			consume(1, eventstream.EventInsert, v1, nil)
 			refresh(t, refresher, 1)
 			expect(t, "2026-11-18", map[string]string{
-				"//le1": "1|100.5|100.5", "register/R1/le1": "1|100.5|100.5", "item//le1": "1|100.5|0",
-				"item/I1/le1": "0|0|40.25", "item/I2/le1": "0|0|60.25",
+				"//": "1|100.5|100.5", "register/R1/": "1|100.5|100.5", "item//": "1|100.5|0",
+				"item/I1/": "0|0|40.25", "item/I2/": "0|0|60.25",
 			})
 
 			v2 := sale("2026-11-18", line("L1", "I1", "40.25"), line("L2", "I2", "60.25"))
@@ -114,8 +114,8 @@ func TestSummariesFollowFactChanges(t *testing.T) {
 			consume(2, eventstream.EventUpdate, v2, v1)
 			refresh(t, refresher, 1)
 			expect(t, "2026-11-18", map[string]string{
-				"//le1": "1|120|100.5", "register/R1/le1": "1|120|100.5", "item//le1": "1|120|0",
-				"item/I1/le1": "0|0|40.25", "item/I2/le1": "0|0|60.25",
+				"//": "1|120|100.5", "register/R1/": "1|120|100.5", "item//": "1|120|0",
+				"item/I1/": "0|0|40.25", "item/I2/": "0|0|60.25",
 			})
 
 			v3 := sale("2026-11-17", line("L1", "I1", "40.25"), line("L2", "I2", "60.25"))
@@ -124,8 +124,8 @@ func TestSummariesFollowFactChanges(t *testing.T) {
 			refresh(t, refresher, 2)
 			expect(t, "2026-11-18", map[string]string{})
 			expect(t, "2026-11-17", map[string]string{
-				"//le1": "1|120|100.5", "register/R1/le1": "1|120|100.5", "item//le1": "1|120|0",
-				"item/I1/le1": "0|0|40.25", "item/I2/le1": "0|0|60.25",
+				"//": "1|120|100.5", "register/R1/": "1|120|100.5", "item//": "1|120|0",
+				"item/I1/": "0|0|40.25", "item/I2/": "0|0|60.25",
 			})
 
 			consume(4, eventstream.EventDelete, nil, v3)
@@ -148,7 +148,7 @@ func TestSummariesFollowFactChanges(t *testing.T) {
 			}
 			refresh(t, refresher, 1)
 			expect(t, "2026-11-18", map[string]string{
-				"//le1": "1|50|0", "register/R1/le1": "1|50|0", "item//le1": "1|50|0",
+				"//": "1|50|0", "register/R1/": "1|50|0", "item//": "1|50|0",
 			})
 		})
 	}
@@ -191,7 +191,7 @@ func assertMatchesFacts(t *testing.T, conn *sql.DB, dialect db.Dialect, day stri
 	if err := conn.QueryRow(db.Rebind(dialect, query), day, db.BoolParam(dialect, false)).Scan(&n, &total); err != nil {
 		t.Fatalf("aggregate facts: %v", err)
 	}
-	have := summary["//le1"]
+	have := summary["//"]
 	if have == "" {
 		have = "0|0|0"
 	}
