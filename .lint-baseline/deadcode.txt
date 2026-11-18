@@ -157,9 +157,9 @@ internal/doctype/diff_sexpr.go::subEntities
 internal/doctype/expr.go::ExprEngine.Evaluate
 internal/doctype/page_runtime_contracts.go::PageActionContracts
 internal/doctype/page_runtime_contracts.go::PageComponentContracts
-internal/doctype/parser.go::CrossFileError.Error
 internal/doctype/parser.go::ValidateAll
 internal/doctype/parser.go::selectHasOption
+internal/doctype/parser.go::validateFacts
 internal/doctype/parser.go::validateQuantityEffects
 internal/doctype/rollback.go::GenerateRollbackPlan
 internal/doctype/sexpr.go::CanonicalizeSExpr

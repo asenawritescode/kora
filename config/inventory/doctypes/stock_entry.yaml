@@ -38,3 +38,12 @@ fields:
   - fieldname: reason
     fieldtype: Text
     label: Reason
+
+facts:
+  time: creation
+  measures:
+    - field: quantity
+  dimensions:
+    - field: item
+    - field: location
+    - field: entry_type

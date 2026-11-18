@@ -297,7 +297,7 @@ func writeSExprDocType(b *strings.Builder, dt *DocType, indent string) {
 		key string
 		val any
 		set bool
-	}{{"reference-rule-json", dt.ReferenceRule, dt.ReferenceRule != nil}, {"public-access-json", dt.PublicAccess, dt.PublicAccess != nil}, {"quantity-effect-json", dt.QuantityEffect, dt.QuantityEffect != nil}} {
+	}{{"reference-rule-json", dt.ReferenceRule, dt.ReferenceRule != nil}, {"public-access-json", dt.PublicAccess, dt.PublicAccess != nil}, {"quantity-effect-json", dt.QuantityEffect, dt.QuantityEffect != nil}, {"facts-json", dt.Facts, dt.Facts != nil}} {
 		if !kv.set {
 			continue
 		}
@@ -1355,6 +1355,12 @@ func applyDocTypeKeywords(dt *DocType, kw map[string]string) {
 		var v QuantityEffect
 		if json.Unmarshal([]byte(raw), &v) == nil {
 			dt.QuantityEffect = &v
+		}
+	}
+	if raw := kw["facts-json"]; raw != "" {
+		var v FactModel
+		if json.Unmarshal([]byte(raw), &v) == nil {
+			dt.Facts = &v
 		}
 	}
 }
