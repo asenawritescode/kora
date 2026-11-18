@@ -104,6 +104,11 @@ func (g *gzipResponseWriter) Write(data []byte) (int, error) {
 	return g.ResponseWriter.Write(data)
 }
 
+// Unwrap exposes the underlying writer to http.ResponseController.
+func (g *gzipResponseWriter) Unwrap() http.ResponseWriter {
+	return g.ResponseWriter
+}
+
 func (g *gzipResponseWriter) WriteString(s string) (int, error) {
 	return g.Write([]byte(s))
 }

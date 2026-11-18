@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"math/big"
 	"strings"
 	"testing"
 
@@ -70,7 +71,9 @@ func TestFieldAdjustValidateAcceptsOnlyWellFormedForms(t *testing.T) {
 		{"signed", FieldAdjust{By: "$input.n", SignFrom: "$input.d", IncreaseWhen: "In", DecreaseWhen: "Out"}, true},
 		{"signed with floor", FieldAdjust{By: "$input.n", SignFrom: "$input.d", IncreaseWhen: "In", DecreaseWhen: "Out", Min: "0"}, true},
 		{"signed missing sign_from", FieldAdjust{By: "$input.n", IncreaseWhen: "In", DecreaseWhen: "Out"}, false},
-		{"signed missing decrease_when", FieldAdjust{By: "$input.n", SignFrom: "$input.d", IncreaseWhen: "In"}, false},
+		{"signed one-sided increase", FieldAdjust{By: "$input.n", SignFrom: "$input.d", IncreaseWhen: "Out"}, true},
+		{"signed one-sided decrease", FieldAdjust{By: "$input.n", SignFrom: "$input.d", DecreaseWhen: "Out"}, true},
+		{"signed no direction", FieldAdjust{By: "$input.n", SignFrom: "$input.d"}, false},
 		{"signed missing by", FieldAdjust{SignFrom: "$input.d", IncreaseWhen: "In", DecreaseWhen: "Out"}, false},
 		{"signed with increase too", FieldAdjust{Increase: "$input.n", By: "$input.n", SignFrom: "$input.d", IncreaseWhen: "In", DecreaseWhen: "Out"}, false},
 		{"signed same direction values", FieldAdjust{By: "$input.n", SignFrom: "$input.d", IncreaseWhen: "In", DecreaseWhen: "In"}, false},
@@ -116,6 +119,62 @@ func TestApplySignedAdjustmentsFollowsDirectionValue(t *testing.T) {
 			}
 			if got := doc.Get("expected_cash"); got != tc.want {
 				t.Fatalf("expected_cash = %v, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestApplyOneSidedSignedAdjustmentCountsOnlyItsDirection(t *testing.T) {
+	dt := &doctype.DocType{Name: "Till Session", Fields: []doctype.Field{{Fieldname: "payout_count", Fieldtype: "Int"}}}
+	counts := map[string]FieldAdjust{"payout_count": {By: "1", SignFrom: "$input.direction", IncreaseWhen: "Out"}}
+	cases := []struct {
+		name, direction string
+		start, want     int64
+	}{
+		{"out counts", "Out", 3, 4},
+		{"in leaves count", "In", 3, 3},
+		{"unknown leaves count", "Sideways", 3, 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			old := doctype.NewDocument("Till Session")
+			old.Set("payout_count", tc.start)
+			doc := doctype.NewDocument("Till Session")
+			env := refEnv{input: map[string]any{"direction": tc.direction}}
+			if err := applyAdjustments(dt, old, doc, counts, stepEnv{env: env}); err != nil {
+				t.Fatal(err)
+			}
+			got := doc.Get("payout_count")
+			if tc.start == tc.want && got != nil {
+				t.Fatalf("payout_count written = %v, want untouched", got)
+			}
+			if tc.start != tc.want && got != tc.want {
+				t.Fatalf("payout_count = %v, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMoveExactAndStoredNumberKeepDecimalsExact(t *testing.T) {
+	tests := []struct {
+		name      string
+		current   string
+		delta     string
+		increase  bool
+		fieldtype string
+		want      any
+	}{
+		{"add decimals", "0.1", "0.2", true, "Float", "0.3"},
+		{"subtract to whole", "1.5", "0.5", false, "Currency", "1"},
+		{"int stays integer", "7", "2", false, "Int", int64(5)},
+		{"float trims zeros", "2", "0.25", true, "Float", "2.25"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			current, _ := new(big.Rat).SetString(tc.current)
+			delta, _ := new(big.Rat).SetString(tc.delta)
+			if got := storedNumber(tc.fieldtype, moveExact(current, delta, tc.increase)); got != tc.want {
+				t.Fatalf("got %#v, want %#v", got, tc.want)
 			}
 		})
 	}

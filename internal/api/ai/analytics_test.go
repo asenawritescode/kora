@@ -112,15 +112,15 @@ func TestRelatedAnalyticsPermissionsCheckGeneratedModelWithoutReport(t *testing.
 func TestAnalyticsInsightPermissionRequiresUnscopedSourceRead(t *testing.T) {
 	registry := reportAnalyticsRegistry()
 	execution := analyticsTestExecution(t, "tenant-a", []string{"Cashier"}, nil)
-	if err := authorizeAnalyticsInsight(registry, execution, "Sale"); err == nil {
+	if err := authorizeAnalyticsInsight(registry, execution, tenantScopeFor("tenant-a"), "Sale"); err == nil {
 		t.Fatal("missing source permission authorized an analytics insight")
 	}
 	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Sale", Role: "Cashier", Read: true, IfOwner: true})
-	if err := authorizeAnalyticsInsight(registry, execution, "Sale"); err == nil {
+	if err := authorizeAnalyticsInsight(registry, execution, tenantScopeFor("tenant-a"), "Sale"); err == nil {
 		t.Fatal("owner-scoped source permission authorized an aggregate insight")
 	}
 	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Sale", Role: "Cashier", Read: true})
-	if err := authorizeAnalyticsInsight(registry, execution, "Sale"); err != nil {
+	if err := authorizeAnalyticsInsight(registry, execution, tenantScopeFor("tenant-a"), "Sale"); err != nil {
 		t.Fatalf("unscoped source read permission was denied: %v", err)
 	}
 }
@@ -220,5 +220,53 @@ func reportAnalyticsDefinition() analytics.ReportDefinition {
 			Measures: []analytics.SemanticMeasure{{Name: "sales_total", Label: "Sales total", Field: "line_total", Aggregation: "sum", Source: "child"}},
 		}},
 		Queries: []analytics.ReportQuery{{ID: "items", Model: "sales_items", Measures: []string{"sales_total"}, Dimensions: []string{"product"}}},
+	}
+}
+
+func tenantScopeFor(tenant string) contract.BusinessScope {
+	return contract.BusinessScope{TenantID: contract.TenantID(tenant), Kind: contract.ScopeKindTenant}
+}
+
+func entityScopeFor(tenant, entity string) contract.BusinessScope {
+	return contract.BusinessScope{TenantID: contract.TenantID(tenant), Kind: contract.ScopeKindLegalEntity, LegalEntityID: entity}
+}
+
+// An entity-owned source must be readable only through an exact grant for the
+// request's legal entity. A tenant-level role permission is not enough, and a
+// tenant request has no entity to match.
+func TestAIAnalyticsEntityOwnedSourceRequiresExactEntityGrant(t *testing.T) {
+	const tenant = "tenant-a"
+	entityA := entityScopeFor(tenant, "entity-a")
+	grantA := []policy.Grant{{Resource: "Ledger Entry", Operation: "read", Scope: entityA}}
+	model := analytics.SemanticModel{Name: "ledger_entries", SourceDoctype: "Ledger Entry"}
+	tests := []struct {
+		name      string
+		grants    []policy.Grant
+		scope     contract.BusinessScope
+		wantAllow bool
+	}{
+		{name: "exact entity grant allows its own entity", grants: grantA, scope: entityA, wantAllow: true},
+		{name: "grant for entity A does not allow entity B", grants: grantA, scope: entityScopeFor(tenant, "entity-b")},
+		{name: "tenant request is denied on entity-owned source", grants: grantA, scope: tenantScopeFor(tenant)},
+		{name: "tenant role permission alone does not allow an entity", scope: entityA},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			registry := doctype.NewRegistry()
+			registry.Register(&doctype.DocType{Name: "Ledger Entry", BusinessScopePolicy: contract.ScopeEntityOwned, BusinessScopeField: "legal_entity_id", Fields: []doctype.Field{{Fieldname: "amount", Fieldtype: "Currency"}}})
+			registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Ledger Entry", Role: "Cashier", Read: true})
+			execution := analyticsTestExecution(t, tenant, []string{"Cashier"}, test.grants)
+
+			if got := authorizeAnalyticsInsight(registry, execution, test.scope, "Ledger Entry") == nil; got != test.wantAllow {
+				t.Errorf("insight authorized = %v, want %v", got, test.wantAllow)
+			}
+			if got := analyticsModelReadable(registry, execution, model, test.scope); got != test.wantAllow {
+				t.Errorf("model readable = %v, want %v", got, test.wantAllow)
+			}
+			request := analytics.SemanticRequest{Queries: []analytics.ModelQuery{{Model: "ledger_entry"}}}
+			if _, err := authorizeRelatedAnalytics(registry, nil, request, execution, test.scope); (err == nil) != test.wantAllow {
+				t.Errorf("related analytics error = %v, want allowed %v", err, test.wantAllow)
+			}
+		})
 	}
 }

@@ -1158,3 +1158,8 @@ func selectHasOption(field *Field, value string) bool {
 	}
 	return false
 }
+
+// KeySuggestion is the "did you mean" detail for an unknown YAML key, or "" when nothing is close.
+func KeySuggestion(unknown string, known map[string]bool) string {
+	return suggestionFor(unknown, known)
+}

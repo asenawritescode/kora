@@ -61,7 +61,7 @@ func CSRFMiddleware() gin.HandlerFunc {
 
 		// Skip CSRF for API clients using Bearer tokens — the Authorization header
 		// cannot be set cross-origin, so CSRF is not a concern for these requests.
-		if c.GetHeader("Authorization") != "" {
+		if _, ok := bearerToken(c.GetHeader("Authorization")); ok {
 			c.Next()
 			return
 		}

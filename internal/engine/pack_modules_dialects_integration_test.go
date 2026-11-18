@@ -166,10 +166,10 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 			owner := get("Owner")
 			ownerOps, ownerQueries := refs(owner)
 			t.Logf("owner operations=%v queries=%v", ownerOps, ownerQueries)
-			if len(ownerOps) != 10 {
-				t.Errorf("owner operations = %d, want 10: %v", len(ownerOps), ownerOps)
+			if len(ownerOps) != 11 {
+				t.Errorf("owner operations = %d, want 11: %v", len(ownerOps), ownerOps)
 			}
-			for _, name := range []string{"receive_stock", "adjust_stock", "open_session", "close_session", "record_sale", "return_sale", "void_sale", "hold_sale", "delete_held_sale"} {
+			for _, name := range []string{"receive_stock", "adjust_stock", "open_session", "close_session", "record_sale", "return_sale", "void_sale", "hold_sale", "delete_held_sale", "record_cash_movement"} {
 				found := false
 				for _, ref := range ownerOps {
 					found = found || strings.HasSuffix(ref, "~"+name)
