@@ -221,14 +221,14 @@ func TestMySQL_CreateTableTemporalDefaults(t *testing.T) {
 	}
 
 	stmt := d.CreateTable(dt)[0]
-	if !contains(stmt, "`sale_date` DATE DEFAULT CURRENT_DATE") || contains(stmt, "`sale_date` DATE DEFAULT NULL") {
-		t.Fatalf("expected CURRENT_DATE default, got: %s", stmt)
+	if !contains(stmt, "`sale_date` DATE DEFAULT NULL") || contains(stmt, "CURRENT_DATE") {
+		t.Fatalf("Date today is ORM-filled: want no DB default, got: %s", stmt)
 	}
 	if !contains(stmt, "`sale_time` TIME(6) DEFAULT CURRENT_TIME(6)") || contains(stmt, "`sale_time` TIME(6) DEFAULT NULL") {
 		t.Fatalf("expected CURRENT_TIME(6) default, got: %s", stmt)
 	}
-	if !contains(stmt, "`created_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6)") || contains(stmt, "`created_at` DATETIME(6) DEFAULT NULL") {
-		t.Fatalf("expected CURRENT_TIMESTAMP(6) default, got: %s", stmt)
+	if !contains(stmt, "`created_at` DATETIME(6) DEFAULT NULL") {
+		t.Fatalf("Datetime now is ORM-filled: want no DB default, got: %s", stmt)
 	}
 	if strings.Contains(stmt, "DEFAULT 'Today'") || strings.Contains(stmt, "DEFAULT 'Now'") {
 		t.Fatalf("temporal defaults should not be quoted literals: %s", stmt)
@@ -238,8 +238,8 @@ func TestMySQL_CreateTableTemporalDefaults(t *testing.T) {
 func TestMySQL_AddColumnUsesOnlySupportedDefault(t *testing.T) {
 	d := &MySQLDialect{}
 	dateStmt := d.AddColumn("tabTest", &doctype.Field{Fieldname: "received_at", Fieldtype: "Datetime", Default: "Now"})
-	if !contains(dateStmt, "`received_at` DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6)") || contains(dateStmt, "`received_at` DATETIME(6) DEFAULT NULL") {
-		t.Fatalf("nullable column should have one temporal default, got: %s", dateStmt)
+	if !contains(dateStmt, "`received_at` DATETIME(6) DEFAULT NULL") || contains(dateStmt, "CURRENT_TIMESTAMP") {
+		t.Fatalf("Datetime now is ORM-filled: want DEFAULT NULL, got: %s", dateStmt)
 	}
 
 	textStmt := d.AddColumn("tabTest", &doctype.Field{Fieldname: "payload", Fieldtype: "Text", Default: "ignored by mysql"})
@@ -373,8 +373,8 @@ func TestMySQL_AddColumnEscapesAndFormatsDefaults(t *testing.T) {
 	d := &MySQLDialect{}
 
 	dateStmt := d.AddColumn("tabTest", &doctype.Field{Fieldname: "sale_date", Fieldtype: "Date", Default: "Today"})
-	if !contains(dateStmt, "DEFAULT CURRENT_DATE") {
-		t.Fatalf("expected CURRENT_DATE in add column, got: %s", dateStmt)
+	if !contains(dateStmt, "`sale_date` DATE DEFAULT NULL") || contains(dateStmt, "CURRENT_DATE") {
+		t.Fatalf("Date today is ORM-filled: want DEFAULT NULL, got: %s", dateStmt)
 	}
 
 	textStmt := d.AddColumn("tabTest", &doctype.Field{Fieldname: "title", Fieldtype: "Data", Default: "O'Reilly"})

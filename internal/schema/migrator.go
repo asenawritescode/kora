@@ -158,9 +158,7 @@ func ComputeDiff(doctypes []*doctype.DocType, getDocType func(string) *doctype.D
 					Type:     dialect.ColumnType(&field),
 					Nullable: !field.Reqd,
 				}
-				if field.Default != "" {
-					colAdd.Default = field.Default
-				}
+				colAdd.Default = storedDefault(field.Fieldtype, field.Default)
 				diff.NewColumns[tableName] = append(diff.NewColumns[tableName], colAdd)
 			}
 		}
@@ -470,10 +468,10 @@ func generateCreateTableForDoctypes(tableName string, doctypes []*doctype.DocTyp
 			} else {
 				nullable = " NOT NULL"
 			}
-			if f.Default != "" && f.Reqd {
-				nullable = fmt.Sprintf(" NOT NULL DEFAULT '%s'", escapeSQL(f.Default))
-			} else if f.Default != "" {
-				nullable = fmt.Sprintf(" DEFAULT '%s'", escapeSQL(f.Default))
+			if def := storedDefault(f.Fieldtype, f.Default); def != "" && f.Reqd {
+				nullable = fmt.Sprintf(" NOT NULL DEFAULT '%s'", escapeSQL(def))
+			} else if def != "" {
+				nullable = fmt.Sprintf(" DEFAULT '%s'", escapeSQL(def))
 			}
 			cols = append(cols, fmt.Sprintf("%s %s%s", f.Fieldname, dbType, nullable))
 		}
@@ -503,6 +501,17 @@ func generateAddColumn(tableName string, col ColumnAdd, dialect db.Dialect) stri
 		}
 	}
 	return fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s%s", dialect.QuoteIdent(tableName), col.Name, col.Type, nullable)
+}
+
+// storedDefault is the default the database enforces for a field. An
+// ORM-filled default (Date "today", Datetime "now") is applied on insert, so
+// the column gets none: an existing row keeps no value, and a required field
+// with one is a Warning, like a required field with no default.
+func storedDefault(fieldtype string, def string) string {
+	if db.ORMFilledDefault(fieldtype, def) {
+		return ""
+	}
+	return def
 }
 
 func escapeSQL(s string) string {
@@ -619,30 +628,7 @@ func AnalyzeImpact(database *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype
 	// Detect added fields.
 	for name, f := range newFields {
 		if _, exists := oldFields[name]; !exists {
-			change := TieredChange{
-				DocType: oldDT.Name,
-				Field:   name,
-				Change:  fmt.Sprintf("Add field %s (%s)", name, f.Fieldtype),
-				Rows:    rowCount,
-			}
-			if f.Reqd && f.Default == "" {
-				change.Tier = "warning"
-				change.Message = fmt.Sprintf("Required field with no default — %d existing rows will get empty values", rowCount)
-			} else {
-				change.Tier = "safe"
-				if f.Default != "" {
-					change.Message = fmt.Sprintf("%d existing rows backfilled with default '%s'", rowCount, f.Default)
-				} else {
-					change.Message = fmt.Sprintf("%d existing rows get NULL", rowCount)
-				}
-			}
-			ddl := generateAddColumn(tableName, ColumnAdd{
-				Name:     f.Fieldname,
-				Type:     dialect.ColumnType(f),
-				Nullable: !f.Reqd,
-				Default:  f.Default,
-			}, dialect)
-			change.DDL = ddl
+			change, ddl := addedFieldChange(oldDT, name, f, rowCount, dialect)
 			preview.DDL = append(preview.DDL, ddl)
 			preview.Changes = append(preview.Changes, change)
 		}
@@ -688,7 +674,7 @@ func AnalyzeImpact(database *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype
 				Change:  "Field is now required",
 				Rows:    rowCount,
 			}
-			if newF.Default != "" {
+			if storedDefault(newF.Fieldtype, newF.Default) != "" {
 				change.Tier = "safe"
 				change.Message = fmt.Sprintf("%d rows backfilled with default", rowCount)
 			} else {
@@ -710,6 +696,38 @@ func AnalyzeImpact(database *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype
 	}
 
 	return preview
+}
+
+// addedFieldChange classifies a field added to an existing doctype and builds
+// its ADD COLUMN statement. A required field with no stored default is a
+// Warning, because existing rows get no value; any other added field is safe.
+func addedFieldChange(oldDT *doctype.DocType, name string, f *doctype.Field, rowCount int, dialect db.Dialect) (TieredChange, string) {
+	change := TieredChange{
+		DocType: oldDT.Name,
+		Field:   name,
+		Change:  fmt.Sprintf("Add field %s (%s)", name, f.Fieldtype),
+		Rows:    rowCount,
+	}
+	def := storedDefault(f.Fieldtype, f.Default)
+	if f.Reqd && def == "" {
+		change.Tier = "warning"
+		change.Message = fmt.Sprintf("Required field with no default — %d existing rows will get empty values", rowCount)
+	} else {
+		change.Tier = "safe"
+		if def != "" {
+			change.Message = fmt.Sprintf("%d existing rows backfilled with default '%s'", rowCount, def)
+		} else {
+			change.Message = fmt.Sprintf("%d existing rows get NULL", rowCount)
+		}
+	}
+	ddl := generateAddColumn(oldDT.RawTableName(), ColumnAdd{
+		Name:     f.Fieldname,
+		Type:     dialect.ColumnType(f),
+		Nullable: !f.Reqd,
+		Default:  def,
+	}, dialect)
+	change.DDL = ddl
+	return change, ddl
 }
 
 // ---------------------------------------------------------------------------

@@ -5,8 +5,27 @@ import (
 	"strings"
 )
 
+// ORMFilledDefault reports whether a field default is applied by the ORM on
+// insert (Date "today"; Datetime "now" or "today") instead of by the database.
+// MySQL and Postgres get no DDL default for these: the tenant business clock
+// is the source of truth, and the server zone must not decide the day.
+func ORMFilledDefault(fieldtype string, value string) bool {
+	normalizedValue := strings.ToLower(strings.TrimSpace(value))
+	switch strings.TrimSpace(fieldtype) {
+	case "Date":
+		return normalizedValue == "today"
+	case "Datetime":
+		return normalizedValue == "now" || normalizedValue == "today"
+	}
+	return false
+}
+
 func sqlDefaultClause(dialect string, fieldtype string, value string) string {
 	if value == "" || fieldtype == "Check" {
+		return ""
+	}
+
+	if dialect != "libsql" && ORMFilledDefault(fieldtype, value) {
 		return ""
 	}
 
@@ -36,25 +55,12 @@ func temporalDefaultExpr(dialect string, fieldtype string, value string) (string
 
 	switch normalizedType {
 	case "Date":
-		if normalizedValue != "today" {
-			return "", false
-		}
-		switch dialect {
-		case "mysql", "postgres":
-			return "CURRENT_DATE", true
-		case "libsql":
+		// libsql only: MySQL and Postgres never reach here (ORMFilledDefault).
+		if normalizedValue == "today" && dialect == "libsql" {
 			return "(DATE('now'))", true
 		}
 	case "Datetime":
-		if normalizedValue != "now" && normalizedValue != "today" {
-			return "", false
-		}
-		switch dialect {
-		case "mysql":
-			return "CURRENT_TIMESTAMP(6)", true
-		case "postgres":
-			return "NOW()", true
-		case "libsql":
+		if dialect == "libsql" && (normalizedValue == "now" || normalizedValue == "today") {
 			return "(STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))", true
 		}
 	case "Time":
