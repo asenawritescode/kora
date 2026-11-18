@@ -117,8 +117,7 @@ func (g *SiteGuard) Middleware(skipCSRF bool) gin.HandlerFunc {
 		}
 		// Check Bearer token for channel-session or extension API auth.
 		authHeader := c.GetHeader("Authorization")
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			token := strings.TrimPrefix(authHeader, "Bearer ")
+		if token, ok := bearerToken(authHeader); ok {
 			if matchesEnvToken(token, envcompat.IntegrationTokenEnv) && ((c.Request.Method == http.MethodPost && (path == "/api/internal/channel/managed-client/rotate" || path == "/api/internal/channel/managed-client/revoke")) || (c.Request.Method == http.MethodGet && path == "/api/internal/site/identity")) {
 				c.Set("auth_type", "engine_provisioner")
 				c.Set("user", "kora-cloud-provisioner")
@@ -310,12 +309,8 @@ func RevalidateRealtimeIdentity(c *gin.Context) (bool, error) {
 	guard := &SiteGuard{}
 	authType := c.GetString("auth_type")
 	if authType == "extension" || authType == "channel_session" {
-		header := c.GetHeader("Authorization")
-		if !strings.HasPrefix(header, "Bearer ") {
-			return false, nil
-		}
-		token := strings.TrimPrefix(header, "Bearer ")
-		if token == "" {
+		token, ok := bearerToken(c.GetHeader("Authorization"))
+		if !ok {
 			return false, nil
 		}
 		if authType == "channel_session" {
