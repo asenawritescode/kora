@@ -347,6 +347,11 @@ func (d *LibSQLDialect) NowTimestamp() string {
 	return `STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')`
 }
 
+// NowMinusSeconds is the database clock minus the bound seconds in the session zone.
+func (d *LibSQLDialect) NowMinusSeconds() string {
+	return `datetime('now', '-' || ? || ' seconds')`
+}
+
 func (d *LibSQLDialect) ParseError(err error, dt *doctype.DocType) *doctype.ValidationError {
 	if err == nil {
 		return nil

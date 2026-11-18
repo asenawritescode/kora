@@ -114,7 +114,7 @@ var archiveColumns = []string{"id", "site", "source_sequence", "event_type", "ev
 // selectDue returns up to ChunkSize published rows older than the horizon that no
 // delivery failure references, oldest first, plus the first row's created_at.
 func (a *Archiver) selectDue(ctx context.Context, site string) ([]archiveRow, time.Time, error) {
-	query := `SELECT ` + strings.Join(archiveColumns, ",") + ` FROM _kora_outbox o WHERE o.site = ? AND o.status = ? AND o.created_at < ` + archiveCutoffSQL(a.Dialect) + ` AND NOT EXISTS (SELECT 1 FROM _kora_outbox_delivery_failure f WHERE f.site = o.site AND f.event_id = o.id) ORDER BY o.created_at, o.id LIMIT ?`
+	query := `SELECT ` + strings.Join(archiveColumns, ",") + ` FROM _kora_outbox o WHERE o.site = ? AND o.status = ? AND o.created_at < ` + a.Dialect.NowMinusSeconds() + ` AND NOT EXISTS (SELECT 1 FROM _kora_outbox_delivery_failure f WHERE f.site = o.site AND f.event_id = o.id) ORDER BY o.created_at, o.id LIMIT ?`
 	rows, err := a.DB.QueryContext(ctx, db.Rebind(a.Dialect, query), site, string(StatusPublished), archiveHorizonSeconds(a.Horizon), a.ChunkSize)
 	if err != nil {
 		return nil, time.Time{}, fmt.Errorf("outbox: select archive rows: %w", err)
@@ -143,18 +143,6 @@ func (a *Archiver) selectDue(ctx context.Context, site string) ([]archiveRow, ti
 	return out, created, rows.Err()
 }
 
-// archiveCutoffSQL is the instant that rows older than the horizon fall before,
-// read from the database clock. created_at takes its value from the same clock
-// through the column default, in the session time zone, so comparing against
-// it stays correct whatever zone the session runs in. The one placeholder is
-// the horizon in seconds (see archiveHorizonSeconds).
-func archiveCutoffSQL(dialect db.Dialect) string {
-	if dialect.DriverName() == "postgres" {
-		return "(NOW() - (? * INTERVAL '1 second'))"
-	}
-	return "DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL ? SECOND)"
-}
-
 func archiveHorizonSeconds(horizon time.Duration) int64 {
 	return int64(horizon / time.Second)
 }
@@ -163,7 +151,7 @@ func archiveHorizonSeconds(horizon time.Duration) int64 {
 // find work for horizon, and its bound arguments. It applies the same filters
 // as the archiver, so a probe never reports rows the archiver keeps.
 func ArchiveDueProbe(dialect db.Dialect, horizon time.Duration) (string, []any) {
-	query := `SELECT 1 FROM _kora_outbox o WHERE o.status = 'published' AND o.created_at < ` + archiveCutoffSQL(dialect) + ` AND NOT EXISTS (SELECT 1 FROM _kora_outbox_delivery_failure f WHERE f.site = o.site AND f.event_id = o.id) LIMIT 1`
+	query := `SELECT 1 FROM _kora_outbox o WHERE o.status = 'published' AND o.created_at < ` + dialect.NowMinusSeconds() + ` AND NOT EXISTS (SELECT 1 FROM _kora_outbox_delivery_failure f WHERE f.site = o.site AND f.event_id = o.id) LIMIT 1`
 	return db.Rebind(dialect, query), []any{archiveHorizonSeconds(horizon)}
 }
 

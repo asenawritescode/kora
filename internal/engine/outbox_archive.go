@@ -34,9 +34,8 @@ func archiveFirstDelay(random func(time.Duration) time.Duration) time.Duration {
 	return min(max(random(time.Hour), 0), time.Hour-time.Nanosecond)
 }
 
-// RunOutboxArchiver archives the tenant's due outbox rows after a random first
-// delay and then once a day. Each run holds one maintenance admission slot and
-// returns when ctx ends.
+// RunOutboxArchiver archives due outbox rows after a random first delay, then
+// daily, holding one maintenance admission slot per run. It returns on ctx end.
 func RunOutboxArchiver(ctx context.Context, siteName string, archiver *outbox.Archiver, admission archiveMaintenance, random func(time.Duration) time.Duration) {
 	timer := time.NewTimer(archiveFirstDelay(random))
 	defer timer.Stop()
