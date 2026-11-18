@@ -1,0 +1,46 @@
+name: record_cash_movement
+namespace: pos
+version: 1
+module_owner_id: pos.core
+capability: pos.drawer
+operation: record_cash_movement
+presentation:
+  title: Cash in or out
+permission: create
+input:
+  record: Cash Movement
+  extra:
+    till_session: {type: string, required: true}
+require:
+  - lock:
+      record: Till Session
+      name: $input.till_session
+  - exists:
+      record: Till Session
+      where:
+        name: $input.till_session
+        status: Open
+        cashier: $actor
+    message: Till is not open for you
+transaction:
+  - as: movement
+    create:
+      record: Cash Movement
+      values:
+        till_session: $input.till_session
+        direction: $input.direction
+        amount: $input.amount
+        reason: $input.reason
+        note: $input.note
+        cashier: $actor
+  - update:
+      record: Till Session
+      name: $input.till_session
+      adjust:
+        expected_cash: { by: $input.amount, sign_from: $input.direction, increase_when: In, decrease_when: Out, min: "0" }
+        payin_count: { by: "1", sign_from: $input.direction, increase_when: In }
+        payin_total: { by: $input.amount, sign_from: $input.direction, increase_when: In }
+        payout_count: { by: "1", sign_from: $input.direction, increase_when: Out }
+        payout_total: { by: $input.amount, sign_from: $input.direction, increase_when: Out }
+output:
+  reference: $steps.movement.name

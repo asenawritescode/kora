@@ -69,7 +69,7 @@ func TestSignedAdjustMovesBalanceByDirectionOnBothDialects(t *testing.T) {
 				t.Fatalf("read till: %v", err)
 			}
 
-			move := func(direction, amount string) contract.CommandResult {
+			move := func(direction string, amount float64) contract.CommandResult {
 				payload, _ := json.Marshal(map[string]any{"data": map[string]any{"till_session": till, "direction": direction, "amount": amount}})
 				return exec(t, s, k, kernel.Operation{Command: "till.move_cash", Payload: payload, Context: opCtx(s.Name, "Administrator")})
 			}
@@ -90,18 +90,18 @@ func TestSignedAdjustMovesBalanceByDirectionOnBothDialects(t *testing.T) {
 				}
 			}
 
-			mustComplete(t, move("In", "12.5"))
+			mustComplete(t, move("In", 12.5))
 			expect("112.5")
-			mustComplete(t, move("Out", "30"))
+			mustComplete(t, move("Out", 30))
 			expect("82.5")
 
-			refused := move("Out", "100")
+			refused := move("Out", 100)
 			if refused.Status == contract.StatusCompleted || refused.Error == nil || refused.Error.Type != contract.CodeConflict {
 				t.Fatalf("overdraw not refused as CONFLICT: %+v", refused)
 			}
 			expect("82.5")
 
-			unknown := move("Sideways", "1")
+			unknown := move("Sideways", 1)
 			if unknown.Status == contract.StatusCompleted || unknown.Error == nil || unknown.Error.Type != contract.CodeValidationFailed {
 				t.Fatalf("unknown direction not refused: %+v", unknown)
 			}
