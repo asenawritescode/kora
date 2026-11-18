@@ -661,22 +661,36 @@ func TestCORSMiddleware_AllowOrigin(t *testing.T) {
 	}
 }
 
-func TestCORSMiddleware_DevModeReflectsOrigin(t *testing.T) {
+func TestCORSMiddlewareAllowlistOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
-	r := gin.New()
-	r.Use(CORSMiddleware(nil)) // empty → dev mode
-	r.GET("/test", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("Origin", "http://localhost:5173")
-	r.ServeHTTP(w, req)
-
-	if v := w.Header().Get("Access-Control-Allow-Origin"); v != "http://localhost:5173" {
-		t.Errorf("Allow-Origin = %q, want %q", v, "http://localhost:5173")
+	tests := []struct {
+		name        string
+		allowed     []string
+		origin      string
+		wantOrigin  string
+		wantCredent string
+	}{
+		{name: "empty allowlist does not reflect origin", origin: "http://localhost:5173"},
+		{name: "empty allowlist sends no credentials header", origin: "https://trusted.example.com"},
+		{name: "allowlisted origin is reflected with credentials", allowed: []string{"https://trusted.example.com"}, origin: "https://trusted.example.com", wantOrigin: "https://trusted.example.com", wantCredent: "true"},
+		{name: "origin outside allowlist gets no CORS headers", allowed: []string{"https://trusted.example.com"}, origin: "https://evil.example.com"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			r := gin.New()
+			r.Use(CORSMiddleware(test.allowed))
+			r.GET("/test", func(c *gin.Context) { c.Status(http.StatusOK) })
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest("GET", "/test", nil)
+			req.Header.Set("Origin", test.origin)
+			r.ServeHTTP(w, req)
+			if got := w.Header().Get("Access-Control-Allow-Origin"); got != test.wantOrigin {
+				t.Errorf("Allow-Origin = %q, want %q", got, test.wantOrigin)
+			}
+			if got := w.Header().Get("Access-Control-Allow-Credentials"); got != test.wantCredent {
+				t.Errorf("Allow-Credentials = %q, want %q", got, test.wantCredent)
+			}
+		})
 	}
 }
 

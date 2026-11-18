@@ -58,11 +58,11 @@ func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 
 		limiter := rl.getLimiter(key)
 		if !limiter.Allow() {
+			c.Header("Retry-After", "1")
 			c.AbortWithStatusJSON(429, gin.H{
 				"error":   "rate_limit_exceeded",
 				"message": "Too many requests. Please try again later.",
 			})
-			c.Header("Retry-After", "1")
 			return
 		}
 		c.Next()

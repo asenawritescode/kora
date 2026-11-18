@@ -1,6 +1,8 @@
 package net
 
 import (
+	"log/slog"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/secure"
 	"github.com/gin-gonic/gin"
@@ -40,11 +42,14 @@ func SecurityHeadersMiddleware(tlsEnabled bool) gin.HandlerFunc {
 	return secure.New(cfg)
 }
 
-// CORSMiddleware configures cross-origin access.
-// When allowedOrigins is empty (dev mode), origins are reflected from the request.
-// This is safe with credentials because the origin is reflected, not wildcarded.
-// In production, always pass explicit allowed origins.
+// CORSMiddleware configures cross-origin access for the allowlisted origins.
+// When allowedOrigins is empty, no CORS headers are sent and the API is
+// same-origin only: Origin is not reflected and credentials are never allowed.
 func CORSMiddleware(allowedOrigins []string) gin.HandlerFunc {
+	if len(allowedOrigins) == 0 {
+		slog.Warn("no CORS origins configured; cross-origin browser access is disabled")
+		return func(c *gin.Context) { c.Next() }
+	}
 	cfg := cors.Config{
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Kora-CSRF-Token", "X-Request-Id", "Idempotency-Key"},
@@ -53,14 +58,7 @@ func CORSMiddleware(allowedOrigins []string) gin.HandlerFunc {
 		MaxAge:           12 * 3600, // 12 hours
 	}
 
-	if len(allowedOrigins) > 0 {
-		cfg.AllowOrigins = allowedOrigins
-	} else {
-		// Dev mode: reflect the request origin.
-		// This is safe with AllowCredentials because the wildcard * is never sent.
-		cfg.AllowOriginFunc = func(origin string) bool { return true }
-	}
-
+	cfg.AllowOrigins = allowedOrigins
 	return cors.New(cfg)
 }
 

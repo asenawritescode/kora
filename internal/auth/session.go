@@ -1174,16 +1174,33 @@ func publicAppBaseURL(value string) (*url.URL, error) {
 // validateSession validates the session cookie/header and sets user context.
 // Returns false and writes 401 if auth fails; true if auth succeeded or was skipped.
 // Does NOT call c.Next() — callers must do that themselves.
-func validateSession(c *gin.Context, sm *SessionManager) bool {
-	// Get session cookie.
-	sid, err := c.Cookie("kora_sid")
-	if err != nil {
-		// Try Authorization header.
-		authHeader := c.GetHeader("Authorization")
-		if stringsHasPrefix(authHeader, "Bearer ") {
-			sid = authHeader[7:]
-		}
+// bearerToken returns the credential of a Bearer Authorization header. The
+// scheme is matched case-insensitively (RFC 7235). ok is false for any other
+// header, including an empty token.
+func bearerToken(header string) (token string, ok bool) {
+	scheme, value, found := strings.Cut(header, " ")
+	token = strings.TrimSpace(value)
+	if !found || !strings.EqualFold(scheme, "Bearer") || token == "" {
+		return "", false
 	}
+	return token, true
+}
+
+// sessionIDFromRequest returns the session ID the request presents. An
+// Authorization header, when present, is the only credential: the session
+// cookie is never consulted for a request that sent one, and a non-Bearer
+// header yields no session ID.
+func sessionIDFromRequest(c *gin.Context) string {
+	if header := c.GetHeader("Authorization"); header != "" {
+		token, _ := bearerToken(header)
+		return token
+	}
+	sid, _ := c.Cookie("kora_sid")
+	return sid
+}
+
+func validateSession(c *gin.Context, sm *SessionManager) bool {
+	sid := sessionIDFromRequest(c)
 
 	if sid == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
@@ -1239,10 +1256,6 @@ func validateSession(c *gin.Context, sm *SessionManager) bool {
 	}
 	c.Set("policy_execution", execution)
 	return true
-}
-
-func stringsHasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
 // RegisterAuthRoutes registers authentication endpoints.

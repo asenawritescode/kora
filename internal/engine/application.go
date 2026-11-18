@@ -69,6 +69,7 @@ func BuildApplication(config ApplicationConfig) (*Application, error) {
 	router.Use(knet.RequestIDMiddleware())
 	router.Use(knet.SecurityHeadersMiddleware(config.Common.TLSMode != "" && config.Common.TLSMode != "off"))
 	router.Use(knet.CORSMiddleware(config.CORSAllowedOrigins))
+	router.Use(knet.RequestBodyLimitMiddleware())
 	router.Use(config.Tenants.Middleware())
 	// Bound the complete tenant request, including session authentication's DB
 	// lookup. API route groups retain an idempotent compatibility wrapper.

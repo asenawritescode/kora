@@ -651,15 +651,10 @@ func RegisterPathSiteRoutes(router *gin.Engine, sr *SiteRouter) {
 			c.Request.URL.Path = rest
 			// Buffer the request body for re-dispatch — HandleContext
 			// re-processes the middleware chain, so we need a fresh body reader.
-			if c.Request.Body != nil && c.Request.ContentLength > 0 {
-				bodyBytes, err := io.ReadAll(c.Request.Body)
-				if err == nil {
-					c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-					slog.Info("body buffered for re-dispatch", "path", rest, "size", len(bodyBytes))
-				} else {
-					slog.Warn("body buffer read failed", "path", rest, "error", err)
-				}
-			} else if c.Request.ContentLength > 0 && c.Request.Body == nil {
+			if bufferRedispatchBody(c, rest) {
+				return
+			}
+			if c.Request.ContentLength > 0 && c.Request.Body == nil {
 				slog.Warn("body not buffered", "path", rest, "bodyNil", c.Request.Body == nil, "contentLength", c.Request.ContentLength)
 			}
 			// Manually call HandleContext — but this time site context is already set
@@ -677,4 +672,26 @@ func stripPort(host string) string {
 		return h
 	}
 	return host
+}
+
+// bufferRedispatchBody reads the request body once, bounded by the route's
+// cap, so re-dispatch sees a fresh reader. It reports true when the response
+// has been written and the request must stop.
+func bufferRedispatchBody(c *gin.Context, rest string) (aborted bool) {
+	if c.Request.Body == nil || c.Request.ContentLength <= 0 {
+		return false
+	}
+	bodyBytes, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, requestBodyLimit(rest)))
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		abortBodyTooLarge(c)
+		return true
+	}
+	if err == nil {
+		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		slog.Info("body buffered for re-dispatch", "path", rest, "size", len(bodyBytes))
+	} else {
+		slog.Warn("body buffer read failed", "path", rest, "error", err)
+	}
+	return false
 }
