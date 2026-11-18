@@ -5,6 +5,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 
 	"github.com/asenawritescode/kora/internal/doctype"
 )
@@ -73,6 +74,8 @@ type QueryDialect interface {
 	ReserveSeriesRange(tx *sql.Tx, doctypeName, key string, size int64, seed func() (int64, error)) (first, last int64, err error)
 	// RecordNumberBlock inserts one reserved range into _kora_number_block.
 	RecordNumberBlock(tx *sql.Tx, row NumberBlockRow) error
+	// OpenNumberBlocks returns the open ranges of one doctype reserved for owner.
+	OpenNumberBlocks(tx *sql.Tx, doctypeName, owner string) ([]NumberBlockRow, error)
 	// NameGenQuery returns the highest PREFIX-NNNN number in tableName. The
 	// single placeholder takes the LIKE pattern "PREFIX-%".
 	NameGenQuery(tableName string) string
@@ -224,3 +227,20 @@ func Resolve(dbType string) Dialect {
 
 // MySQL returns the MySQL dialect (for callers that don't have DBType info).
 func MySQL() Dialect { return &MySQLDialect{} }
+
+// scanNumberBlocks reads rows selected as doctype, prefix, owner, state, first and last.
+func scanNumberBlocks(rows *sql.Rows, err error) ([]NumberBlockRow, error) {
+	if err != nil {
+		return nil, fmt.Errorf("reading number blocks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []NumberBlockRow
+	for rows.Next() {
+		var r NumberBlockRow
+		if err := rows.Scan(&r.Doctype, &r.Prefix, &r.Owner, &r.State, &r.First, &r.Last); err != nil {
+			return nil, fmt.Errorf("scanning number block: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

@@ -548,7 +548,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			if dt == nil {
 				return nil, contract.NewError(contract.CodeNotFound, fmt.Sprintf("command %q: record %q not found", def.Name, create.Record))
 			}
-			doc, valueErr := createDocumentValues(dt, create.Values, env, i)
+			doc, valueErr := k.createStepDocument(dbTx, txMgr, dt, create, stepEnv{env, i}) //nolint:contextcheck // the context travels in txMgr.Context
 			if valueErr != nil {
 				return nil, valueErr
 			}
