@@ -15,14 +15,14 @@ func TestRecordSaleCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(def.Require) != 4 || len(def.Steps) != 5 || def.Steps[0].As != "sale" || def.Steps[1].ForEach != "$input.payments" || def.Steps[2].Create.Record != "Sale Line Balance" || def.Steps[3].ForEach != "$input.items" || def.Steps[4].ForEach != "$input.items" {
+	if len(def.Require) != 7 || len(def.Steps) != 5 || def.Steps[0].As != "sale" || def.Steps[0].Upsert == nil || def.Steps[1].ForEach != "$input.payments" || def.Steps[2].Create.Record != "Sale Line Balance" || def.Steps[3].ForEach != "$input.items" || def.Steps[4].ForEach != "$input.items" {
 		t.Fatalf("steps = %#v", def.Steps)
 	}
 	if got := def.Steps[3].Update.Adjust["quantity"]; got.Decrease != "$item.quantity" || got.Min != "0" {
 		t.Fatalf("stock must decrease without going negative: %+v", got)
 	}
-	if def.Steps[0].Create.Values["location"] != "$input.location" {
-		t.Fatalf("sale must record its location: %v", def.Steps[0].Create.Values)
+	if def.Steps[0].Upsert.Values["location"] != "$input.location" || def.Steps[0].Upsert.Name != "$input.sale_number" {
+		t.Fatalf("sale must record its location and settle its number: %+v", def.Steps[0].Upsert)
 	}
 	if def.Output["reference"] != "$steps.sale.name" || def.Output["total"] != "$computed.total" {
 		t.Fatalf("receipt output = %v", def.Output)

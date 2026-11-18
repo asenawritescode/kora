@@ -12,7 +12,18 @@ presentation:
 permission: create
 input:
   record: Sale
+  extra:
+    # The number the till reserved for this sale. A held sale with this number
+    # is paid (Held to Paid); without one the sale takes the next series number.
+    sale_number: {type: string}
 require:
+  # A sale with this number that is already Paid, Void or Return cannot be recorded again.
+  - not_exists: {record: Sale, where: {name: $input.sale_number, status: Paid}, optional: true}
+    message: That sale is already paid
+  - not_exists: {record: Sale, where: {name: $input.sale_number, status: Void}, optional: true}
+    message: That sale is already voided
+  - not_exists: {record: Sale, where: {name: $input.sale_number, status: Return}, optional: true}
+    message: That sale is already returned
   - payment:
       for_each: $input.payments
       reference: $item.reference
@@ -38,8 +49,10 @@ compute:
   paid: {sum: $input.payments, expr: "amount"}
 transaction:
   - as: sale
-    create:
+    upsert:
       record: Sale
+      name: $input.sale_number
+      in_block: $input.till_session
       values:
         register: $input.register
         location: $input.location

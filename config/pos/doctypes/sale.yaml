@@ -61,6 +61,7 @@ fields:
       Paid
       Void
       Return
+      Held
     default: Draft
     in_list_view: true
   - fieldname: held_name

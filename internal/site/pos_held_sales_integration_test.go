@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -188,15 +189,22 @@ func runPOSHeldSales(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	if n := str("SELECT COUNT(*) FROM "+table("Sale")+" WHERE name = ?", number(0)); n != "1" {
 		t.Fatalf("replay wrote %s rows", n)
 	}
-	// A different intent cannot reuse a number that a sale already has.
-	if cerr := hold("key-other", 0); cerr == nil {
-		t.Fatal("a used sale number was held again")
+	// Holding the same number again with a new intent is an edit of that held sale.
+	if cerr := hold("key-edit", 0); cerr != nil {
+		t.Fatalf("re-hold of a held sale: %+v", cerr)
+	}
+	if n := str("SELECT COUNT(*) FROM "+table("Sale")+" WHERE name = ?", number(0)); n != "1" {
+		t.Fatalf("re-hold wrote %s rows", n)
 	}
 	// The limit: twenty held on this till, the twenty-first is refused.
 	for n := 1; n < 20; n++ {
 		if cerr := hold(fmt.Sprintf("key-%d", n), n); cerr != nil {
 			t.Fatalf("hold %d: %+v", n, cerr)
 		}
+	}
+	// Exactly twenty held: editing one of them is allowed, a twenty-first is not.
+	if cerr := hold("key-edit-20", 0); cerr != nil {
+		t.Fatalf("edit at exactly twenty: %+v", cerr)
 	}
 	if cerr := hold("key-20", 20); cerr == nil || cerr.Type != contract.CodeConflict {
 		t.Fatalf("twenty-first held sale = %+v, want a conflict", cerr)
@@ -221,12 +229,56 @@ func runPOSHeldSales(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	if cerr := hold("key-20", 20); cerr != nil {
 		t.Fatalf("hold after delete: %+v", cerr)
 	}
-	// Held sales sit outside the sales lists and cash.
-	if rows := cashRow("held_sales")["rows"].([]map[string]any); len(rows) != 20 {
-		t.Fatalf("held_sales after delete and hold lists %d, want 20", len(rows))
+	// Held to Paid: recording a held sale's number pays it with the items it is given now.
+	bread := id("Item", map[string]any{"item_name": "Bread", "uom": "Nos", "price": 50})
+	id("Stock Balance", map[string]any{"item": bread, "location": loc, "quantity": 10, "reorder_level": 1})
+	payCash := posPayments(t, conn, dialect, siteName)
+	pay := func(n int, key string) *contract.Error {
+		_, cerr := exec("pos.record_sale", key, map[string]any{"data": map[string]any{
+			"register": register, "till_session": till, "location": loc, "sale_number": number(n), "currency": "KES",
+			"items":    []map[string]any{{"item": bread, "quantity": 2, "unit_price": 50, "amount": 100}},
+			"payments": []map[string]any{payCash("cash", 100)},
+		}})
+		return cerr
 	}
-	if expected() != "500" || stock() != "50" {
-		t.Fatalf("held sales moved cash or stock: expected=%s stock=%s", expected(), stock())
+	if cerr := pay(1, "pay-1"); cerr != nil {
+		t.Fatalf("pay held sale: %+v", cerr)
+	}
+	if status(1) != "Paid" {
+		t.Fatalf("paid held sale status = %s", status(1))
+	}
+	// Facts: Held rows get no facts, and the paid sale is not excluded, so it gets its facts.
+	if fx := reg.Get("Sale").Facts; fx == nil || !slices.Contains(fx.ExcludeStatus, "Held") || slices.Contains(fx.ExcludeStatus, "Paid") {
+		t.Fatalf("Sale facts exclude %v, want Held excluded and Paid kept", reg.Get("Sale").Facts)
+	}
+	if n := str("SELECT COUNT(*) FROM "+dialect.QuoteIdent("tabSale__items")+" WHERE parent = ? AND item = ?", number(1), tea); n != "0" {
+		t.Fatalf("the held item survived the payment: %s rows", n)
+	}
+	if n := str("SELECT COUNT(*) FROM "+dialect.QuoteIdent("tabSale__items")+" WHERE parent = ? AND item = ?", number(1), bread); n != "1" {
+		t.Fatalf("paid sale has %s bread lines, want 1", n)
+	}
+	if got := money("SELECT quantity FROM "+table("Stock Balance")+" WHERE item = ? AND location = ?", bread, loc); got != "8" {
+		t.Fatalf("bread stock after the sale = %s, want 8", got)
+	}
+	if got := money("SELECT quantity FROM "+table("Stock Balance")+" WHERE item = ? AND location = ?", tea, loc); got != "50" {
+		t.Fatalf("paying moved tea stock to %s", got)
+	}
+	if expected() != "600" {
+		t.Fatalf("expected cash after the cash payment = %s, want 600", expected())
+	}
+	if cerr := pay(1, "pay-again"); cerr == nil {
+		t.Fatal("a paid sale was paid again")
+	}
+	if cerr := hold("key-after-pay", 1); cerr == nil {
+		t.Fatal("a paid sale was held again")
+	}
+
+	// Held sales sit outside the sales lists and cash.
+	if rows := cashRow("held_sales")["rows"].([]map[string]any); len(rows) != 19 {
+		t.Fatalf("held_sales after the payment lists %d, want 19", len(rows))
+	}
+	if stock() != "50" {
+		t.Fatalf("held sales moved tea stock: %s", stock())
 	}
 	// The one voided row is the deleted held sale; no held sale is listed.
 	for _, row := range cashRow("recent_sales")["rows"].([]map[string]any) {
@@ -234,7 +286,8 @@ func runPOSHeldSales(t *testing.T, driver string, conn *sql.DB, dbName string) {
 			t.Fatalf("recent_sales lists a held sale: %v", row)
 		}
 	}
-	if rows := cashRow("today_totals")["rows"].([]map[string]any); len(rows) != 0 {
-		t.Fatalf("today_totals counts held sales: %v", rows)
+	// Totals count the one paid sale (100), never the held ones.
+	if rows := cashRow("today_totals")["rows"].([]map[string]any); len(rows) != 1 || fmt.Sprint(rows[0]["sale_count"]) != "1" {
+		t.Fatalf("today_totals = %v, want the one paid sale", rows)
 	}
 }

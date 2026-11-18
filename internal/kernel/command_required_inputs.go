@@ -17,6 +17,15 @@ var inputKeyRef = regexp.MustCompile(`^\$input\.([A-Za-z_][A-Za-z0-9_]*)`)
 // steps are skipped when absent, so they are not listed (the target record's
 // own required fields govern those). Guards waived for some roles
 // (unless_role) are not listed, since those roles may omit what they guard.
+// requiredMatchRefs returns the references of an exists or not_exists match that
+// the command needs: none for a missing or optional match.
+func requiredMatchRefs(match *GuardMatch) map[string]string {
+	if match == nil || match.Optional {
+		return nil
+	}
+	return match.Where
+}
+
 // The published input schema and the executor's field-level error both use it.
 func (c *CommandResource) RequiredInputs() []string {
 	set := map[string]bool{}
@@ -39,12 +48,8 @@ func (c *CommandResource) RequiredInputs() []string {
 		if g.Lock != nil {
 			add(g.Lock.Name)
 		}
-		if g.Exists != nil {
-			addMap(g.Exists.Where)
-		}
-		if g.NotExists != nil {
-			addMap(g.NotExists.Where)
-		}
+		addMap(requiredMatchRefs(g.Exists))
+		addMap(requiredMatchRefs(g.NotExists))
 		if g.Payment != nil {
 			add(g.Payment.ForEach, g.Payment.Currency)
 		}
@@ -60,10 +65,10 @@ func (c *CommandResource) RequiredInputs() []string {
 			addMap(s.Ensure.Where)
 		}
 		add(s.reserveOwner())
-		if s.updateSpec() != nil {
-			add(s.updateSpec().Name)
-			addMap(s.updateSpec().Where)
-			for _, a := range s.updateSpec().Adjust {
+		if s.Update != nil {
+			add(s.Update.Name)
+			addMap(s.Update.Where)
+			for _, a := range s.Update.Adjust {
 				add(a.Increase, a.Decrease, a.By, a.SignFrom)
 			}
 		}
