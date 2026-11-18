@@ -35,10 +35,21 @@ func summaryDDL(dialect db.Dialect, dt *doctype.DocType) string {
 	return ddl
 }
 
-// rebuildInsert aggregates one business day from the fact tables into summary rows, per status: the day
-// total and one grain per dimension. row_count counts header rows (line_id is empty), so a record with
-// lines counts once. Tombstones (deleted) are excluded. Args bind the day and the deleted flag per part.
-func rebuildInsert(dialect db.Dialect, dt *doctype.DocType, day tenanttime.Date) (string, []any) {
+// summaryColumns are the summary table's columns in the order rebuildSelect returns them: the key, then
+// row_count, then each measure.
+func summaryColumns(dt *doctype.DocType) []string {
+	cols := []string{"business_date", "legal_entity", "status", "grain", "grain_value", "row_count"}
+	for _, m := range dt.Facts.Measures {
+		cols = append(cols, m.ColumnName())
+	}
+	return cols
+}
+
+// rebuildSelect aggregates one business day from the fact tables, per status: the day total and one grain
+// per dimension, with the columns named as summaryColumns. row_count counts header rows (line_id is empty),
+// so a record with lines counts once. Tombstones (deleted) are excluded. Args bind the day and the deleted
+// flag per part.
+func rebuildSelect(dialect db.Dialect, dt *doctype.DocType, day tenanttime.Date) (string, []any) {
 	f := dt.Facts
 	q := dialect.QuoteIdent
 	dims := make([]string, len(f.Dimensions))
@@ -60,9 +71,9 @@ func rebuildInsert(dialect db.Dialect, dt *doctype.DocType, day tenanttime.Date)
 	}
 	// grain "" is the day total; each dimension is its own grain.
 	grains := append([]string{""}, dims...)
-	sums := []string{"SUM(CASE WHEN f.line_id = '' THEN 1 ELSE 0 END)"}
+	sums := []string{"SUM(CASE WHEN f.line_id = '' THEN 1 ELSE 0 END) AS " + q("row_count")}
 	for _, m := range f.Measures {
-		sums = append(sums, "SUM(f."+q(m.ColumnName())+")")
+		sums = append(sums, "SUM(f."+q(m.ColumnName())+") AS "+q(m.ColumnName()))
 	}
 	selects := make([]string, 0, len(grains))
 	var args []any
@@ -71,16 +82,17 @@ func rebuildInsert(dialect db.Dialect, dt *doctype.DocType, day tenanttime.Date)
 		if g != "" {
 			value, group = "f."+q(g), group+", f."+q(g)
 		}
-		selects = append(selects, fmt.Sprintf("SELECT f.%s, f.%s, f.%s, '%s', %s, %s FROM (%s) AS f GROUP BY %s",
-			q("business_date"), q("legal_entity"), q("status"), g, value, strings.Join(sums, ", "), source, group))
+		selects = append(selects, fmt.Sprintf("SELECT f.%s, f.%s, f.%s, '%s' AS %s, %s AS %s, %s FROM (%s) AS f GROUP BY %s",
+			q("business_date"), q("legal_entity"), q("status"), g, q("grain"), value, q("grain_value"), strings.Join(sums, ", "), source, group))
 		args = append(args, partArgs...)
 	}
-	cols := []string{"business_date", "legal_entity", "status", "grain", "grain_value", "row_count"}
-	for _, m := range f.Measures {
-		cols = append(cols, m.ColumnName())
-	}
-	insert := fmt.Sprintf("INSERT INTO %s (%s) %s", q(summaryTable(dt)), quoteList(dialect, cols), strings.Join(selects, " UNION ALL "))
-	return insert, args
+	return strings.Join(selects, " UNION ALL "), args
+}
+
+// rebuildInsert writes one business day's aggregate into the summary table.
+func rebuildInsert(dialect db.Dialect, dt *doctype.DocType, day tenanttime.Date) (string, []any) {
+	selectSQL, args := rebuildSelect(dialect, dt, day)
+	return fmt.Sprintf("INSERT INTO %s (%s) %s", dialect.QuoteIdent(summaryTable(dt)), quoteList(dialect, summaryColumns(dt)), selectSQL), args
 }
 
 // migrateSummary replaces a summary table that predates the status column. Summaries are caches, so the
