@@ -26,6 +26,12 @@ func registerFactConsumer(config TenantServiceConfig, loaded *knet.LoadedSite, s
 	dispatcher.WorkAdmission = services.WorkAdmission
 	builder := &facts.Builder{DB: loaded.DB, Dialect: dialect, Registry: loaded.Registry}
 	refresher := &facts.Refresher{DB: loaded.DB, Dialect: dialect, Registry: loaded.Registry, Admission: services.WorkAdmission, Owner: contract.NewEventID()}
+	driftCounter, err := facts.NewDriftCounter()
+	if err != nil {
+		return fmt.Errorf("register fact drift metric: %w", err)
+	}
+	drift := &facts.DriftChecker{DB: loaded.DB, Dialect: dialect, Registry: loaded.Registry, Site: loaded.Name,
+		Admission: services.WorkAdmission, Owner: contract.NewEventID(), Drifted: driftCounter}
 	if err := dispatcher.RegisterTransactionalForTypes(facts.ConsumerName, types, builder.Consume); err != nil {
 		return fmt.Errorf("register fact events: %w", err)
 	}
@@ -36,6 +42,9 @@ func registerFactConsumer(config TenantServiceConfig, loaded *knet.LoadedSite, s
 			return errors.New("tenant runtime is stopping")
 		}
 		if !loaded.StartWorker(config.ProcessContext, refresher.Run) {
+			return errors.New("tenant runtime is stopping")
+		}
+		if !loaded.StartWorker(config.ProcessContext, drift.Run) {
 			return errors.New("tenant runtime is stopping")
 		}
 		return nil
