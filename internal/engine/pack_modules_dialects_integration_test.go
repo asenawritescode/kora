@@ -166,10 +166,10 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 			owner := get("Owner")
 			ownerOps, ownerQueries := refs(owner)
 			t.Logf("owner operations=%v queries=%v", ownerOps, ownerQueries)
-			if len(ownerOps) != 8 {
-				t.Errorf("owner operations = %d, want 8: %v", len(ownerOps), ownerOps)
+			if len(ownerOps) != 10 {
+				t.Errorf("owner operations = %d, want 10: %v", len(ownerOps), ownerOps)
 			}
-			for _, name := range []string{"receive_stock", "adjust_stock", "open_session", "close_session", "record_sale", "return_sale", "void_sale"} {
+			for _, name := range []string{"receive_stock", "adjust_stock", "open_session", "close_session", "record_sale", "return_sale", "void_sale", "hold_sale", "delete_held_sale"} {
 				found := false
 				for _, ref := range ownerOps {
 					found = found || strings.HasSuffix(ref, "~"+name)
@@ -181,8 +181,8 @@ func TestPOSPackPublishesCatalogAcrossDialects(t *testing.T) {
 			// 19 published queries (favourite_items #570 and expected_cash add two the Owner reads); the Owner reads all but my_closed_session and
 			// my_sales, the Cashier's own-till and own-sales variants of
 			// closed_session (#384) and recent_sales (#91).
-			if len(ownerQueries) != 17 {
-				t.Errorf("owner queries = %d, want 17: %v", len(ownerQueries), ownerQueries)
+			if len(ownerQueries) != 18 {
+				t.Errorf("owner queries = %d, want 18: %v", len(ownerQueries), ownerQueries)
 			}
 			for _, name := range []string{"sale_items", "sale_payments", "recent_sales"} {
 				if !slices.Contains(ownerQueries, "pos.core/"+name) {
