@@ -9,6 +9,11 @@
       "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func1"
     },
     {
+      "method": "POST",
+      "path": "/api/analytics/drill",
+      "handler": "github.com/asenawritescode/kora/internal/api.registerAnalyticsDrill.func1"
+    },
+    {
       "method": "GET",
       "path": "/api/analytics/insights/:doctype",
       "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func12"
@@ -722,6 +727,11 @@
       "method": "GET",
       "path": "/api/v1/analytics/catalog",
       "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func1"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/analytics/drill",
+      "handler": "github.com/asenawritescode/kora/internal/api.registerAnalyticsDrill.func1"
     },
     {
       "method": "GET",
