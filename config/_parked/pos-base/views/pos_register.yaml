@@ -43,12 +43,26 @@ components:
       methods: literal:cash
       register: literal:REG-001
     actions:
+      - id: set_up_register
+        trigger: on_click
+        type: create_record
+        config:
+          target_doctype: Register
+          context_field: register_record
+          label: Till
+          button_label: Open till
+          match_fields: [reference]
+          fields:
+            reference: $binding.register
+            register_name: Main till
+            status: Active
       - id: open_till
         trigger: on_click
         type: create_record
         config:
           target_doctype: Till Session
           context_field: till_session
+          match_fields: [register_code, status]
           label: Till session
           button_label: Open till
           reference_prefix: TILL
