@@ -158,6 +158,15 @@ func (e *managementProvisionExecutor) Execute(ctx context.Context, claim managem
 	return management.FinishResult{State: contract.OperationSucceeded}, nil
 }
 
+// bootstrapAdminFullName returns the owner's name Cloud sent, or the
+// "Administrator" default for commands that predate the field.
+func bootstrapAdminFullName(command contract.ProvisionTenant) string {
+	if name := strings.TrimSpace(command.BootstrapAdminFullName); name != "" {
+		return name
+	}
+	return "Administrator"
+}
+
 func (e *managementProvisionExecutor) createTenant(ctx context.Context, command contract.ProvisionTenant) error {
 	assignment, err := site.NormalizeRuntimeCellID(string(command.Deployment))
 	if err != nil || assignment == "" {
@@ -169,7 +178,7 @@ func (e *managementProvisionExecutor) createTenant(ctx context.Context, command 
 	}
 	input := site.CreateSiteInput{
 		Hostname: command.PrimaryAlias, SiteID: string(command.Tenant), AdminEmail: command.BootstrapAdminEmail, CloudSubjectID: command.BootstrapAdminSubject,
-		AdminFullName: "Administrator", ExtraDomains: append([]string(nil), command.Aliases...),
+		AdminFullName: bootstrapAdminFullName(command), ExtraDomains: append([]string(nil), command.Aliases...),
 		RuntimeCellID: assignment, DisplayName: displayName,
 		DBType: e.common.DBType, DBHost: e.common.DBHost, DBPort: e.common.DBPort,
 		DBUser: e.common.DBUser, DBPassword: e.common.DBPassword,

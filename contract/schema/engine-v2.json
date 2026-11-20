@@ -4409,6 +4409,10 @@
           "minLength": 3,
           "type": "string"
         },
+        "bootstrap_admin_full_name": {
+          "maxLength": 140,
+          "type": "string"
+        },
         "bootstrap_admin_subject": {
           "maxLength": 160,
           "minLength": 3,
@@ -10577,6 +10581,10 @@
         "bootstrap_admin_email": {
           "maxLength": 254,
           "minLength": 3,
+          "type": "string"
+        },
+        "bootstrap_admin_full_name": {
+          "maxLength": 140,
           "type": "string"
         },
         "bootstrap_admin_subject": {

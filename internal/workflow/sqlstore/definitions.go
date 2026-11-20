@@ -372,6 +372,15 @@ func (s *DefinitionStore) GetStatusPolicyInTx(ctx context.Context, tx *sql.Tx, t
 	return policy, len(policy.Transitions) > 0, nil
 }
 
+// ImportedBatch is one validated set of v2 definitions published by one actor
+// at one instant, as a config import or a package activation does.
+type ImportedBatch struct {
+	Tenant      contract.TenantID
+	Actor       contract.PrincipalID
+	Definitions []contract.WorkflowDefinition
+	Now         time.Time
+}
+
 // PublishImportedBatch atomically publishes a validated set of v2 definitions
 // from a tenant configuration import. Matching immutable rows make retries
 // safe; conflicts roll back the whole batch.
@@ -379,52 +388,74 @@ func (s *DefinitionStore) PublishImportedBatch(ctx context.Context, tenant contr
 	if s == nil || s.database == nil || s.dialect == nil || ctx == nil {
 		return fmt.Errorf("workflow definition import dependencies are incomplete")
 	}
-	if _, err := contract.ParseTenantID(string(tenant)); err != nil {
-		return err
-	}
-	if _, err := contract.ParsePrincipalID(string(actor)); err != nil {
-		return err
-	}
-	if now.IsZero() {
-		return fmt.Errorf("workflow definition import time is required")
-	}
 	tx, err := s.database.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin workflow definition import batch: %w", err)
 	}
 	defer tx.Rollback()
-	for _, definition := range definitions {
-		if definition.ID == "" || definition.Version == 0 || len(definition.Steps) == 0 {
-			return fmt.Errorf("batch contains an invalid workflow definition")
-		}
-		if _, err := contract.ParseDefinitionID(string(definition.ID)); err != nil {
-			return err
-		}
-		body, err := json.Marshal(definition)
-		if err != nil {
-			return err
-		}
-		digest, err := workflow.DefinitionDigest(definition)
-		if err != nil {
-			return fmt.Errorf("digest imported workflow definition: %w", err)
-		}
-		var existing string
-		err = tx.QueryRowContext(ctx, db.Rebind(s.dialect, `SELECT digest FROM _kora_workflow_definition WHERE tenant_id=? AND definition_id=? AND version=?`), string(tenant), string(definition.ID), definition.Version).Scan(&existing)
-		if err == nil {
-			if existing != digest {
-				return contract.NewError(contract.CodeConflict, "imported workflow definition conflicts with an existing immutable version")
-			}
-			continue
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("check imported workflow definition: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, db.Rebind(s.dialect, `INSERT INTO _kora_workflow_definition (tenant_id,definition_id,version,digest,definition_json,created_by,created_at) VALUES (?,?,?,?,?,?,?)`), string(tenant), string(definition.ID), definition.Version, digest, string(body), string(actor), now.UTC()); err != nil {
-			return fmt.Errorf("insert imported workflow definition %s: %w", definition.ID, err)
-		}
+	if err := s.PublishImportedBatchTx(ctx, tx, ImportedBatch{Tenant: tenant, Actor: actor, Definitions: definitions, Now: now}); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit workflow definition import batch: %w", err)
+	}
+	return nil
+}
+
+// PublishImportedBatchTx writes the batch inside the caller's transaction, so
+// it commits or rolls back with that transaction. Conflicts are returned as
+// contract.CodeConflict errors and leave the transaction for the caller to roll back.
+func (s *DefinitionStore) PublishImportedBatchTx(ctx context.Context, tx *sql.Tx, batch ImportedBatch) error {
+	if s == nil || s.dialect == nil || tx == nil || ctx == nil {
+		return fmt.Errorf("workflow definition import dependencies are incomplete")
+	}
+	if _, err := contract.ParseTenantID(string(batch.Tenant)); err != nil {
+		return err
+	}
+	if _, err := contract.ParsePrincipalID(string(batch.Actor)); err != nil {
+		return err
+	}
+	if batch.Now.IsZero() {
+		return fmt.Errorf("workflow definition import time is required")
+	}
+	for _, definition := range batch.Definitions {
+		if err := s.publishImportedDefinition(ctx, tx, batch, definition); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// publishImportedDefinition inserts one immutable version, or accepts an
+// identical version that is already published.
+func (s *DefinitionStore) publishImportedDefinition(ctx context.Context, tx *sql.Tx, batch ImportedBatch, definition contract.WorkflowDefinition) error {
+	if definition.ID == "" || definition.Version == 0 || len(definition.Steps) == 0 {
+		return fmt.Errorf("batch contains an invalid workflow definition")
+	}
+	if _, err := contract.ParseDefinitionID(string(definition.ID)); err != nil {
+		return err
+	}
+	body, err := json.Marshal(definition)
+	if err != nil {
+		return err
+	}
+	digest, err := workflow.DefinitionDigest(definition)
+	if err != nil {
+		return fmt.Errorf("digest imported workflow definition: %w", err)
+	}
+	var existing string
+	err = tx.QueryRowContext(ctx, db.Rebind(s.dialect, `SELECT digest FROM _kora_workflow_definition WHERE tenant_id=? AND definition_id=? AND version=?`), string(batch.Tenant), string(definition.ID), definition.Version).Scan(&existing)
+	if err == nil {
+		if existing != digest {
+			return contract.NewError(contract.CodeConflict, "imported workflow definition conflicts with an existing immutable version")
+		}
+		return nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("check imported workflow definition: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx, db.Rebind(s.dialect, `INSERT INTO _kora_workflow_definition (tenant_id,definition_id,version,digest,definition_json,created_by,created_at) VALUES (?,?,?,?,?,?,?)`), string(batch.Tenant), string(definition.ID), definition.Version, digest, string(body), string(batch.Actor), batch.Now.UTC()); err != nil {
+		return fmt.Errorf("insert imported workflow definition %s: %w", definition.ID, err)
 	}
 	return nil
 }

@@ -209,7 +209,10 @@ func ImportConfigFromSnapshot(db *sql.DB, registry *doctype.Registry, dbName, si
 	return ImportConfigFromSnapshotForTenant(db, registry, dbName, siteName, siteName, label, snapshot, dialect, scriptBodyByHash)
 }
 
-func publishImportedWorkflows(ctx context.Context, database *sql.DB, dialect sqlDialect.Dialect, tenant contract.TenantID, definitions []contract.WorkflowDefinition, registry *doctype.Registry) error {
+// ValidateWorkflowDefinitions checks Engine v2 definitions against the package
+// action catalog and the doctypes loaded in registry. Package activation and
+// config import both gate publication on it.
+func ValidateWorkflowDefinitions(definitions []contract.WorkflowDefinition, registry *doctype.Registry) error {
 	catalog := flow.NewCatalog()
 	input := contract.SchemaRef{ID: "kora.notification.send", Version: 1}
 	output := contract.SchemaRef{ID: "kora.notification.send.result", Version: 1}
@@ -226,26 +229,39 @@ func publishImportedWorkflows(ctx context.Context, database *sql.DB, dialect sql
 	}
 	schemas := importedWorkflowSchemas{registry: registry}
 	for _, definition := range definitions {
-		validation := flow.ValidateDefinition(definition, catalog, schemas, nil)
-		issues := append(validation.Issues, flow.ValidateRecordTriggerSchema(definition.Trigger, schemas)...)
-		issues = append(issues, flow.ValidateRecordActionFields(definition, schemas)...)
-		if definition.Trigger != nil {
-			for j, step := range definition.Steps {
-				if step.Condition != nil && step.Condition.Field != nil && !schemas.RecordFieldExists(definition.Trigger.Table, step.Condition.Field.Field) {
-					issues = append(issues, contract.ValidationIssue{Path: fmt.Sprintf("steps[%d].condition.field", j), Code: "unknown_field", Detail: "condition field does not exist on the selected table"})
-				}
+		if err := validateImportedWorkflow(definition, catalog, schemas); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateImportedWorkflow reports the first issue that makes a definition unpublishable.
+func validateImportedWorkflow(definition contract.WorkflowDefinition, catalog *flow.Catalog, schemas importedWorkflowSchemas) error {
+	validation := flow.ValidateDefinition(definition, catalog, schemas, nil)
+	issues := validation.Issues
+	issues = append(issues, flow.ValidateRecordTriggerSchema(definition.Trigger, schemas)...)
+	issues = append(issues, flow.ValidateRecordActionFields(definition, schemas)...)
+	if definition.Trigger != nil {
+		for j, step := range definition.Steps {
+			if step.Condition != nil && step.Condition.Field != nil && !schemas.RecordFieldExists(definition.Trigger.Table, step.Condition.Field.Field) {
+				issues = append(issues, contract.ValidationIssue{Path: fmt.Sprintf("steps[%d].condition.field", j), Code: "unknown_field", Detail: "condition field does not exist on the selected table"})
 			}
 		}
-		if len(issues) > 0 {
-			return fmt.Errorf("definition %s issue %s: %s", definition.ID, issues[0].Path, issues[0].Detail)
-		}
+	}
+	if len(issues) > 0 {
+		return fmt.Errorf("definition %s issue %s: %s", definition.ID, issues[0].Path, issues[0].Detail)
+	}
+	return nil
+}
+
+func publishImportedWorkflows(ctx context.Context, database *sql.DB, dialect sqlDialect.Dialect, tenant contract.TenantID, definitions []contract.WorkflowDefinition, registry *doctype.Registry) error {
+	if err := ValidateWorkflowDefinitions(definitions, registry); err != nil {
+		return err
 	}
 	store, err := workflowsql.NewDefinitionStore(database, dialect)
 	if err != nil {
 		return err
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	if err := store.Ensure(ctx); err != nil {
 		return err

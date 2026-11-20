@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -300,35 +299,22 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		handle.Release()
 		return packageRecoveryRequired("package schema validation phase needs recovery"), nil
 	}
-	tx, err := runtime.DB.BeginTx(ctx, nil)
-	if err != nil {
-		releaseTenantWork()
-		handle.Release()
-		return packageRecoveryRequired("package activation transaction could not begin"), nil
-	}
-	versionID, _, err := store.CommitManagementActivation(ctx, tx, target, info.Name, dialect, configstore.ManagementActivationCommit{
-		OperationID: string(operation.ID), JournalKind: "management_package", FromPhase: configstore.ActivationValidated,
-		RecoveryPlan: "replace-runtime-from-tenant-db", CreatedBy: string(operation.Caller),
-		VersionLabel: "Apply package " + command.ArtifactRef, Fence: claim.Fence,
-		ExpectedRevision: expectedRevision, ArtifactDigest: command.Digest, ModuleSnapshotRevision: moduleSnapshot.Revision,
-		ModuleTenantID:     operation.Tenant,
-		ProviderSelections: command.ProviderSelections,
-		PackageConstraints: []contract.InstalledPackage{packageConstraint},
+	versionID, err := commitPackageActivation(ctx, packageActivationWrite{
+		database: runtime.DB, dialect: dialect, tenant: operation.Tenant, site: info.Name, target: target,
+		commit: configstore.ManagementActivationCommit{
+			OperationID: string(operation.ID), JournalKind: "management_package", FromPhase: configstore.ActivationValidated,
+			RecoveryPlan: "replace-runtime-from-tenant-db", CreatedBy: string(operation.Caller),
+			VersionLabel: "Apply package " + command.ArtifactRef, Fence: claim.Fence,
+			ExpectedRevision: expectedRevision, ArtifactDigest: command.Digest, ModuleSnapshotRevision: moduleSnapshot.Revision,
+			ModuleTenantID:     operation.Tenant,
+			ProviderSelections: command.ProviderSelections,
+			PackageConstraints: []contract.InstalledPackage{packageConstraint},
+		},
 	})
 	if err != nil {
-		slog.ErrorContext(ctx, "management package configuration commit failed", "operation_id", operation.ID, "tenant_id", operation.Tenant, "error", err)
-		_ = tx.Rollback()
 		releaseTenantWork()
 		handle.Release()
-		if errors.Is(err, configstore.ErrConfigRevisionConflict) {
-			return failed(contract.CodeConflict, "tenant configuration changed during package activation"), nil
-		}
-		return packageRecoveryRequired("package configuration commit needs recovery"), nil
-	}
-	if err := tx.Commit(); err != nil {
-		releaseTenantWork()
-		handle.Release()
-		return packageRecoveryRequired("package configuration commit outcome needs recovery"), nil
+		return packageActivationFailure(err), nil
 	}
 	releaseTenantWork()
 	handle.Release()
