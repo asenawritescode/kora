@@ -1,0 +1,43 @@
+{
+  "id": "kitchen-order-cancel-new",
+  "version": 1,
+  "entry": "transition",
+  "trigger": {
+    "kind": "record.updated",
+    "table": "Kitchen Order",
+    "watched_fields": [
+      "status"
+    ]
+  },
+  "steps": [
+    {
+      "id": "transition",
+      "kind": "action",
+      "action": {
+        "name": "record.update_status",
+        "version": 1,
+        "input_schema": "kora.record.update_status",
+        "input": {
+          "state_field": "status",
+          "initial_state": "New",
+          "transition_action": "Cancel",
+          "from": "New",
+          "to": "Cancelled",
+          "allowed_roles": [
+            "Administrator",
+            "Restaurant Manager",
+            "Waiter"
+          ]
+        },
+        "next": "finish"
+      }
+    },
+    {
+      "id": "finish",
+      "kind": "end",
+      "end": {
+        "outcome": "complete"
+      }
+    }
+  ]
+}
