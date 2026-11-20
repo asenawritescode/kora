@@ -369,6 +369,9 @@ func (m *mutation) validateItem(ctx context.Context, b *bundle, i int, resolver 
 			return contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
 	}
+	if err := txMgr.DeriveFields(recordDT, doc); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
+		return contract.NewError(contract.CodeDependencyUnavailable, "deriving fields: "+err.Error())
+	}
 	if verrs := doctype.ValidateDocumentWithResolvers(recordDT, doc, m.run.Reg, oldDoc, resolver, op.Context.BusinessReferenceValidator, op.Context.HistoricalSnapshotValidator); verrs.HasErrors() {
 		return validationContractError(verrs)
 	}

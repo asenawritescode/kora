@@ -131,7 +131,6 @@ internal/auth/site.go::SiteGuard.Close
 internal/db/dialect.go::MySQL
 internal/dbaccess/admission.go::NewAdmission
 internal/disposabledb/disposabledb.go::Open
-internal/doctype/computed.go::ComputeFields
 internal/doctype/diff_sexpr.go::DiffSExpr
 internal/doctype/diff_sexpr.go::ReverseDiff
 internal/doctype/diff_sexpr.go::addAllSection
@@ -159,7 +158,6 @@ internal/doctype/page_runtime_contracts.go::PageActionContracts
 internal/doctype/page_runtime_contracts.go::PageComponentContracts
 internal/doctype/parser.go::KeySuggestion
 internal/doctype/parser.go::ValidateAll
-internal/doctype/parser.go::selectHasOption
 internal/doctype/parser.go::validateFacts
 internal/doctype/parser.go::validateQuantityEffects
 internal/doctype/rollback.go::GenerateRollbackPlan

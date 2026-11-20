@@ -67,6 +67,11 @@ type documentCheck struct {
 }
 
 func validateOperationDocument(txMgr *orm.TxManager, dt *doctype.DocType, doc *doctype.Document, reg *doctype.Registry, check documentCheck) doctype.ValidationErrors {
+	// Linked and computed values are derived first so constraints check what
+	// the save will store, whatever the client sent for them.
+	if err := txMgr.DeriveFields(dt, doc); err != nil {
+		return doctype.ValidationErrors{{Type: "ValidationError", Message: err.Error(), DocType: dt.Name}}
+	}
 	resolver := func(target *doctype.DocType, name string) (*doctype.Document, error) {
 		return txMgr.GetDoc(target, name, "")
 	}

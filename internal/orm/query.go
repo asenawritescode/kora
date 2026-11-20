@@ -403,7 +403,8 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 
 	computedHook := tx.computedScriptHook()
 
-	// Evaluate computed fields on child items (e.g., line_total = quantity * unit_price).
+	// Child rows first (e.g., line_total = quantity * unit_price), then the
+	// parent (e.g., subtotal = SUM(items.line_total)); see DeriveFields.
 	for _, f := range dt.TableFields() {
 		children := doc.GetTable(f.Fieldname)
 		if children == nil {
@@ -413,26 +414,16 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 		if childDT == nil {
 			continue
 		}
-		for _, child := range children {
-			if err := tx.populateLinkedFields(dbTx, childDT, child); err != nil {
-				return fmt.Errorf("populating linked fields in %s: %w", f.Fieldname, err)
-			}
-			if err := doctype.ComputeFieldsWithHook(childDT, child, computedHook); err != nil {
-				slog.Warn("computed fields failed on child", "doctype", childDT.Name, "error", err)
-			}
+		if err := tx.deriveChildRows(dbTx, childDT, children, computedHook); err != nil {
+			return fmt.Errorf("populating linked fields in %s: %w", f.Fieldname, err)
 		}
 		if err := persistComputedChildFields(dbTx, dt, f.Fieldname, childDT, children, tx.Dialect); err != nil {
 			return fmt.Errorf("persisting computed child fields in %s: %w", f.Fieldname, err)
 		}
 	}
 
-	// Resolve links before computed expressions consume their values.
-	if err := tx.populateLinkedFields(dbTx, dt, doc); err != nil {
+	if err := tx.deriveParent(dbTx, dt, doc, computedHook); err != nil {
 		return fmt.Errorf("populating linked fields: %w", err)
-	}
-	// Evaluate computed fields on the parent document (e.g., subtotal = SUM(items.line_total)).
-	if err := doctype.ComputeFieldsWithHook(dt, doc, computedHook); err != nil {
-		slog.Warn("computed fields failed", "doctype", dt.Name, "error", err)
 	}
 
 	// Persist linked and computed field values via UPDATE.
@@ -710,7 +701,7 @@ func (tx *TxManager) SaveInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, doc *d
 
 	computedHook := tx.computedScriptHook()
 
-	// Evaluate computed fields on child items first, then parent.
+	// Child rows first, then the parent; see DeriveFields.
 	for _, f := range dt.TableFields() {
 		children := doc.GetTable(f.Fieldname)
 		if children == nil {
@@ -720,24 +711,16 @@ func (tx *TxManager) SaveInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, doc *d
 		if childDT == nil {
 			continue
 		}
-		for _, child := range children {
-			if err := tx.populateLinkedFields(dbTx, childDT, child); err != nil {
-				return fmt.Errorf("populating linked fields in %s: %w", f.Fieldname, err)
-			}
-			if err := doctype.ComputeFieldsWithHook(childDT, child, computedHook); err != nil {
-				slog.Warn("computed fields failed on child", "doctype", childDT.Name, "error", err)
-			}
+		if err := tx.deriveChildRows(dbTx, childDT, children, computedHook); err != nil {
+			return fmt.Errorf("populating linked fields in %s: %w", f.Fieldname, err)
 		}
 		if err := persistComputedChildFields(dbTx, dt, f.Fieldname, childDT, children, tx.Dialect); err != nil {
 			return fmt.Errorf("persisting computed child fields in %s: %w", f.Fieldname, err)
 		}
 	}
 
-	if err := tx.populateLinkedFields(dbTx, dt, doc); err != nil {
+	if err := tx.deriveParent(dbTx, dt, doc, computedHook); err != nil {
 		return fmt.Errorf("populating linked fields: %w", err)
-	}
-	if err := doctype.ComputeFieldsWithHook(dt, doc, computedHook); err != nil {
-		slog.Warn("computed fields failed", "doctype", dt.Name, "error", err)
 	}
 
 	if err := updateDerivedFieldsExec(dbTx, dt, doc, tx.Dialect); err != nil {
