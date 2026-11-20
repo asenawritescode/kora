@@ -138,7 +138,17 @@ type ProvisionTenant struct {
 	// and bidirectional-override characters are rejected.
 	//contract:maxLength=120
 	DisplayName string `json:"display_name,omitempty"`
+	// BootstrapAdminFullName is the optional name of the owner Cloud
+	// provisions as the bootstrap administrator. The Engine trims it and
+	// stores it as that administrator's full name. Absent keeps the
+	// "Administrator" default for commands written before this field.
+	//contract:maxLength=140
+	BootstrapAdminFullName string `json:"bootstrap_admin_full_name,omitempty"`
 }
+
+// MaxBootstrapAdminFullNameBytes caps ProvisionTenant.BootstrapAdminFullName
+// in bytes after trimming. It matches the Cloud identity full name limit.
+const MaxBootstrapAdminFullNameBytes = 140
 
 // MaxTenantDisplayNameLength caps ProvisionTenant.DisplayName in Unicode
 // characters after trimming.
@@ -491,6 +501,9 @@ func ValidateProvisionTenant(cmd ProvisionTenant) error {
 	}
 	if _, err := NormalizeTenantDisplayName(cmd.DisplayName); err != nil {
 		return err
+	}
+	if len(strings.TrimSpace(cmd.BootstrapAdminFullName)) > MaxBootstrapAdminFullNameBytes {
+		return fmt.Errorf("bootstrap admin full name must be %d bytes or fewer", MaxBootstrapAdminFullNameBytes)
 	}
 	return nil
 }
