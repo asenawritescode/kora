@@ -108,6 +108,10 @@ func DerivePrefix(name string) string {
 
 // TxManager provides transactional operations on documents.
 type TxManager struct {
+	// DeferLinkChecks skips the per-write Link existence check. A record bundle
+	// sets it while it writes its items, because an item may link to one written
+	// later in the same bundle, then checks every link with CheckLinkTargets.
+	DeferLinkChecks             bool
 	DB                          *sql.DB
 	BusinessScope               contract.BusinessScope
 	BusinessReferenceValidator  contract.BusinessReferenceValidator
@@ -775,6 +779,9 @@ func (tx *TxManager) validateEntityReferences(queryer db.Queryer, dt *doctype.Do
 		if count == 0 {
 			return fmt.Errorf("reference %s.%s does not resolve within the verified legal entity", dt.Name, field.Fieldname)
 		}
+	}
+	if tx.DeferLinkChecks {
+		return nil
 	}
 	return tx.validateLinkTargets(queryer, dt, doc)
 }

@@ -127,3 +127,9 @@ func distinctLinkValues(uses []linkUse) []string {
 	}
 	return names
 }
+
+// CheckLinkTargets runs the Link existence check for a record a bundle wrote
+// with DeferLinkChecks set, once every item of the bundle exists.
+func (tx *TxManager) CheckLinkTargets(queryer db.Queryer, dt *doctype.DocType, doc *doctype.Document) error {
+	return tx.validateLinkTargets(queryer, dt, doc)
+}
