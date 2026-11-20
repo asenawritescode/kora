@@ -776,7 +776,7 @@ func (tx *TxManager) validateEntityReferences(queryer db.Queryer, dt *doctype.Do
 			return fmt.Errorf("reference %s.%s does not resolve within the verified legal entity", dt.Name, field.Fieldname)
 		}
 	}
-	return nil
+	return tx.validateLinkTargets(queryer, dt, doc)
 }
 
 // GetDoc loads a single document by name, including child table expansion.

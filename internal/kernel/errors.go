@@ -30,7 +30,7 @@ func wrapORMError(err error, dialect db.Dialect) *contract.Error {
 	case errors.Is(err, orm.ErrDuplicate):
 		return contract.NewError(contract.CodeConflict, sanitize(err.Error()))
 	case errors.Is(err, orm.ErrValidation):
-		return contract.NewError(contract.CodeValidationFailed, "record validation failed")
+		return ormValidationError(err)
 	case errors.Is(err, orm.ErrNotFound):
 		return contract.NewError(contract.CodeNotFound, "document not found or access denied")
 	case dialect.IsAbortedTransaction(err):
@@ -84,4 +84,14 @@ func validationContractError(verrs doctype.ValidationErrors) *contract.Error {
 	e := contract.NewError(contract.CodeValidationFailed, "validation failed")
 	e.Details = raw
 	return e
+}
+
+// ormValidationError keeps the field-level error the write path reported, so
+// the caller learns which field was refused and why.
+func ormValidationError(err error) *contract.Error {
+	var fieldErr *doctype.ValidationError
+	if errors.As(err, &fieldErr) {
+		return validationContractError(doctype.ValidationErrors{fieldErr})
+	}
+	return contract.NewError(contract.CodeValidationFailed, "record validation failed")
 }
