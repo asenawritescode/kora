@@ -374,7 +374,7 @@ func (d *LibSQLDialect) ParseError(err error, dt *doctype.DocType) *doctype.Vali
 			}
 			return &doctype.ValidationError{
 				Type:    "UniqueConstraint",
-				Message: fmt.Sprintf("%s must be unique.", label),
+				Message: fmt.Sprintf("This %s is already used. Enter a different one.", strings.ToLower(label)),
 				Field:   fieldName,
 				DocType: dt.Name,
 			}

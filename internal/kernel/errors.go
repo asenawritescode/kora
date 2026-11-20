@@ -28,9 +28,9 @@ func wrapORMError(err error, dialect db.Dialect) *contract.Error {
 	}
 	switch {
 	case errors.Is(err, orm.ErrDuplicate):
-		return contract.NewError(contract.CodeConflict, sanitize(err.Error()))
+		return duplicateError(err)
 	case errors.Is(err, orm.ErrValidation):
-		return contract.NewError(contract.CodeValidationFailed, "record validation failed")
+		return ormValidationError(err)
 	case errors.Is(err, orm.ErrNotFound):
 		return contract.NewError(contract.CodeNotFound, "document not found or access denied")
 	case dialect.IsAbortedTransaction(err):
@@ -82,6 +82,30 @@ func statusFor(c contract.Code) contract.Status {
 func validationContractError(verrs doctype.ValidationErrors) *contract.Error {
 	raw, _ := json.Marshal(verrs)
 	e := contract.NewError(contract.CodeValidationFailed, "validation failed")
+	e.Details = raw
+	return e
+}
+
+// ormValidationError keeps the field-level error the write path reported, so
+// the caller learns which field was refused and why.
+func ormValidationError(err error) *contract.Error {
+	var fieldErr *doctype.ValidationError
+	if errors.As(err, &fieldErr) {
+		return validationContractError(doctype.ValidationErrors{fieldErr})
+	}
+	return contract.NewError(contract.CodeValidationFailed, "record validation failed")
+}
+
+// duplicateError is a conflict that names the field already holding the value,
+// in the same details shape as a validation error, so a form can show it
+// beside that field instead of as an editing conflict.
+func duplicateError(err error) *contract.Error {
+	var fieldErr *doctype.ValidationError
+	if !errors.As(err, &fieldErr) || fieldErr.Field == "" {
+		return contract.NewError(contract.CodeConflict, sanitize(err.Error()))
+	}
+	raw, _ := json.Marshal(doctype.ValidationErrors{fieldErr})
+	e := contract.NewError(contract.CodeConflict, fieldErr.Message)
 	e.Details = raw
 	return e
 }

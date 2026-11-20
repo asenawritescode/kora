@@ -359,7 +359,7 @@ func (d *PostgresDialect) ParseError(err error, dt *doctype.DocType) *doctype.Va
 	}
 	switch pqErr.Code {
 	case "23505": // unique_violation
-		fieldName := postgresUniqueConstraint(pqErr.Constraint).field(dt.RawTableName())
+		fieldName := uniqueIndexName(pqErr.Constraint).field(dt.RawTableName())
 		if fieldName == "" {
 			fieldName = pqErr.Column
 		}
@@ -370,7 +370,7 @@ func (d *PostgresDialect) ParseError(err error, dt *doctype.DocType) *doctype.Va
 			}
 			return &doctype.ValidationError{
 				Type:    "UniqueConstraint",
-				Message: fmt.Sprintf("%s must be unique.", label),
+				Message: fmt.Sprintf("This %s is already used. Enter a different one.", strings.ToLower(label)),
 				Field:   fieldName,
 				DocType: dt.Name,
 			}
@@ -393,14 +393,14 @@ func (d *PostgresDialect) ParseError(err error, dt *doctype.DocType) *doctype.Va
 	return nil
 }
 
-// postgresUniqueConstraint is the name of a unique index as CreateIndex writes
+// uniqueIndexName is the name of a unique index as CreateIndex writes
 // it: uq_<table>_<field>. pq.Error.Column is empty for unique violations, so
 // the field comes from this name.
-type postgresUniqueConstraint string
+type uniqueIndexName string
 
 // field returns the field part of the name for table, or "" when the name was
 // not built for that table.
-func (c postgresUniqueConstraint) field(table string) string {
+func (c uniqueIndexName) field(table string) string {
 	prefix := "uq_" + table + "_"
 	if !strings.HasPrefix(string(c), prefix) {
 		return ""

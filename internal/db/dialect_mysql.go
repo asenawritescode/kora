@@ -341,7 +341,7 @@ func (d *MySQLDialect) ParseError(err error, dt *doctype.DocType) *doctype.Valid
 	}
 	switch mysqlErr.Number {
 	case 1062: // Duplicate entry
-		fieldName := parseMySQLKeyField(mysqlErr.Message)
+		fieldName := parseMySQLKeyField(mysqlErr.Message, dt.RawTableName())
 		if fieldName != "" {
 			label := fieldName
 			if f := dt.GetField(fieldName); f != nil {
@@ -349,7 +349,7 @@ func (d *MySQLDialect) ParseError(err error, dt *doctype.DocType) *doctype.Valid
 			}
 			return &doctype.ValidationError{
 				Type:    "UniqueConstraint",
-				Message: fmt.Sprintf("%s must be unique.", label),
+				Message: fmt.Sprintf("This %s is already used. Enter a different one.", strings.ToLower(label)),
 				Field:   fieldName,
 				DocType: dt.Name,
 			}
@@ -609,23 +609,27 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 	}...), append(mysqlFieldTableSQL(), PaymentTablesMySQL()...)...)
 }
 
-func parseMySQLKeyField(msg string) string {
-	const prefix = "key 'uq_"
-	idx := strings.Index(msg, prefix)
+// parseMySQLKeyField returns the field a duplicate-entry message names. MySQL 8
+// reports the key as "<table>.uq_<table>_<field>", older servers as
+// "uq_<table>_<field>" or "uq_<field>".
+func parseMySQLKeyField(msg, table string) string {
+	idx := strings.Index(msg, "key '")
 	if idx < 0 {
-		idx = strings.Index(msg, "key '")
-		if idx < 0 {
-			return ""
-		}
-		idx += len("key '")
-	} else {
-		idx += len(prefix)
+		return ""
 	}
+	idx += len("key '")
 	end := strings.IndexByte(msg[idx:], '\'')
 	if end < 0 {
 		return ""
 	}
-	return msg[idx : idx+end]
+	key := msg[idx : idx+end]
+	if dot := strings.LastIndexByte(key, '.'); dot >= 0 {
+		key = key[dot+1:]
+	}
+	if field := uniqueIndexName(key).field(table); field != "" {
+		return field
+	}
+	return strings.TrimPrefix(key, "uq_")
 }
 
 func parseMySQLNotNullField(msg string) string {

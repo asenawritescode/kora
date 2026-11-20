@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/orm"
 	"github.com/asenawritescode/kora/internal/outbox"
@@ -77,6 +78,7 @@ func TestPrintSourceRecordLinkTitles(t *testing.T) {
 			}{
 				{productDT, doc(productDT, "P-1", map[string]any{"label": "Maize Flour 2kg"})},
 				{hiddenDT, doc(hiddenDT, "H-1", map[string]any{"label": "Cost Centre"})},
+				{productDT, doc(productDT, "P-9", map[string]any{"label": "Discontinued"})},
 			} {
 				if err := tx.InsertInTx(dbTx, row.dt, row.d, "root", "root"); err != nil {
 					t.Fatalf("seed %s: %v", row.dt.Name, err)
@@ -89,6 +91,11 @@ func TestPrintSourceRecordLinkTitles(t *testing.T) {
 			})
 			if err := tx.InsertInTx(dbTx, orderDT, parent, "root", "root"); err != nil {
 				t.Fatalf("seed order: %v", err)
+			}
+			// A product deleted after it was sold: the line keeps a link to a record
+			// that no longer exists, and printing must still work.
+			if _, delErr := dbTx.Exec(kdb.Rebind(dialect, "DELETE FROM "+dialect.QuoteIdent(productDT.RawTableName())+" WHERE name = ?"), "P-9"); delErr != nil {
+				t.Fatalf("delete product: %v", delErr)
 			}
 			if err := dbTx.Commit(); err != nil {
 				t.Fatal(err)
