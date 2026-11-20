@@ -8,7 +8,8 @@ fields:
   - fieldname: reference
     fieldtype: Data
     label: Register code
-    reqd: true
+    default_to_name: true
+    description: Leave blank to use this record's number.
     unique: true
     in_list_view: true
   - fieldname: register_name
