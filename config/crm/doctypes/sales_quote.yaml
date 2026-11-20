@@ -1,4 +1,5 @@
 name: Sales Quote
+naming_series: QUO-.YYYY.-.#####
 module: CRM
 description: A versioned commercial offer linked to a deal, with clear validity and customer decision.
 title_field: reference
@@ -9,9 +10,10 @@ sort_order: DESC
 fields:
   - fieldname: reference
     fieldtype: Data
+    default_to_name: true
+    description: Leave blank to use this record's number.
     label: Quote Number
     search_index: true
-    reqd: true
     unique: true
     in_list_view: true
   - fieldname: deal

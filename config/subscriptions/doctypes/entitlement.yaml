@@ -1,4 +1,5 @@
 name: Entitlement
+naming_series: ENT-.YYYY.-.#####
 module: Subscriptions
 title_field: reference
 search_fields: reference, entitlement_name
@@ -9,8 +10,9 @@ description: A benefit or usage allowance granted by a subscription. Usage recor
 fields:
   - fieldname: reference
     fieldtype: Data
+    default_to_name: true
+    description: Leave blank to use this record's number.
     label: Reference
-    reqd: true
     unique: true
     in_list_view: true
     search_index: true

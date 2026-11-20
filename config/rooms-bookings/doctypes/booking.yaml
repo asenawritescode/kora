@@ -1,4 +1,5 @@
 name: Booking
+naming_series: BOOK-.YYYY.-.#####
 module: Rooms
 title_field: reference
 search_fields: reference, status
@@ -9,8 +10,9 @@ description: A guest's stay in a room, from the day they arrive to the day they 
 fields:
   - fieldname: reference
     fieldtype: Data
+    default_to_name: true
+    description: Leave blank to use this record's number.
     label: Reference
-    reqd: true
     unique: true
     in_list_view: true
   - fieldname: guest

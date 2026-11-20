@@ -5,7 +5,7 @@ Roles: **Logistics Manager** (everything, including delete) and **Shipping Clerk
 and updates shipments and events, cannot delete). One view, **Shipments Board** at `/shipments`,
 and a shipments overview report (shipments and charge by status).
 
-- A shipment reference is unique. Weight and charge cannot be negative.
+- A shipment reference is unique. Left blank, it is the shipment's number. Weight and charge cannot be negative.
 - A shipment cannot be marked Delivered without a delivered-on date. Once Delivered, its
   customer, origin and destination are frozen.
 - A shipment event is a dated step (Collected, In transit, Delivered, Failed) with a note.

@@ -1,4 +1,5 @@
 name: Recurring Invoice
+naming_series: INV-.YYYY.-.#####
 module: Subscriptions
 title_field: invoice_number
 search_fields: invoice_number, status
@@ -9,8 +10,9 @@ description: An invoice for one billing period of a subscription. Type the subto
 fields:
   - fieldname: invoice_number
     fieldtype: Data
+    default_to_name: true
+    description: Leave blank to use this record's number.
     label: Invoice number
-    reqd: true
     unique: true
     in_list_view: true
     search_index: true

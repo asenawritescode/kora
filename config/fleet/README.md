@@ -6,7 +6,7 @@ creates and changes trips, fuel logs and service records; cannot delete). One vi
 **Fleet Overview** at `/fleet` (all vehicles and the open trips), and a `fleet_overview`
 report: trips by status, fuel cost by vehicle, distance by vehicle.
 
-- Vehicle registrations are unique; a trip reference is unique.
+- Vehicle registrations are unique; a trip reference is unique. Left blank, it is the trip's number.
 - A trip's end date cannot be before its start date, and a Delivered trip must have an end date.
 - Once a trip is Delivered or Cancelled, its vehicle, driver, origin and destination are frozen.
 - Distance, litres and odometer readings cannot be negative.

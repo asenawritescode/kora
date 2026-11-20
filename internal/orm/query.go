@@ -350,6 +350,7 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 		columns = append(columns, f.Fieldname)
 		placeholders = append(placeholders, "?")
 
+		fillFromName(f, doc)
 		val := doc.Get(f.Fieldname)
 		if val == nil && f.Default != "" {
 			val = convertDefault(f.Default, f.Fieldtype, tx.todayDefault(f.Fieldtype, f.Default))
@@ -602,6 +603,9 @@ func (tx *TxManager) SaveInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, doc *d
 		// Note: read_only is a UI hint, not an ORM constraint.
 		// Kernel command policy decides whether the current operation may change
 		// the field (for example, a trusted workflow transition).
+		if _, present := doc.Fields[f.Fieldname]; present {
+			fillFromName(f, doc)
+		}
 		newVal, err := canonicalizeDecimal(doc, f, doc.Get(f.Fieldname))
 		if err != nil {
 			return err
@@ -1463,5 +1467,16 @@ func normalizeSQLValue(f doctype.Field, v any) (any, error) {
 			return nil, fmt.Errorf("invalid JSON: %w", err)
 		}
 		return string(b), nil
+	}
+}
+
+// fillFromName sets a blank default_to_name field to the record's name, so a
+// reference left empty reads as the record's own number.
+func fillFromName(f doctype.Field, doc *doctype.Document) {
+	if !f.DefaultToName || doc.Name == "" {
+		return
+	}
+	if v := doc.Get(f.Fieldname); v == nil || strings.TrimSpace(fmt.Sprint(v)) == "" {
+		doc.Set(f.Fieldname, doc.Name)
 	}
 }

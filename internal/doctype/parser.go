@@ -496,6 +496,9 @@ func (d *DocType) Validate() error {
 		if err := validateFieldName(f.Fieldname); err != nil {
 			return fmt.Errorf("doctype %s, field %d: %w", d.Name, i, err)
 		}
+		if f.DefaultToName && (f.Fieldtype != "Data" || f.Default != "") {
+			return fmt.Errorf("doctype %s: field %q: default_to_name needs a Data field without a default", d.Name, f.Fieldname)
+		}
 
 		if fieldnames[f.Fieldname] {
 			return fmt.Errorf("doctype %s: duplicate fieldname %q", d.Name, f.Fieldname)

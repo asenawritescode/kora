@@ -1,4 +1,5 @@
 name: Usage Record
+naming_series: USE-.YYYY.-.#####
 module: Subscriptions
 append_only: true
 title_field: reference
@@ -16,8 +17,9 @@ description: A measured use of an entitlement. Saving it adds the quantity to th
 fields:
   - fieldname: reference
     fieldtype: Data
+    default_to_name: true
+    description: Leave blank to use this record's number.
     label: Reference
-    reqd: true
     unique: true
     in_list_view: true
     search_index: true
