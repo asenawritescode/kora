@@ -63,6 +63,11 @@ fields:
     fieldtype: Table
     options: Product Price
     label: Other currency prices
+  - fieldname: location
+    fieldtype: Data
+    label: Location
+    default: Main
+    description: Where the stock is kept. One-shop businesses keep Main.
   - fieldname: stock_qty
     fieldtype: Float
     label: Stock quantity

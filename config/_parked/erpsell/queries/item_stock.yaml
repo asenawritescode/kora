@@ -9,6 +9,6 @@ input:
   product: {type: string, max_length: 140}
 filters:
   - {field: name, op: eq, value: $input.product, optional: true}
-fields: [name, product_name, stock_qty]
+fields: [name, product_name, stock_qty, location]
 sort: [{field: product_name, dir: asc}]
 offline_eligible: true

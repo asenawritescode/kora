@@ -21,6 +21,7 @@ fields:
   - fieldname: location
     fieldtype: Data
     label: Location
+    default: Main
   - fieldname: status
     fieldtype: Select
     label: Status

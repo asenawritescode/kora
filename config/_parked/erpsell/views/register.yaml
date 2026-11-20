@@ -30,6 +30,7 @@ components:
     resource_bindings: {items: items, categories: categories, stock: stock}
     bindings:
       stock_item: name
+      stock_location: location
       stock_quantity: stock_qty
       title: product_name
       local_name: local_name
