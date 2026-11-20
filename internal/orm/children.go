@@ -105,7 +105,7 @@ func insertChildrenBatch(ex db.Queryer, parentDT *doctype.DocType, parentField s
 				if err != nil {
 					return err
 				}
-				values = append(values, val)
+				values = append(values, blankAsNull(f, val))
 			}
 		}
 
@@ -212,7 +212,7 @@ func updateChildRow(ex db.Queryer, tableName string, childDT *doctype.DocType, d
 			return err
 		}
 		setClauses = append(setClauses, fmt.Sprintf("%s = ?", f.Fieldname))
-		values = append(values, val)
+		values = append(values, blankAsNull(f, val))
 	}
 
 	if len(setClauses) == 0 {

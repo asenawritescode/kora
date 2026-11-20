@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/asenawritescode/kora/internal/db"
@@ -47,7 +48,15 @@ type Diff struct {
 	NewIndexes    map[string][]IndexAdd     // Table → indexes to CREATE
 	DropIndexes   []IndexDrop               // Indexes to DROP (old-style names)
 	RenameColumns map[string][]ColumnRename // Table → columns to RENAME
+	RelaxColumns  map[string][]ColumnRelax  // Table → NOT NULL columns whose field is now optional
 	Orphaned      []OrphanedColumn          // Columns in DB but not in registry
+}
+
+// ColumnRelax is an existing NOT NULL column whose field is no longer
+// required, so it must accept NULL like a new workspace's column does.
+type ColumnRelax struct {
+	Field    doctype.Field
+	LiveType string
 }
 
 // ColumnAdd describes a column to be added to an existing table.
@@ -124,6 +133,7 @@ func ComputeDiff(doctypes []*doctype.DocType, getDocType func(string) *doctype.D
 		NewColumns:    make(map[string][]ColumnAdd),
 		NewIndexes:    make(map[string][]IndexAdd),
 		RenameColumns: make(map[string][]ColumnRename),
+		RelaxColumns:  make(map[string][]ColumnRelax),
 	}
 
 	for _, dt := range doctypes {
@@ -245,6 +255,7 @@ func ComputeDiff(doctypes []*doctype.DocType, getDocType func(string) *doctype.D
 		}
 
 		diff.addMissingUniqueIndexes(tableName, dt, liveTable)
+		diff.addRelaxedColumns(tableName, dt.DataFields(), liveTable, dialect)
 
 		diff.addOrphanedColumns(tableName, dt, liveTable)
 	}
@@ -263,42 +274,12 @@ func ComputeDiff(doctypes []*doctype.DocType, getDocType func(string) *doctype.D
 					continue
 				}
 				// Avoid duplicate entries.
-				found := false
-				for _, nt := range diff.NewTables {
-					if nt == childTableName {
-						found = true
-						break
-					}
-				}
-				if !found {
+				if !slices.Contains(diff.NewTables, childTableName) {
 					diff.NewTables = append(diff.NewTables, childTableName)
 				}
 			} else if childDT != nil {
 				// Child table already exists AND child doctype is now available.
-				// Detect missing data columns and add them. This recovers from
-				// cases where a parent was activated before its child doctype,
-				// creating a skeleton child table without data columns.
-				existingTable := liveSchema[childTableName]
-				for _, cf := range childDT.DataFields() {
-					if cf.Fieldtype == "Table" {
-						continue
-					}
-					if _, exists := existingTable.Columns[cf.Fieldname]; !exists {
-						diff.NewColumns[childTableName] = append(
-							diff.NewColumns[childTableName],
-							ColumnAdd{
-								Name:     cf.Fieldname,
-								Type:     dialect.ColumnType(&cf),
-								Nullable: !cf.Reqd,
-								Default:  cf.Default,
-							},
-						)
-						slog.Info("schema: backfilling missing column in existing child table",
-							"child_table", childTableName,
-							"column", cf.Fieldname,
-							"child_doctype", childDT.Name)
-					}
-				}
+				diff.addChildColumns(childTableName, childDT, liveSchema[childTableName], dialect)
 			}
 		}
 	}
@@ -308,7 +289,7 @@ func ComputeDiff(doctypes []*doctype.DocType, getDocType func(string) *doctype.D
 
 // IsEmpty returns true if there are no changes to apply.
 func (d *Diff) IsEmpty() bool {
-	return len(d.NewTables) == 0 && len(d.NewColumns) == 0 && len(d.NewIndexes) == 0 && len(d.RenameColumns) == 0
+	return len(d.NewTables) == 0 && len(d.NewColumns) == 0 && len(d.NewIndexes) == 0 && len(d.RenameColumns) == 0 && len(d.RelaxColumns) == 0
 }
 
 // GenerateDDL produces the SQL statements to apply the diff.
@@ -365,6 +346,8 @@ func (d *Diff) GenerateDDL(doctypes []*doctype.DocType, getDocType func(string) 
 			statements = append(statements, stmt)
 		}
 	}
+
+	statements = append(statements, d.relaxDDL(dialect)...)
 
 	// CREATE INDEX statements.
 	for tableName, idxs := range d.NewIndexes {
@@ -666,22 +649,11 @@ func AnalyzeImpact(database *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype
 			}
 			preview.Changes = append(preview.Changes, change)
 		}
-		// Detect not-required → required changes.
-		if !oldF.Reqd && newF.Reqd {
-			change := TieredChange{
-				DocType: oldDT.Name,
-				Field:   name,
-				Change:  "Field is now required",
-				Rows:    rowCount,
-			}
-			if storedDefault(newF.Fieldtype, newF.Default) != "" {
-				change.Tier = "safe"
-				change.Message = fmt.Sprintf("%d rows backfilled with default", rowCount)
-			} else {
-				change.Tier = "warning"
-				change.Message = fmt.Sprintf("%d rows may have empty values", rowCount)
-			}
+		if change, ok := requirednessChange(oldDT, oldF, newF, rowCount, dialect); ok {
 			preview.Changes = append(preview.Changes, change)
+			if change.DDL != "" {
+				preview.DDL = append(preview.DDL, change.DDL)
+			}
 		}
 	}
 
@@ -696,6 +668,34 @@ func AnalyzeImpact(database *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype
 	}
 
 	return preview
+}
+
+// requirednessChange classifies a field whose required flag changed. Making a
+// field optional is safe: its column only starts accepting NULL. Making it
+// required is safe only when a stored default backfills existing rows.
+func requirednessChange(oldDT *doctype.DocType, oldF, newF *doctype.Field, rowCount int, dialect db.Dialect) (TieredChange, bool) {
+	change := TieredChange{DocType: oldDT.Name, Field: newF.Fieldname, Rows: rowCount}
+	switch {
+	case oldF.Reqd && !newF.Reqd:
+		change.Tier = "safe"
+		change.Change = "Field is now optional"
+		change.Message = "Column will accept empty values"
+		if nullable, ok := dialect.(db.NullableColumnDialect); ok {
+			change.DDL = nullable.DropNotNull(oldDT.RawTableName(), newF, "")
+		}
+	case !oldF.Reqd && newF.Reqd:
+		change.Change = "Field is now required"
+		if storedDefault(newF.Fieldtype, newF.Default) != "" {
+			change.Tier = "safe"
+			change.Message = fmt.Sprintf("%d rows backfilled with default", rowCount)
+		} else {
+			change.Tier = "warning"
+			change.Message = fmt.Sprintf("%d rows may have empty values", rowCount)
+		}
+	default:
+		return change, false
+	}
+	return change, true
 }
 
 // addedFieldChange classifies a field added to an existing doctype and builds
@@ -790,6 +790,66 @@ func (d *Diff) addMissingUniqueIndexes(tableName string, dt *doctype.DocType, li
 		}
 		d.NewIndexes[tableName] = append(d.NewIndexes[tableName], IndexAdd{Table: tableName, Columns: []string{field.Fieldname}, Unique: true})
 	}
+}
+
+// addChildColumns brings an existing child table up to its child doctype. It
+// adds missing data columns, which recovers from a parent activated before
+// its child doctype (a skeleton child table without data columns), and
+// relaxes columns whose field is no longer required.
+func (d *Diff) addChildColumns(childTableName string, childDT *doctype.DocType, existingTable *TableInfo, dialect db.SchemaDialect) {
+	d.addRelaxedColumns(childTableName, childDT.DataFields(), existingTable, dialect)
+	for _, cf := range childDT.DataFields() {
+		if cf.Fieldtype == "Table" {
+			continue
+		}
+		if _, exists := existingTable.Columns[cf.Fieldname]; !exists {
+			d.NewColumns[childTableName] = append(
+				d.NewColumns[childTableName],
+				ColumnAdd{
+					Name:     cf.Fieldname,
+					Type:     dialect.ColumnType(&cf),
+					Nullable: !cf.Reqd,
+					Default:  cf.Default,
+				},
+			)
+			slog.Info("schema: backfilling missing column in existing child table",
+				"child_table", childTableName,
+				"column", cf.Fieldname,
+				"child_doctype", childDT.Name)
+		}
+	}
+}
+
+// addRelaxedColumns records each existing NOT NULL data column whose field is
+// no longer required. It only relaxes: tightening a column needs a backfill
+// and is classified by AnalyzeImpact instead. Dialects that cannot drop NOT
+// NULL in place are skipped.
+func (d *Diff) addRelaxedColumns(tableName string, fields []doctype.Field, liveTable *TableInfo, dialect db.SchemaDialect) {
+	if _, ok := dialect.(db.NullableColumnDialect); !ok {
+		return
+	}
+	for _, field := range fields {
+		live, exists := liveTable.Columns[field.Fieldname]
+		if field.Reqd || field.Fieldtype == "Table" || !exists || live.Nullable {
+			continue
+		}
+		d.RelaxColumns[tableName] = append(d.RelaxColumns[tableName], ColumnRelax{Field: field, LiveType: live.Type})
+	}
+}
+
+// relaxDDL makes each recorded column accept NULL.
+func (d *Diff) relaxDDL(dialect db.Dialect) []string {
+	nullable, ok := dialect.(db.NullableColumnDialect)
+	if !ok {
+		return nil
+	}
+	var statements []string
+	for tableName, cols := range d.RelaxColumns {
+		for _, col := range cols {
+			statements = append(statements, nullable.DropNotNull(tableName, &col.Field, col.LiveType))
+		}
+	}
+	return statements
 }
 
 // ComputeDiffFromRegistry is a backward-compat wrapper. Prefer calling

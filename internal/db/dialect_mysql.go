@@ -219,6 +219,20 @@ func (d *MySQLDialect) AlterColumn(tableName string, f *doctype.Field) string {
 	return fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN %s", d.QuoteIdent(tableName), col)
 }
 
+// DropNotNull re-declares the column with its live type and NULL. MODIFY
+// replaces the whole definition, so the field's default is restated as
+// CREATE TABLE would declare it for an optional field.
+func (d *MySQLDialect) DropNotNull(tableName string, f *doctype.Field, liveType string) string {
+	if liveType == "" {
+		liveType = d.ColumnType(f)
+	}
+	col := fmt.Sprintf("%s %s NULL", d.QuoteIdent(f.Fieldname), liveType)
+	if mysqlSupportsDefault(f.Fieldtype) {
+		col += sqlDefaultClause("mysql", f.Fieldtype, f.Default)
+	}
+	return fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN %s", d.QuoteIdent(tableName), col)
+}
+
 func (d *MySQLDialect) RenameColumn(tableName, oldName, newName string) string {
 	return fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s",
 		d.QuoteIdent(tableName), d.QuoteIdent(oldName), d.QuoteIdent(newName))
