@@ -12,6 +12,7 @@ import (
 // linkUse is one Link value on a record or one of its child rows, kept so a
 // missing target can be reported against the field that holds it.
 type linkUse struct {
+	owner string // the record type holding the Link: the record or a child row type
 	field doctype.Field
 	value string
 }
@@ -63,7 +64,7 @@ func (tx *TxManager) collectLinks(targets linkTargets, dt *doctype.DocType, doc 
 		if value == "" {
 			continue
 		}
-		targets[target.Name] = append(targets[target.Name], linkUse{field: field, value: value})
+		targets[target.Name] = append(targets[target.Name], linkUse{owner: dt.Name, field: field, value: value})
 	}
 }
 
@@ -97,9 +98,9 @@ func (tx *TxManager) requireLinkTargets(queryer db.Queryer, target *doctype.DocT
 		if !found[use.value] {
 			return fmt.Errorf("%w: %w", ErrValidation, &doctype.ValidationError{
 				Type:    "LinkValidationError",
-				Message: fmt.Sprintf("%s: %s does not exist.", use.field.Label, use.value),
+				Message: fmt.Sprintf("The %s you picked no longer exists. Choose another one.", strings.ToLower(use.field.Label)),
 				Field:   use.field.Fieldname,
-				DocType: target.Name,
+				DocType: use.owner,
 			})
 		}
 	}

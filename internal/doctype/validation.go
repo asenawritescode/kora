@@ -818,7 +818,7 @@ func selectValueErrors(field *Field, val any, doctypeName string) ValidationErro
 	}
 	return ValidationErrors{&ValidationError{
 		Type:    "ValidationError",
-		Message: fmt.Sprintf("%s: %q is not one of the allowed options.", field.Label, value),
+		Message: fmt.Sprintf("Choose one of the listed options for %s.", strings.ToLower(field.Label)),
 		Field:   field.Fieldname,
 		DocType: doctypeName,
 	}}
