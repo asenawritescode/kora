@@ -1,6 +1,14 @@
 name: Sale
 module: Selling
-is_submittable: true
+quantity_effect:
+  target_doctype: Product
+  target_quantity_field: stock_qty
+  lines_field: items
+  source_record_field: product
+  delta_field: quantity
+  direction: decrease
+  status_field: status
+  apply_in_statuses: [Awaiting Payment, Partially Paid, Paid]
 title_field: reference
 search_fields: reference, status
 sort_field: modified
