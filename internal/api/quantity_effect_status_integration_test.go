@@ -6,9 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+
+	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/kernel"
 )
 
 // A Sale's quantity_effect is gated by its status: it takes stock while the
@@ -178,6 +183,41 @@ func TestSaleThatCannotBeFilledIsRefusedAndStaysDraft(t *testing.T) {
 		}
 		if status := e.saleStatus(t, name); status != "Draft" {
 			t.Fatalf("status = %q after a refused payment, want Draft", status)
+		}
+	})
+}
+
+// runBundle sends a record bundle the way a register checkout does: one kernel
+// operation that creates several records together.
+func (e *effectHarness) runBundle(t *testing.T, payload kernel.RecordMutationBundlePayload, key string) *contract.Error {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/view/action/complete", nil)
+	execution := integrationTestExecution(t, effectSite, "admin@example.test", effectAdmin)
+	ctx.Set("site_name", effectSite)
+	ctx.Set("site_db", e.db)
+	ctx.Set("site_registry", e.reg)
+	ctx.Set("site_db_type", e.driver)
+	ctx.Set("user", execution.Actor().PrincipalID)
+	ctx.Set("user_role", effectAdmin[0])
+	ctx.Set("user_roles", append([]string(nil), effectAdmin...))
+	ctx.Set("policy_execution", execution)
+	_, _, cerr := e.h.runKernelMutationBundle(ctx, payload, key)
+	return cerr
+}
+
+func TestSaleCreatedAsPaidInABundleDecreasesStockOnce(t *testing.T) {
+	forEachQuantityEffectDialect(t, func(t *testing.T, e *effectHarness) {
+		data, _ := json.Marshal(map[string]any{"reference": "SALE-B1", "status": "Paid", "items": saleLines(2)})
+		payload := kernel.RecordMutationBundlePayload{Doctype: "Sale", Records: []kernel.RecordMutationBundleItem{{Key: "sale", Doctype: "Sale", Data: data}}}
+		for range 2 { // the retry replays the first result
+			if cerr := e.runBundle(t, payload, "bundle-sale-b1"); cerr != nil {
+				t.Fatalf("bundle: %+v", cerr)
+			}
+		}
+		if got := e.stockOf(t, "SODA"); got != 8 {
+			t.Fatalf("stock = %v, want 8", got)
 		}
 	})
 }

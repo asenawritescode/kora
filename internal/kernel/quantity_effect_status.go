@@ -40,12 +40,16 @@ func createStatusApplies(dt *doctype.DocType, data map[string]any) (bool, *contr
 }
 
 // applyStatusEffect moves stock for a gated record that a write has just saved.
-// oldDoc is the stored record, doc the one written. It does nothing for an
-// ungated effect or a record that did not exist before the write.
+// oldDoc is the stored record (nil for a new one), doc the one written. A new
+// record created inside a bundle (a register checkout) moves stock here; a
+// single create was already rewritten to carry its stock change (effectItems).
 func (m *mutation) applyStatusEffect(ctx context.Context, dt *doctype.DocType, oldDoc, doc *doctype.Document) *contract.Error {
 	effect := dt.QuantityEffect
-	if !effect.Gated() || oldDoc == nil {
+	if !effect.Gated() || (oldDoc == nil && len(m.op.Context.effectItems) > 0) {
 		return nil
+	}
+	if oldDoc == nil {
+		oldDoc = doctype.NewDocument(dt.Name)
 	}
 	wasIn := effect.AppliesIn(oldDoc.GetString(effect.StatusField))
 	isIn := effect.AppliesIn(doc.GetString(effect.StatusField))
