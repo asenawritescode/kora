@@ -4,7 +4,7 @@ Garage and workshop records: Customer Vehicle, Job Card and its child table Job 
 Module name **Workshop**. Roles: **Workshop Manager** (everything, including delete) and
 **Mechanic** (reads vehicles and job cards, creates and updates job cards, cannot delete).
 One view, **Workshop** at `/workshop` (open job cards and vehicles), and one report,
-`job_cards_by_status`. Parts link to `Product`, so this pack needs the Selling pack (`pos-base`).
+`job_cards_by_status`. Parts link to `Product`, so this pack needs the Selling pack (`erpsell`).
 
 What is enforced (each point is tested on real MySQL):
 

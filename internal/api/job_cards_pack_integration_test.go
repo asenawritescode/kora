@@ -21,7 +21,7 @@ func workshopStock(t *testing.T, c *packClient, product string) float64 {
 // parts from stock, the refusals around it, and what editing a saved job card
 // does (and does not do) to stock.
 func TestWorkshopJobCardTakesPartsFromStockWorkflowOnMySQL(t *testing.T) {
-	handler, db, reg, site := newPackLayersHandler(t, "pos-base", "job-cards")
+	handler, db, reg, site := newPackLayersHandler(t, "erpsell", "job-cards")
 	c := newPackClient(t, handler, db, reg, site)
 
 	filter := c.create("Product", `{"reference":"W-FILTER","product_name":"Oil filter","selling_price":500,"stock_qty":10}`)

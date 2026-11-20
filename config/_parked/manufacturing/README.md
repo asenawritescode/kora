@@ -2,7 +2,7 @@
 
 Bills of materials, work orders and production runs that move stock: Bill of Materials
 (with BOM Component rows), Work Order, Production Run and Material Issue. It builds on the
-Selling/Stock pack's `Product` (`config/pos-base`), so install it with that pack.
+Selling/Stock pack's `Product` (`config/erpsell`), so install it with that pack.
 Roles: **Production Manager** (everything except deleting append-only records) and
 **Production Operator** (reads recipes and work orders; creates production runs and material
 issues; cannot delete). One view, **Production Overview** at `/production` (open work orders

@@ -1,4 +1,4 @@
-# pos-base
+# erpsell
 
 A lean point-of-sale base that keeps its books in one currency and lets every
 money record carry its own. It is built from what worked in `retail-shop` (small,

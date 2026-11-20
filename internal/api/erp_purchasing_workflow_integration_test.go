@@ -12,7 +12,7 @@ import (
 // supplier, an order, goods received (which raise stock), the supplier's bill and
 // our payment of it.
 func TestERPPurchasingBuyToPayWorkflowOnMySQL(t *testing.T) {
-	handler, db, reg, site := newPackLayersHandler(t, "pos-base", "erp-purchasing")
+	handler, db, reg, site := newPackLayersHandler(t, "erpsell", "erp-purchasing")
 	if _, err := db.Exec("INSERT INTO `tabProduct` (name, reference, product_name, selling_price, stock_qty, status) VALUES ('PROD-001','P-1','Soda',100,0,'Active')"); err != nil {
 		t.Fatal(err)
 	}

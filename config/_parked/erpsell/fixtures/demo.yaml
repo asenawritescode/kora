@@ -1,4 +1,4 @@
-pack: pos-base
+pack: erpsell
 seed_mode: demo
 records:
   - doctype: Currency

@@ -11,7 +11,7 @@ import (
 // The Produce pack as shipped, on real MySQL: a delivery raises the product's
 // stock and prices itself, refusals move no stock, and a saved delivery is frozen.
 func TestProduceDeliveryRaisesStockAndIsFrozenOnMySQL(t *testing.T) {
-	handler, db, reg, site := newPackLayersHandler(t, "pos-base", "farm-produce")
+	handler, db, reg, site := newPackLayersHandler(t, "erpsell", "farm-produce")
 	c := newPackClient(t, handler, db, reg, site)
 	if _, err := db.Exec("INSERT INTO `tabProduct` (name, reference, product_name, selling_price, stock_qty, status) VALUES ('PROD-001','P-1','Maize',60,0,'Active')"); err != nil {
 		t.Fatal(err)

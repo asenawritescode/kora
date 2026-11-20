@@ -1,6 +1,6 @@
 # erp-purchasing
 
-Layer on top of `pos-base` (needs its `Currency` and `Product` records; always
+Layer on top of `erpsell` (needs its `Currency` and `Product` records; always
 install both). Buying from suppliers and paying them, in any currency.
 
 Records: Supplier, Purchase Order (+ item), Goods Receipt (+ item), Supplier Bill,
@@ -14,7 +14,7 @@ workspace administrator can do all of it.
 
 Report: **Buying overview** (orders and supplier bills by status, in base currency).
 
-Same money convention as `pos-base`: every money record has `currency` (empty =
+Same money convention as `erpsell`: every money record has `currency` (empty =
 base currency) and a frozen `exchange_rate`, and a computed base amount. Rates
 are typed in by hand.
 

@@ -1,8 +1,8 @@
 # batch-expiry
 
 Dispensing and medicine batches: Patient, Prescription (with Prescription Line rows) and
-Medicine Batch. Medicines are `Product` records from the Selling pack (`pos-base`), so this
-pack needs pos-base installed. Roles: **Pharmacist** (everything) and **Dispensing
+Medicine Batch. Medicines are `Product` records from the Selling pack (`erpsell`), so this
+pack needs erpsell installed. Roles: **Pharmacist** (everything) and **Dispensing
 Assistant** (reads patients and batches, creates and edits prescriptions, cannot delete).
 One view, **Dispensary** at `/dispensary` (prescriptions waiting, and the batches table),
 and a `dispensary_overview` report (prescriptions by status, batches by medicine).
