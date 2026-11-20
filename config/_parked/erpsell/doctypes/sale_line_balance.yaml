@@ -1,0 +1,41 @@
+name: Sale Line Balance
+module: Selling
+title_field: product
+search_fields: product
+sort_field: modified
+sort_order: DESC
+description: >-
+  How much of one sold line is still open for a return. Written when a sale is
+  recorded and reduced by each return against it.
+
+fields:
+  - fieldname: sale
+    fieldtype: Link
+    options: Sale
+    label: Sale
+    reqd: true
+    search_index: true
+    in_list_view: true
+  - fieldname: product
+    fieldtype: Link
+    options: Product
+    label: Product
+    reqd: true
+    in_list_view: true
+  - fieldname: unit_price
+    fieldtype: Currency
+    label: Unit price
+    reqd: true
+  - fieldname: sold_quantity
+    fieldtype: Float
+    label: Sold quantity
+    reqd: true
+  - fieldname: remaining_quantity
+    fieldtype: Float
+    label: Remaining quantity
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0
+        message: "The remaining quantity cannot be negative."

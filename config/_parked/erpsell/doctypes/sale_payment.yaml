@@ -1,0 +1,46 @@
+name: Sale Payment
+module: Selling
+is_child_table: true
+title_field: method
+description: One way a sale was paid. A sale can be paid in several lines.
+
+fields:
+  - fieldname: method
+    fieldtype: Select
+    label: Method
+    options: |
+      Cash
+      Card
+      Mobile Money
+    reqd: true
+    in_list_view: true
+  - fieldname: currency
+    fieldtype: Link
+    options: Currency
+    label: Currency
+    description: Leave empty for the base currency.
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0
+        message: "The amount cannot be negative."
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    description: Payment reference for a card or mobile money payment. A refund has none.
+  - fieldname: payment_account
+    fieldtype: Link
+    options: Payment Account
+    label: Payment account
+    description: Account a non-cash payment was received on. Empty for cash.
+  - fieldname: verification
+    fieldtype: Select
+    label: Verification
+    options: |
+      provider_confirmed
+      manually_recorded
+    description: How a non-cash payment was confirmed. Empty for cash.
