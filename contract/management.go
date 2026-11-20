@@ -499,6 +499,12 @@ func ValidateProvisionTenant(cmd ProvisionTenant) error {
 	if cmd.PackageDigest != "" && !packageDigestPattern.MatchString(cmd.PackageDigest) {
 		return fmt.Errorf("package digest must be lowercase SHA-256 hex")
 	}
+	return cmd.validateNames()
+}
+
+// validateNames checks the tenant's display name and the bootstrap admin's
+// full name, the two free-text names a provision command carries.
+func (cmd ProvisionTenant) validateNames() error {
 	if _, err := NormalizeTenantDisplayName(cmd.DisplayName); err != nil {
 		return err
 	}

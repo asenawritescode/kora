@@ -57,8 +57,8 @@ func TestLiveCreateSiteStoresAdminFullName(t *testing.T) {
 				if dialect.driver == "postgres" {
 					quoted = `"` + databaseName + `" WITH (FORCE)`
 				}
-				if _, err := platformDB.ExecContext(ctx, "DROP DATABASE IF EXISTS "+quoted); err != nil {
-					t.Logf("drop disposable tenant database %s: %v", databaseName, err)
+				if _, dropErr := platformDB.ExecContext(ctx, "DROP DATABASE IF EXISTS "+quoted); dropErr != nil {
+					t.Logf("drop disposable tenant database %s: %v", databaseName, dropErr)
 				}
 			})
 			result, err = CreateSite(t.Context(), CreateSiteInput{
