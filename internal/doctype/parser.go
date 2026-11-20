@@ -1095,62 +1095,114 @@ func validateQuantityEffects(doctypes []*DocType, dtMap map[string]*DocType) []C
 		errs = append(errs, CrossFileError{Code: "InvalidQuantityEffect", DocType: dt.Name, Field: field, Message: message})
 	}
 	for _, dt := range doctypes {
-		q := dt.QuantityEffect
-		if q == nil {
-			continue
-		}
-		if dt.IsSubmittable {
-			bad(dt, "quantity_effect", "quantity_effect applies when the record is created, so it cannot be used on a submittable record (stock would change on save, not on submit)")
-		}
-		if q.Direction != "" && q.Direction != "increase" && q.Direction != "decrease" {
-			bad(dt, "direction", fmt.Sprintf("quantity_effect direction %q must be increase or decrease", q.Direction))
-		}
-		if len(q.ReasonDirections) > 0 {
-			if q.LinesField != "" {
-				bad(dt, "reason_directions", "quantity_effect reason_directions cannot be used together with lines_field")
-			}
-			reason := dt.GetField(q.ReasonField)
-			if reason == nil || reason.Fieldtype != "Select" {
-				bad(dt, "reason_field", "quantity_effect reason_directions needs reason_field to name a Select field on this record")
-			}
-			for value, direction := range q.ReasonDirections {
-				if direction != "increase" && direction != "decrease" {
-					bad(dt, "reason_directions", fmt.Sprintf("quantity_effect reason %q has direction %q; use increase or decrease", value, direction))
-				}
-				if reason != nil && reason.Fieldtype == "Select" && !selectHasOption(reason, value) {
-					bad(dt, "reason_directions", fmt.Sprintf("quantity_effect reason %q is not one of the options of %s", value, q.ReasonField))
-				}
-			}
-		}
-		target := dtMap[q.TargetDocType]
-		if target == nil {
-			bad(dt, "target_doctype", fmt.Sprintf("quantity_effect target_doctype %q does not exist", q.TargetDocType))
-			continue
-		}
-		if f := target.GetField(q.TargetQuantityField); f == nil || !(f.Fieldtype == "Int" || f.Fieldtype == "Float" || f.Fieldtype == "Currency") {
-			bad(dt, "target_quantity_field", fmt.Sprintf("quantity_effect target_quantity_field %q must be a number field on %s", q.TargetQuantityField, target.Name))
-		}
-		source := dt
-		if q.LinesField != "" {
-			lines := dt.GetField(q.LinesField)
-			if lines == nil || lines.Fieldtype != "Table" {
-				bad(dt, "lines_field", fmt.Sprintf("quantity_effect lines_field %q must be a Table field", q.LinesField))
-				continue
-			}
-			source = dtMap[lines.Options]
-			if source == nil {
-				bad(dt, "lines_field", fmt.Sprintf("quantity_effect lines table %q has no record type %q", q.LinesField, lines.Options))
-				continue
-			}
-		}
-		if f := source.GetField(q.SourceRecordField); f == nil || f.Fieldtype != "Link" || f.Options != target.Name {
-			bad(dt, "source_record_field", fmt.Sprintf("quantity_effect source_record_field %q must be a Link to %s on %s", q.SourceRecordField, target.Name, source.Name))
-		}
-		if f := source.GetField(q.DeltaField); f == nil || !(f.Fieldtype == "Int" || f.Fieldtype == "Float" || f.Fieldtype == "Currency") {
-			bad(dt, "delta_field", fmt.Sprintf("quantity_effect delta_field %q must be a number field on %s", q.DeltaField, source.Name))
+		if dt.QuantityEffect != nil {
+			validateQuantityEffect(dt, dtMap, bad)
 		}
 	}
 	return errs
+}
+
+func validateQuantityEffect(dt *DocType, dtMap map[string]*DocType, bad func(*DocType, string, string)) {
+	q := dt.QuantityEffect
+	if dt.IsSubmittable {
+		bad(dt, "quantity_effect", "quantity_effect applies when the record is created, so it cannot be used on a submittable record (stock would change on save, not on submit)")
+	}
+	if q.Direction != "" && q.Direction != "increase" && q.Direction != "decrease" {
+		bad(dt, "direction", fmt.Sprintf("quantity_effect direction %q must be increase or decrease", q.Direction))
+	}
+	validateReasonDirections(dt, q, bad)
+	validateQuantityStatusGate(dt, q, bad)
+	validateQuantityTargets(dt, dtMap, q, bad)
+}
+
+// validateReasonDirections checks the reason-decided direction of a record-level effect.
+func validateReasonDirections(dt *DocType, q *QuantityEffect, bad func(*DocType, string, string)) {
+	if len(q.ReasonDirections) == 0 {
+		return
+	}
+	if q.LinesField != "" {
+		bad(dt, "reason_directions", "quantity_effect reason_directions cannot be used together with lines_field")
+	}
+	reason := dt.GetField(q.ReasonField)
+	if reason == nil || reason.Fieldtype != "Select" {
+		bad(dt, "reason_field", "quantity_effect reason_directions needs reason_field to name a Select field on this record")
+	}
+	for value, direction := range q.ReasonDirections {
+		if direction != "increase" && direction != "decrease" {
+			bad(dt, "reason_directions", fmt.Sprintf("quantity_effect reason %q has direction %q; use increase or decrease", value, direction))
+		}
+		if reason != nil && reason.Fieldtype == "Select" && !selectHasOption(reason, value) {
+			bad(dt, "reason_directions", fmt.Sprintf("quantity_effect reason %q is not one of the options of %s", value, q.ReasonField))
+		}
+	}
+}
+
+// validateQuantityStatusGate checks the status that gates an effect: status_field
+// and apply_in_statuses come together, the field is a Select on this record, and
+// every listed status is one of its options. A gate does not need append_only.
+func validateQuantityStatusGate(dt *DocType, q *QuantityEffect, bad func(*DocType, string, string)) {
+	if q.StatusField == "" && len(q.ApplyInStatuses) == 0 {
+		return
+	}
+	if q.StatusField == "" {
+		bad(dt, "status_field", "quantity_effect apply_in_statuses needs status_field to name a Select field on this record")
+		return
+	}
+	if len(q.ApplyInStatuses) == 0 {
+		bad(dt, "apply_in_statuses", "quantity_effect status_field needs apply_in_statuses: the statuses that apply the effect")
+	}
+	status := dt.GetField(q.StatusField)
+	if status == nil || status.Fieldtype != "Select" {
+		bad(dt, "status_field", fmt.Sprintf("quantity_effect status_field %q must be a Select field on %s", q.StatusField, dt.Name))
+		return
+	}
+	for _, value := range q.ApplyInStatuses {
+		if !selectHasOption(status, value) {
+			bad(dt, "apply_in_statuses", fmt.Sprintf("quantity_effect status %q is not one of the options of %s", value, q.StatusField))
+		}
+	}
+}
+
+// validateQuantityTargets checks the target record type and the fields the
+// effect reads from the source record or from its lines.
+func validateQuantityTargets(dt *DocType, dtMap map[string]*DocType, q *QuantityEffect, bad func(*DocType, string, string)) {
+	target := dtMap[q.TargetDocType]
+	if target == nil {
+		bad(dt, "target_doctype", fmt.Sprintf("quantity_effect target_doctype %q does not exist", q.TargetDocType))
+		return
+	}
+	if f := target.GetField(q.TargetQuantityField); f == nil || !(f.Fieldtype == "Int" || f.Fieldtype == "Float" || f.Fieldtype == "Currency") {
+		bad(dt, "target_quantity_field", fmt.Sprintf("quantity_effect target_quantity_field %q must be a number field on %s", q.TargetQuantityField, target.Name))
+	}
+	source := quantityEffectSource(dt, dtMap, q, bad)
+	if source == nil {
+		return
+	}
+	if f := source.GetField(q.SourceRecordField); f == nil || f.Fieldtype != "Link" || f.Options != target.Name {
+		bad(dt, "source_record_field", fmt.Sprintf("quantity_effect source_record_field %q must be a Link to %s on %s", q.SourceRecordField, target.Name, source.Name))
+	}
+	if f := source.GetField(q.DeltaField); f == nil || !(f.Fieldtype == "Int" || f.Fieldtype == "Float" || f.Fieldtype == "Currency") {
+		bad(dt, "delta_field", fmt.Sprintf("quantity_effect delta_field %q must be a number field on %s", q.DeltaField, source.Name))
+	}
+}
+
+// quantityEffectSource returns the record type that carries the source and delta
+// fields: the record itself, or the record type of its lines. It returns nil,
+// after reporting it, when the lines do not name one.
+func quantityEffectSource(dt *DocType, dtMap map[string]*DocType, q *QuantityEffect, bad func(*DocType, string, string)) *DocType {
+	if q.LinesField == "" {
+		return dt
+	}
+	lines := dt.GetField(q.LinesField)
+	if lines == nil || lines.Fieldtype != "Table" {
+		bad(dt, "lines_field", fmt.Sprintf("quantity_effect lines_field %q must be a Table field", q.LinesField))
+		return nil
+	}
+	source := dtMap[lines.Options]
+	if source == nil {
+		bad(dt, "lines_field", fmt.Sprintf("quantity_effect lines table %q has no record type %q", q.LinesField, lines.Options))
+	}
+	return source
 }
 
 func selectHasOption(field *Field, value string) bool {

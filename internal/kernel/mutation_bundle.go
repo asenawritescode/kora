@@ -405,6 +405,13 @@ func (m *mutation) persistBundle(ctx context.Context, b *bundle) *contract.Error
 		}
 	}
 	m.result.Related = related
+	// Stock moves after every item is written, so a target that another item
+	// of this bundle also changed is read at its written value.
+	for i, doc := range b.docs {
+		if cerr := m.applyStatusEffect(ctx, b.types[i], m.bundleSavedDocs[i].oldDoc, doc); cerr != nil {
+			return cerr
+		}
+	}
 	return nil
 }
 
@@ -418,6 +425,12 @@ func (m *mutation) persistItem(ctx context.Context, b *bundle, i int) (string, *
 		return "", cerr
 	}
 	doc.IsNew = false
+	return m.auditItem(recordDT, doc, oldDoc, beforeHash)
+}
+
+// auditItem writes the audit and history rows of a written record and returns
+// the audit id. beforeHash is the record's hash before the write.
+func (m *mutation) auditItem(recordDT *doctype.DocType, doc, oldDoc *doctype.Document, beforeHash string) (string, *contract.Error) {
 	row := m.k.buildAuditRow(m.op, m.def, m.run.OpID, auditOutcome{Doctype: recordDT.Name, DocName: doc.Name, Status: contract.StatusCompleted})
 	row.BeforeHash = beforeHash
 	row.AfterHash = CanonicalDocHash(doc.Fields)
