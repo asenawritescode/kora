@@ -42,6 +42,14 @@ type SearchIndexDialect interface {
 	SearchIndexName(tableName, fieldName string) string
 }
 
+// NullableColumnDialect relaxes an existing NOT NULL column to accept NULL,
+// keeping its type and default, for a field that is no longer required.
+// liveType is the column type the database reports; empty means the field's
+// own column type.
+type NullableColumnDialect interface {
+	DropNotNull(tableName string, f *doctype.Field, liveType string) string
+}
+
 // NumberBlockRow is one reserved range of a naming series, stored in _kora_number_block.
 type NumberBlockRow struct {
 	Doctype string

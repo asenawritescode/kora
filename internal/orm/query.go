@@ -1418,10 +1418,29 @@ func copyFieldsWithStatus(fields map[string]any, docStatus int) map[string]any {
 	return out
 }
 
+// blankTextTypes are the field types stored as text whose empty string means
+// "no value".
+var blankTextTypes = map[string]bool{
+	"Data": true, "Small Text": true, "Text": true, "Long Text": true, "Text Editor": true,
+	"Select": true, "Link": true, "Dynamic Link": true,
+	"Attach": true, "Attach Image": true, "Attach Audio": true,
+}
+
+// blankAsNull stores an empty string in an optional text field as NULL, so
+// blank values never collide on a unique index. Required fields keep their
+// value for validation to judge.
+func blankAsNull(f doctype.Field, v any) any {
+	if s, ok := v.(string); ok && s == "" && !f.Reqd && blankTextTypes[f.Fieldtype] {
+		return nil
+	}
+	return v
+}
+
 // normalizeSQLValue converts a field value to a SQL-bindable type.
 // JSON fields: arrays/objects/slices are marshalled to JSON strings.
 // Strings are validated as JSON. Everything else passes through.
 func normalizeSQLValue(f doctype.Field, v any) (any, error) {
+	v = blankAsNull(f, v)
 	if f.Fieldtype == "Datetime" {
 		switch value := v.(type) {
 		case nil:
