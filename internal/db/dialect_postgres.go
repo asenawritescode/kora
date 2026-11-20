@@ -236,6 +236,11 @@ func (d *PostgresDialect) AlterColumn(tableName string, f *doctype.Field) string
 		d.QuoteIdent(tableName), d.QuoteIdent(f.Fieldname), d.ColumnType(f))
 }
 
+// DropNotNull removes the NOT NULL constraint; type and default are kept.
+func (d *PostgresDialect) DropNotNull(tableName string, f *doctype.Field, _ string) string {
+	return fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s DROP NOT NULL", d.QuoteIdent(tableName), d.QuoteIdent(f.Fieldname))
+}
+
 func (d *PostgresDialect) RenameColumn(tableName, oldName, newName string) string {
 	return fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s",
 		d.QuoteIdent(tableName), d.QuoteIdent(oldName), d.QuoteIdent(newName))

@@ -21,7 +21,7 @@ func TestBuildConfigRestoreDDLReplansQuarantineRestore(t *testing.T) {
 	quarantinedLegacy := doctype.QuarantineNameForRevision("legacy", "old-activation")
 	live := map[string]*schema.TableInfo{"tabInvoice": {
 		Name: "tabInvoice", Columns: map[string]*schema.ColumnInfo{
-			"subject": {Name: "subject"}, "extra": {Name: "extra"}, quarantinedLegacy: {Name: quarantinedLegacy},
+			"subject": {Name: "subject", Nullable: true}, "extra": {Name: "extra", Nullable: true}, quarantinedLegacy: {Name: quarantinedLegacy, Nullable: true},
 		},
 	}}
 	first, err := buildConfigRestoreDDL([]*doctype.DocType{current}, target, live, db.MySQL(), "restore-operation")
@@ -44,7 +44,7 @@ func TestBuildConfigRestoreDDLReplansQuarantineRestore(t *testing.T) {
 	// see the target column restored and the removed field already quarantined.
 	retriedLive := map[string]*schema.TableInfo{"tabInvoice": {
 		Name: "tabInvoice", Columns: map[string]*schema.ColumnInfo{
-			"subject": {Name: "subject"}, "legacy": {Name: "legacy"}, quarantinedExtra: {Name: quarantinedExtra},
+			"subject": {Name: "subject", Nullable: true}, "legacy": {Name: "legacy", Nullable: true}, quarantinedExtra: {Name: quarantinedExtra, Nullable: true},
 		},
 	}}
 	retry, err := buildConfigRestoreDDL([]*doctype.DocType{current}, target, retriedLive, db.MySQL(), "restore-operation")
@@ -73,7 +73,7 @@ func TestBuildConfigRestoreDDLRestoresQuarantinedTable(t *testing.T) {
 	targetType := &doctype.DocType{Name: "Archive", Fields: []doctype.Field{{Fieldname: "subject", Fieldtype: "Data"}}}
 	quarantinedTable := doctype.QuarantineTableNameForRevision(targetType.RawTableName(), "restore-operation")
 	live := map[string]*schema.TableInfo{quarantinedTable: {
-		Name: quarantinedTable, Columns: map[string]*schema.ColumnInfo{"subject": {Name: "subject"}},
+		Name: quarantinedTable, Columns: map[string]*schema.ColumnInfo{"subject": {Name: "subject", Nullable: true}},
 	}}
 	plan, err := buildConfigRestoreDDL(nil, &doctype.ConfigSnapshot{DocTypes: []*doctype.DocType{targetType}}, live, db.MySQL(), "restore-operation")
 	if err != nil {
