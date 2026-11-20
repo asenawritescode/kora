@@ -535,6 +535,7 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		"ALTER TABLE _kora_field ADD COLUMN linked_field VARCHAR(255) NOT NULL DEFAULT ''",
 		"ALTER TABLE _kora_field ADD COLUMN computed TEXT",
 		"ALTER TABLE _kora_field ADD COLUMN accept TEXT",
+		"ALTER TABLE _kora_field ADD COLUMN default_to_name TINYINT(1) NOT NULL DEFAULT 0",
 		"ALTER TABLE _kora_field ADD COLUMN field_precision INT",
 		"ALTER TABLE _kora_field ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
 

@@ -610,6 +610,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		`ALTER TABLE "_kora_field" ADD COLUMN "linked_field" TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE "_kora_field" ADD COLUMN "computed" TEXT`,
 		`ALTER TABLE "_kora_field" ADD COLUMN "accept" TEXT`,
+		`ALTER TABLE "_kora_field" ADD COLUMN "default_to_name" INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE "_kora_field" ADD COLUMN "field_precision" INTEGER`,
 
 		// _kora_role
