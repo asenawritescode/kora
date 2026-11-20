@@ -1,4 +1,5 @@
 name: Member
+naming_series: MEM-.YYYY.-.#####
 module: Members
 title_field: member_name
 search_fields: member_no, member_name, phone
@@ -9,8 +10,9 @@ description: A person who belongs to the society or lender. This is a register e
 fields:
   - fieldname: member_no
     fieldtype: Data
+    default_to_name: true
+    description: Leave blank to use this record's number.
     label: Member number
-    reqd: true
     unique: true
     in_list_view: true
   - fieldname: member_name

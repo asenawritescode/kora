@@ -1,4 +1,5 @@
 name: Subscription Payment
+naming_series: PAY-.YYYY.-.#####
 module: Subscriptions
 append_only: true
 title_field: payment_reference
@@ -16,8 +17,9 @@ description: Money received against a recurring invoice, entered by hand. Saving
 fields:
   - fieldname: payment_reference
     fieldtype: Data
+    default_to_name: true
+    description: Leave blank to use this record's number.
     label: Payment reference
-    reqd: true
     unique: true
     in_list_view: true
     search_index: true

@@ -251,13 +251,16 @@ func (d *DocType) ensureDerivedMetadata() {
 
 // Field represents a single field in a DocType.
 type Field struct {
-	Fieldname                string                  `yaml:"fieldname"           json:"fieldname"`
-	Fieldtype                string                  `yaml:"fieldtype"           json:"fieldtype"`
-	Label                    string                  `yaml:"label"               json:"label"`
-	Options                  string                  `yaml:"options"             json:"options"`
-	Reqd                     bool                    `yaml:"reqd"                json:"reqd"`
-	Unique                   bool                    `yaml:"unique"              json:"unique"`
-	Default                  string                  `yaml:"default"             json:"default"`
+	Fieldname string `yaml:"fieldname"           json:"fieldname"`
+	Fieldtype string `yaml:"fieldtype"           json:"fieldtype"`
+	Label     string `yaml:"label"               json:"label"`
+	Options   string `yaml:"options"             json:"options"`
+	Reqd      bool   `yaml:"reqd"                json:"reqd"`
+	Unique    bool   `yaml:"unique"              json:"unique"`
+	Default   string `yaml:"default"             json:"default"`
+	// DefaultToName fills a blank value with the record's name (its number) on save, so a
+	// reference people may type stays optional yet never empty. Data fields only.
+	DefaultToName            bool                    `yaml:"default_to_name" json:"default_to_name,omitempty"`
 	Hidden                   bool                    `yaml:"hidden"              json:"hidden"`
 	ReadOnly                 bool                    `yaml:"read_only"           json:"read_only"`
 	Bold                     bool                    `yaml:"bold"                json:"bold"`

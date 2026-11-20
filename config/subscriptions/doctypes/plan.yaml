@@ -1,4 +1,5 @@
 name: Plan
+naming_series: PLAN-.YYYY.-.#####
 module: Subscriptions
 title_field: plan_name
 search_fields: plan_name, plan_code
@@ -9,8 +10,9 @@ description: A recurring plan with its price and billing interval. A subscriptio
 fields:
   - fieldname: plan_code
     fieldtype: Data
+    default_to_name: true
+    description: Leave blank to use this record's number.
     label: Plan code
-    reqd: true
     unique: true
     in_list_view: true
     search_index: true

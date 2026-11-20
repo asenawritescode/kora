@@ -1,4 +1,5 @@
 name: Appointment
+naming_series: APT-.YYYY.-.#####
 module: Appointments
 title_field: reference
 search_fields: reference, client_name, client_phone
@@ -9,8 +10,9 @@ description: A client booked for a service at a set time, until it is done, miss
 fields:
   - fieldname: reference
     fieldtype: Data
+    default_to_name: true
+    description: Leave blank to use this record's number.
     label: Reference
-    reqd: true
     unique: true
     in_list_view: true
     search_index: true

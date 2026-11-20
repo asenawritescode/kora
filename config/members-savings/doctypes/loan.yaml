@@ -1,4 +1,5 @@
 name: Loan
+naming_series: LOAN-.YYYY.-.#####
 module: Members
 title_field: reference
 search_fields: reference, status
@@ -9,8 +10,9 @@ description: A loan applied for by a member and the decision on it. It records t
 fields:
   - fieldname: reference
     fieldtype: Data
+    default_to_name: true
+    description: Leave blank to use this record's number.
     label: Reference
-    reqd: true
     unique: true
     in_list_view: true
     search_index: true

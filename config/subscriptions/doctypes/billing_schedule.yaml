@@ -1,4 +1,5 @@
 name: Billing Schedule
+naming_series: BILL-.YYYY.-.#####
 module: Subscriptions
 title_field: reference
 search_fields: reference
@@ -9,8 +10,9 @@ description: One planned billing period for a subscription, entered by hand. Not
 fields:
   - fieldname: reference
     fieldtype: Data
+    default_to_name: true
+    description: Leave blank to use this record's number.
     label: Reference
-    reqd: true
     unique: true
     in_list_view: true
     search_index: true

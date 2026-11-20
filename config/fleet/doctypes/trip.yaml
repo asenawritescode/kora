@@ -1,4 +1,5 @@
 name: Trip
+naming_series: TRIP-.YYYY.-.#####
 module: Fleet
 title_field: reference
 search_fields: reference, origin, destination, status
@@ -9,8 +10,9 @@ description: A journey with one vehicle and one driver, from planning to deliver
 fields:
   - fieldname: reference
     fieldtype: Data
+    default_to_name: true
+    description: Leave blank to use this record's number.
     label: Reference
-    reqd: true
     unique: true
     in_list_view: true
     search_index: true

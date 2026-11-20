@@ -575,43 +575,6 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		`ALTER TABLE "_kora_doctype" ADD COLUMN "version" INTEGER NOT NULL DEFAULT 1`,
 		`CREATE INDEX IF NOT EXISTS "idx_doctype_site" ON "_kora_doctype" ("site")`,
 
-		// _kora_field
-		`CREATE TABLE IF NOT EXISTS "_kora_field" (
-			"name" TEXT NOT NULL PRIMARY KEY,
-			"site" TEXT NOT NULL DEFAULT '',
-			"parent" TEXT NOT NULL,
-			"fieldname" TEXT NOT NULL,
-			"fieldtype" TEXT NOT NULL,
-			"label" TEXT NOT NULL DEFAULT '',
-			"options" TEXT,
-			"reqd" INTEGER NOT NULL DEFAULT 0,
-			"unique_constraint" INTEGER NOT NULL DEFAULT 0,
-			"default_value" TEXT,
-			"hidden" INTEGER NOT NULL DEFAULT 0,
-			"read_only" INTEGER NOT NULL DEFAULT 0,
-			"bold" INTEGER NOT NULL DEFAULT 0,
-			"in_list_view" INTEGER NOT NULL DEFAULT 0,
-			"in_standard_filter" INTEGER NOT NULL DEFAULT 0,
-			"search_index" INTEGER NOT NULL DEFAULT 0,
-			"description" TEXT,
-			"depends_on" TEXT,
-			"mandatory_depends_on" TEXT,
-			"constraints_json" TEXT,
-			"renamed_from" TEXT,
-			"linked_field" TEXT NOT NULL DEFAULT '',
-			"computed" TEXT,
-			"idx" INTEGER NOT NULL DEFAULT 0
-		)`,
-		`CREATE INDEX IF NOT EXISTS "idx_parent" ON "_kora_field" ("parent")`,
-		`CREATE INDEX IF NOT EXISTS "idx_parent_fieldname" ON "_kora_field" ("parent", "fieldname")`,
-		`CREATE INDEX IF NOT EXISTS "idx_field_site" ON "_kora_field" ("site")`,
-
-		// Add columns for backwards compat.
-		`ALTER TABLE "_kora_field" ADD COLUMN "linked_field" TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE "_kora_field" ADD COLUMN "computed" TEXT`,
-		`ALTER TABLE "_kora_field" ADD COLUMN "accept" TEXT`,
-		`ALTER TABLE "_kora_field" ADD COLUMN "field_precision" INTEGER`,
-
 		// _kora_role
 		`CREATE TABLE IF NOT EXISTS "_kora_role" (
 			"name" TEXT NOT NULL PRIMARY KEY,
@@ -783,7 +746,6 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 
 		// Add site columns for multi-tenant isolation (LibSQL backwards compat).
 		`ALTER TABLE "_kora_doctype" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE "_kora_field" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE "_kora_role" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE "_kora_permission" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
 
@@ -807,7 +769,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		)`,
 		`CREATE INDEX IF NOT EXISTS "idx_view_site" ON "_kora_view" ("site")`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS "idx_view_route_unique" ON "_kora_view" ("site", "route")`,
-	}, PaymentTablesLibSQL()...)
+	}, append(libsqlFieldTableSQL(), PaymentTablesLibSQL()...)...)
 }
 
 // parseLibSQLConstraintField extracts the column name from SQLite constraint error messages.
@@ -858,4 +820,48 @@ func executeDDLSequential(db *sql.DB, statements []string) error {
 		}
 	}
 	return nil
+}
+
+// libsqlFieldTableSQL creates _kora_field, the stored fields of each record
+// type, and adds the columns later releases introduced.
+func libsqlFieldTableSQL() []string {
+	return []string{
+		`CREATE TABLE IF NOT EXISTS "_kora_field" (
+			"name" TEXT NOT NULL PRIMARY KEY,
+			"site" TEXT NOT NULL DEFAULT '',
+			"parent" TEXT NOT NULL,
+			"fieldname" TEXT NOT NULL,
+			"fieldtype" TEXT NOT NULL,
+			"label" TEXT NOT NULL DEFAULT '',
+			"options" TEXT,
+			"reqd" INTEGER NOT NULL DEFAULT 0,
+			"unique_constraint" INTEGER NOT NULL DEFAULT 0,
+			"default_value" TEXT,
+			"hidden" INTEGER NOT NULL DEFAULT 0,
+			"read_only" INTEGER NOT NULL DEFAULT 0,
+			"bold" INTEGER NOT NULL DEFAULT 0,
+			"in_list_view" INTEGER NOT NULL DEFAULT 0,
+			"in_standard_filter" INTEGER NOT NULL DEFAULT 0,
+			"search_index" INTEGER NOT NULL DEFAULT 0,
+			"description" TEXT,
+			"depends_on" TEXT,
+			"mandatory_depends_on" TEXT,
+			"constraints_json" TEXT,
+			"renamed_from" TEXT,
+			"linked_field" TEXT NOT NULL DEFAULT '',
+			"computed" TEXT,
+			"idx" INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE INDEX IF NOT EXISTS "idx_parent" ON "_kora_field" ("parent")`,
+		`CREATE INDEX IF NOT EXISTS "idx_parent_fieldname" ON "_kora_field" ("parent", "fieldname")`,
+		`CREATE INDEX IF NOT EXISTS "idx_field_site" ON "_kora_field" ("site")`,
+
+		// Add columns for backwards compat.
+		`ALTER TABLE "_kora_field" ADD COLUMN "linked_field" TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_field" ADD COLUMN "computed" TEXT`,
+		`ALTER TABLE "_kora_field" ADD COLUMN "accept" TEXT`,
+		`ALTER TABLE "_kora_field" ADD COLUMN "default_to_name" INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE "_kora_field" ADD COLUMN "field_precision" INTEGER`,
+		`ALTER TABLE "_kora_field" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
+	}
 }

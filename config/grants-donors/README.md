@@ -6,7 +6,7 @@ donors and grants, creates and updates grant reports, cannot delete). One view,
 **Grants Overview** at `/grants` (all grants, and reports still Due), and a grants overview
 report (grants by status with amount, reports by status).
 
-- Donor names are unique. A grant has a unique reference and an amount of at least 0.01.
+- Donor names are unique. A grant has a unique reference (left blank, the grant's number) and an amount of at least 0.01.
 - A grant's end date cannot be before its start date.
 - A Submitted or Accepted grant report needs a "submitted on" date.
 - Once a grant is Closed or Declined, its donor and amount are frozen.

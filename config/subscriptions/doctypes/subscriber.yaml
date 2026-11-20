@@ -1,4 +1,5 @@
 name: Subscriber
+naming_series: SBR-.YYYY.-.#####
 module: Subscriptions
 title_field: subscriber_name
 search_fields: subscriber_name, subscriber_code, email, phone
@@ -9,8 +10,9 @@ description: A person or organisation that holds one or more subscriptions, for 
 fields:
   - fieldname: subscriber_code
     fieldtype: Data
+    default_to_name: true
+    description: Leave blank to use this record's number.
     label: Subscriber code
-    reqd: true
     unique: true
     in_list_view: true
     search_index: true
