@@ -36,7 +36,7 @@ transaction:
       record: Till Session
       name: $steps.till.name
       values:
-        closing_cash: $input.closing_count
+        closing_count: $input.closing_count
         status: Closed
         closed_at: $now
         difference_reason: $input.difference_reason

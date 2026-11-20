@@ -9,6 +9,6 @@ owner_field: opened_by
 filters:
   - {field: opened_by, op: eq, value: $actor}
   - {field: status, op: eq, value: Open}
-fields: [name, shift, register, location, opened_by, opening_cash, expected_cash, creation]
+fields: [name, shift, register, location, opened_by, opening_float, expected_cash, creation]
 sort: [{field: creation, dir: desc}]
 limit: 1

@@ -10,6 +10,6 @@ input:
 filters:
   - {field: register, op: eq, value: $input.register}
   - {field: status, op: eq, value: Closed}
-fields: [name, opened_by, closing_cash, left_in_drawer, closed_at]
+fields: [name, opened_by, closing_count, left_in_drawer, closed_at]
 sort: [{field: closed_at, dir: desc}]
 limit: 1

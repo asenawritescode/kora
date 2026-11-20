@@ -95,6 +95,14 @@ fields:
     options: Till Count Line
     label: Opening count
     description: Notes and coins counted into the till at open. Optional.
+  - fieldname: opening_float
+    fieldtype: Currency
+    label: Opening float
+    description: Cash put in the drawer when the till opened.
+  - fieldname: closing_count
+    fieldtype: Currency
+    label: Closing count
+    description: Cash counted in the drawer at close.
   - fieldname: closing_counts
     fieldtype: Table
     options: Till Count Line
@@ -108,13 +116,13 @@ fields:
     fieldtype: Currency
     label: Taken out
     read_only: true
-    computed: "closing_cash - left_in_drawer"
+    computed: "closing_count - left_in_drawer"
     description: Counted cash that leaves the till.
   - fieldname: variance
     fieldtype: Currency
     label: Variance
     read_only: true
-    computed: "closing_cash - expected_cash"
+    computed: "closing_count - expected_cash"
   - fieldname: difference_reason
     fieldtype: Select
     label: Difference reason
@@ -172,22 +180,22 @@ fields:
 doc_constraints:
   - type: field_dependency
     condition: "status == 'Closed'"
-    require_fields: [closing_cash]
+    require_fields: [closing_count]
     message: "Count the cash in the drawer before closing the till."
   - type: immutable_after
     status_field: status
     status_values: [Closed]
-    immutable_fields: [reference, register, register_code, opening_cash, expected_cash, opened_by, opened_at]
+    immutable_fields: [reference, register, register_code, opening_float, expected_cash, opened_by, opened_at]
     message: "A closed till cannot be changed."
   - type: field_dependency
-    condition: '(and (== status "Closed") (or (> (- closing_cash expected_cash) 100) (> (- expected_cash closing_cash) 100)))'
+    condition: '(and (== status "Closed") (or (> (- closing_count expected_cash) 100) (> (- expected_cash closing_count) 100)))'
     require_fields: [difference_reason]
     message: "Pick a reason before closing."
   - type: predicate
     condition: '(> (count "opening_counts") 0)'
-    predicate: '(== (round opening_cash 2) (round (sum "opening_counts" "amount") 2))'
+    predicate: '(== (round opening_float 2) (round (sum "opening_counts" "amount") 2))'
     message: Counted notes and coins don't add up to the total.
   - type: predicate
     condition: '(> (count "closing_counts") 0)'
-    predicate: '(== (round closing_cash 2) (round (sum "closing_counts" "amount") 2))'
+    predicate: '(== (round closing_count 2) (round (sum "closing_counts" "amount") 2))'
     message: Counted notes and coins don't add up to the total.

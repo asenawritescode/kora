@@ -48,7 +48,7 @@ transaction:
         register: $input.register
         location: $input.location
         opened_by: $actor
-        opening_cash: $input.opening_float
+        opening_float: $input.opening_float
         opening_note: $input.opening_note
         opening_counts: $input.opening_counts
         expected_cash: $input.opening_float

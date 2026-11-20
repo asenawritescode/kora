@@ -10,5 +10,5 @@ input:
   till_session: {type: string, max_length: 140}
 filters:
   - {field: name, op: eq, value: $input.till_session}
-fields: [name, opened_by, opening_cash, cash_sale_count, cash_sale_total, cash_refund_count, cash_refund_total, payout_count, payout_total, payin_count, payin_total, expected_cash]
+fields: [name, opened_by, opening_float, cash_sale_count, cash_sale_total, cash_refund_count, cash_refund_total, payout_count, payout_total, payin_count, payin_total, expected_cash]
 limit: 1
