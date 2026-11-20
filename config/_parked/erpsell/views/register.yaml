@@ -1,0 +1,63 @@
+name: POS Register
+route: /pos
+type: register
+layout: register
+label: Register
+module: Selling
+resources:
+  - id: items
+    query: published.query
+    params: {owner_module_id: erpsell.core, query_name: item_search, input: {}}
+  - id: categories
+    query: published.query
+    params: {owner_module_id: erpsell.core, query_name: item_categories}
+  - id: stock
+    query: published.query
+    params: {owner_module_id: erpsell.core, query_name: item_stock, input: {}}
+  - id: session
+    query: published.query
+    params: {owner_module_id: erpsell.core, query_name: my_session}
+  - id: registers
+    query: published.query
+    params: {owner_module_id: erpsell.core, query_name: my_registers}
+components:
+  - id: finder
+    label: Scan or search
+    type: product_finder
+    version: 2
+    region: main
+    position: 0
+    resource_bindings: {items: items, categories: categories, stock: stock}
+    bindings:
+      stock_item: name
+      stock_quantity: stock_qty
+      title: product_name
+      local_name: local_name
+      shelf_code: shelf_code
+      barcode: barcode
+      subtitle: unit
+      price: selling_price
+      image: image
+      category: category
+      favourite: favourite_position
+      category_label_field: category
+  - id: cart
+    label: Current sale
+    type: cart_panel
+    version: 2
+    region: side
+    position: 0
+  - id: tender
+    label: Payment
+    type: tender_panel
+    version: 2
+    region: side
+    position: 1
+    bindings:
+      submit_operation_ref: erpsell.core~pos.checkout~record_sale
+      methods: "literal:Cash,Mobile Money"
+      quick_cash: "literal:500,1000,2000"
+    context:
+      register: session.register
+      location: session.location
+      till_session: session.name

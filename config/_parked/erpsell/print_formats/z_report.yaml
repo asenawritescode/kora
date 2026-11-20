@@ -1,0 +1,84 @@
+name: z_report
+for: {operation: pos.close_session, doc: Till Session}
+paper: thermal_80
+queries:
+  by_method: {query: erpsell.core/payments_by_method, input: {till_session: doc.name}}
+  refunds: {query: erpsell.core/refunds_by_method, input: {till_session: doc.name}}
+  by_account: {query: erpsell.core/payments_by_account, input: {till_session: doc.name}}
+text: |
+  {{ center (upper .tenant.name) }}
+  {{ center "Z REPORT" }}
+  {{ center (date .now) }}
+  {{ line }}
+  Till: {{ .doc.name }}
+  {{ line }}
+  SALES
+  {{- range .queries.by_method }}
+  {{ left 24 .method }}{{ right 6 (num .payment_count) }}{{ right 18 (money .total) }}
+  {{- end }}
+  REFUNDS
+  {{- range .queries.refunds }}
+  {{ left 24 .method }}{{ right 6 (num .payment_count) }}{{ right 18 (money .total) }}
+  {{- end }}
+  {{- if .queries.by_account }}
+  BY ACCOUNT
+  {{- range .queries.by_account }}
+  {{ left 24 .payment_account }}{{ right 6 (num .payment_count) }}{{ right 18 (money .total) }}
+  {{ .method }}{{ if eq .verification "manually_recorded" }} - manually recorded{{ end }}
+  {{- end }}
+  {{- end }}
+  {{ line }}
+  {{ left 24 "Opening float" }}{{ right 24 (money .doc.opening_cash) }}
+  {{ left 24 "Expected cash" }}{{ right 24 (money .doc.expected_cash) }}
+  {{ left 24 "Counted" }}{{ right 24 (money .doc.closing_cash) }}
+  {{ left 24 "VARIANCE" }}{{ right 24 (money .doc.variance) }}
+  {{ line }}
+html: |
+  <article class="z-report">
+    <h1>{{ .tenant.name }} &middot; Z report</h1>
+    <p>Till {{ .doc.name }} &middot; {{ date .now }}</p>
+    <h2>SALES</h2>
+    {{- if .queries.by_method }}
+    <table class="sales">
+      <thead><tr><th scope="col">Method</th><th scope="col">Count</th><th scope="col">Amount</th></tr></thead>
+      <tbody>
+      {{- range .queries.by_method }}
+      <tr><td>{{ .method }}</td><td>{{ num .payment_count }}</td><td>{{ money .total }}</td></tr>
+      {{- end }}
+      </tbody>
+    </table>
+    {{- else }}
+    <p>No sales</p>
+    {{- end }}
+    {{- if .queries.refunds }}
+    <h2>REFUNDS</h2>
+    <table class="refunds">
+      <thead><tr><th scope="col">Method</th><th scope="col">Count</th><th scope="col">Amount</th></tr></thead>
+      <tbody>
+      {{- range .queries.refunds }}
+      <tr><td>{{ .method }}</td><td>{{ num .payment_count }}</td><td>{{ money .total }}</td></tr>
+      {{- end }}
+      </tbody>
+    </table>
+    {{- end }}
+    {{- if .queries.by_account }}
+    <h2>BY ACCOUNT</h2>
+    <table class="by-account">
+      <thead><tr><th scope="col">Account</th><th scope="col">Method</th><th scope="col">Count</th><th scope="col">Amount</th></tr></thead>
+      <tbody>
+      {{- range .queries.by_account }}
+      <tr><td>{{ .payment_account }}</td><td>{{ .method }}{{ if eq .verification "manually_recorded" }} (manually recorded){{ end }}</td><td>{{ num .payment_count }}</td><td>{{ money .total }}</td></tr>
+      {{- end }}
+      </tbody>
+    </table>
+    {{- end }}
+    <h2>Totals</h2>
+    <table class="totals">
+      <tbody>
+        <tr><th scope="row">Opening float</th><td>{{ money .doc.opening_cash }}</td></tr>
+        <tr><th scope="row">Expected cash</th><td>{{ money .doc.expected_cash }}</td></tr>
+        <tr><th scope="row">Counted cash</th><td>{{ money .doc.closing_cash }}</td></tr>
+        <tr class="variance"><th scope="row">Variance</th><td><strong>{{ money .doc.variance }}</strong></td></tr>
+      </tbody>
+    </table>
+  </article>

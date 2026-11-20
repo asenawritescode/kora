@@ -4,9 +4,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/asenawritescode/kora/internal/doctype"
 )
 
 // The erpsell pack is the selling base that live shops upgrade in place. It is
@@ -118,6 +123,109 @@ func TestErpsellPackParsesAndOwnsItsModule(t *testing.T) {
 		}
 		if head.ModuleOwnerID != "erpsell.core" {
 			t.Errorf("%s is owned by %q, want erpsell.core", head.Name, head.ModuleOwnerID)
+		}
+	}
+}
+
+// erpsellRefs lists every operation and query the pack publishes, keyed the way
+// views and print formats name them.
+func erpsellRefs(t *testing.T, snapshot *doctype.ConfigSnapshot) (operations, queries map[string]bool) {
+	t.Helper()
+	operations, queries = map[string]bool{}, map[string]bool{}
+	for _, raw := range snapshot.Commands {
+		var c struct {
+			Owner      string `json:"module_owner_id"`
+			Capability string `json:"capability"`
+			Operation  string `json:"operation"`
+		}
+		if err := json.Unmarshal(raw, &c); err != nil {
+			t.Fatal(err)
+		}
+		operations[c.Owner+"~"+c.Capability+"~"+c.Operation] = true
+	}
+	for _, raw := range snapshot.Queries {
+		var q struct {
+			Owner string `json:"module_owner_id"`
+			Name  string `json:"name"`
+		}
+		if err := json.Unmarshal(raw, &q); err != nil {
+			t.Fatal(err)
+		}
+		queries[q.Owner+"/"+q.Name] = true
+	}
+	return operations, queries
+}
+
+var erpsellOperationRef = regexp.MustCompile(`erpsell\.core~[a-z_.]+~[a-z_]+`)
+
+// TestErpsellRegisterViewResolves checks that the register view, the one the
+// shops open at /pos, only names commands and queries the pack publishes.
+func TestErpsellRegisterViewResolves(t *testing.T) {
+	files := erpsellFilesValidated(t)
+	snapshot, _, err := ParseConfigPack("erpsell", files)
+	if err != nil {
+		t.Fatalf("ParseConfigPack: %v", err)
+	}
+	operations, queries := erpsellRefs(t, snapshot)
+
+	body, err := os.ReadFile(filepath.Join(erpsellPackDir, "views", "register.yaml"))
+	if err != nil {
+		t.Fatalf("register view: %v", err)
+	}
+	var view struct {
+		Route     string `yaml:"route"`
+		Resources []struct {
+			Params struct {
+				OwnerModuleID string `yaml:"owner_module_id"`
+				QueryName     string `yaml:"query_name"`
+			} `yaml:"params"`
+		} `yaml:"resources"`
+	}
+	if err := yaml.Unmarshal(body, &view); err != nil {
+		t.Fatalf("parse register view: %v", err)
+	}
+	if view.Route != "/pos" {
+		t.Errorf("register view route = %q, want /pos", view.Route)
+	}
+	for _, resource := range view.Resources {
+		if resource.Params.QueryName == "" {
+			continue
+		}
+		key := resource.Params.OwnerModuleID + "/" + resource.Params.QueryName
+		if !queries[key] {
+			t.Errorf("register view resource names unknown query %s", key)
+		}
+	}
+	for _, ref := range erpsellOperationRef.FindAllString(string(body), -1) {
+		if !operations[ref] {
+			t.Errorf("register view names unknown operation %s", ref)
+		}
+	}
+}
+
+// TestErpsellPrintFormatsResolve checks the query references inside the print
+// formats against the pack's own queries.
+func TestErpsellPrintFormatsResolve(t *testing.T) {
+	files := erpsellFilesValidated(t)
+	snapshot, _, err := ParseConfigPack("erpsell", files)
+	if err != nil {
+		t.Fatalf("ParseConfigPack: %v", err)
+	}
+	_, queries := erpsellRefs(t, snapshot)
+	entries, err := os.ReadDir(filepath.Join(erpsellPackDir, "print_formats"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := regexp.MustCompile(`query: (erpsell\.core/[a-z_]+)`)
+	for _, entry := range entries {
+		body, err := os.ReadFile(filepath.Join(erpsellPackDir, "print_formats", entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, match := range ref.FindAllStringSubmatch(string(body), -1) {
+			if !queries[match[1]] {
+				t.Errorf("%s names unknown query %s", entry.Name(), match[1])
+			}
 		}
 	}
 }
