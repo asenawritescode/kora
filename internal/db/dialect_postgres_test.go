@@ -637,7 +637,7 @@ func TestPostgres_SystemTablesCreateAll(t *testing.T) {
 func TestPostgresUniqueConstraintFieldName(t *testing.T) {
 	tests := []struct {
 		name       string
-		constraint postgresUniqueConstraint
+		constraint uniqueIndexName
 		table      string
 		want       string
 	}{

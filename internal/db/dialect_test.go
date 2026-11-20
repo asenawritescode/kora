@@ -583,7 +583,7 @@ func TestLibSQL_ParseError(t *testing.T) {
 			name:    "unique constraint",
 			err:     errors.New("UNIQUE constraint failed: User.email"),
 			want:    "UniqueConstraint",
-			wantMsg: "Email must be unique.",
+			wantMsg: "This email is already used. Enter a different one.",
 		},
 		{
 			name:    "not null constraint",
@@ -782,4 +782,20 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestParseMySQLKeyField(t *testing.T) {
+	tests := []struct{ name, msg, want string }{
+		{"mysql 8 qualified key", "Duplicate entry 'P-1' for key 'tabProduct.uq_tabProduct_reference'", "reference"},
+		{"unqualified table key", "Duplicate entry 'P-1' for key 'uq_tabProduct_reference'", "reference"},
+		{"field-only key", "Duplicate entry 'a@b.c' for key 'uq_email'", "email"},
+		{"no key in message", "Duplicate entry 'x'", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseMySQLKeyField(tc.msg, "tabProduct"); got != tc.want {
+				t.Fatalf("parseMySQLKeyField(%q) = %q, want %q", tc.msg, got, tc.want)
+			}
+		})
+	}
 }
