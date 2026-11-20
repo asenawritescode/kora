@@ -92,7 +92,7 @@ Roles: **Manager** (runs the shop, owns currencies and rates) and **Cashier**
 
 ## Not here yet
 
-A stock movement ledger (adjustments are in `erp-inventory`), purchasing, returns and refunds, approvals, automatic posting to accounts, a Z-report.
+Holding and recalling sales, voids and returns are in (a return moves no stock: returning items to stock is not ported yet). Not here yet: a stock movement ledger, per-location stock, restocking on returns, approvals, automatic posting to accounts.
 
 ## Checks
 
