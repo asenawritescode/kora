@@ -133,3 +133,12 @@ func distinctLinkValues(uses []linkUse) []string {
 func (tx *TxManager) CheckLinkTargets(queryer db.Queryer, dt *doctype.DocType, doc *doctype.Document) error {
 	return tx.validateLinkTargets(queryer, dt, doc)
 }
+
+// writeTimeLinkCheck checks links as a record is written, unless a bundle
+// deferred the check until all its items exist.
+func (tx *TxManager) writeTimeLinkCheck(queryer db.Queryer, dt *doctype.DocType, doc *doctype.Document) error {
+	if tx.DeferLinkChecks {
+		return nil
+	}
+	return tx.validateLinkTargets(queryer, dt, doc)
+}
