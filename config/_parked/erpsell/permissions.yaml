@@ -135,3 +135,80 @@
   role: Cashier
   read: true
   create: true
+- doctype: Sale
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+- doctype: Till Session
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Cash Movement
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: false
+  submit: true
+- doctype: Register
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: true
+- doctype: Payment Account
+  role: Owner
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Payment Account
+  role: Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Payment Account
+  role: Cashier
+  read: true
+- doctype: Shift
+  role: Owner
+  read: true
+- doctype: Shift
+  role: Manager
+  read: true
+- doctype: Shift
+  role: Cashier
+  read: true
+- doctype: Sale Payment
+  role: Owner
+  read: true
+- doctype: Sale Payment
+  role: Manager
+  read: true
+- doctype: Sale Payment
+  role: Cashier
+  read: true
+- doctype: Sale Line Balance
+  role: Owner
+  read: true
+- doctype: Sale Line Balance
+  role: Manager
+  read: true
+- doctype: Sale Line Balance
+  role: Cashier
+  read: true
+- doctype: Till Count Line
+  role: Owner
+  read: true
+- doctype: Till Count Line
+  role: Manager
+  read: true
+- doctype: Till Count Line
+  role: Cashier
+  read: true
