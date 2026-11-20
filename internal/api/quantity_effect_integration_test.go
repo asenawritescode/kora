@@ -76,6 +76,20 @@ func effectDoctypes() []*doctype.DocType {
 			{Fieldname: "supplier", Fieldtype: "Data", Reqd: true},
 			{Fieldname: "items", Fieldtype: "Table", Options: "Goods Receipt Item", Reqd: true},
 		}},
+		{Name: "Sale Item", IsChildTable: true, Fields: []doctype.Field{
+			{Fieldname: "product", Fieldtype: "Link", Options: "Stock Item", Reqd: true},
+			{Fieldname: "quantity", Fieldtype: "Float", Reqd: true},
+		}},
+		// A sale takes stock only while it is awaiting or has received payment.
+		{Name: "Sale", QuantityEffect: &doctype.QuantityEffect{
+			TargetDocType: "Stock Item", TargetQuantityField: "stock_qty", LinesField: "items",
+			SourceRecordField: "product", DeltaField: "quantity", Direction: "decrease",
+			StatusField: "status", ApplyInStatuses: []string{"Awaiting Payment", "Partially Paid", "Paid"},
+		}, Fields: []doctype.Field{
+			{Fieldname: "reference", Fieldtype: "Data", Reqd: true, Unique: true},
+			{Fieldname: "status", Fieldtype: "Select", Options: "Draft\nAwaiting Payment\nPartially Paid\nPaid\nRefunded\nCancelled", Default: "Draft", Reqd: true},
+			{Fieldname: "items", Fieldtype: "Table", Options: "Sale Item", Reqd: true},
+		}},
 	}
 }
 
@@ -85,6 +99,8 @@ func effectPermissions() []*doctype.Permission {
 		{Doctype: "Stock Adjustment", Role: doctype.AdminRole, Read: true, Create: true, Delete: true},
 		{Doctype: "Goods Receipt", Role: doctype.AdminRole, Read: true, Create: true, Delete: true},
 		{Doctype: "Goods Receipt Item", Role: doctype.AdminRole, Read: true, Create: true, Delete: true},
+		{Doctype: "Sale", Role: doctype.AdminRole, Read: true, Write: true, Create: true, Delete: true},
+		{Doctype: "Sale Item", Role: doctype.AdminRole, Read: true, Write: true, Create: true, Delete: true},
 		// A clerk may record adjustments and receipts and read stock items,
 		// but may not edit a stock item directly.
 		{Doctype: "Stock Item", Role: "Clerk", Read: true},

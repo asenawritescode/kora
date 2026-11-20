@@ -116,8 +116,8 @@
    "cyclomatic": 22
   },
   "contract::ValidateProvisionTenant": {
-   "cognitive": 21,
-   "cyclomatic": 21
+   "cognitive": 20,
+   "cyclomatic": 20
   },
   "contract::ValidateScheduledJobDefinitions": {
    "cognitive": 28,
@@ -1356,11 +1356,6 @@
    "cyclomatic": 52,
    "statements": 70
   },
-  "internal/doctype::validateQuantityEffects": {
-   "cognitive": 52,
-   "cyclomatic": 33,
-   "statements": 43
-  },
   "internal/doctype::validateTransactionLineRecords": {
    "cognitive": 43,
    "cyclomatic": 22
@@ -1468,8 +1463,8 @@
    "cyclomatic": 46
   },
   "internal/engine::(*managementPackageExecutor).Execute": {
-   "cognitive": 89,
-   "cyclomatic": 80
+   "cognitive": 85,
+   "cyclomatic": 77
   },
   "internal/engine::(*managementProvisionExecutor).Execute": {
    "cognitive": 37,
@@ -1862,9 +1857,7 @@
    "statements": 142
   },
   "internal/kernel::prepareQuantityEffect": {
-   "cognitive": 39,
-   "cyclomatic": 31,
-   "statements": 58
+   "cyclomatic": 16
   },
   "internal/kernel::resolveBundleValue": {
    "cognitive": 22
@@ -2626,9 +2619,6 @@
    "cyclomatic": 19,
    "statements": 51
   },
-  "internal/site::publishImportedWorkflows": {
-   "cognitive": 20
-  },
   "internal/site::removePlatformSiteRegistrationByID": {
    "cognitive": 33,
    "cyclomatic": 24
@@ -2721,10 +2711,6 @@
   "internal/workflow/sqlstore::(*DefinitionStore).PublishDefinition": {
    "cognitive": 39,
    "cyclomatic": 35
-  },
-  "internal/workflow/sqlstore::(*DefinitionStore).PublishImportedBatch": {
-   "cognitive": 26,
-   "cyclomatic": 21
   },
   "internal/workflow/sqlstore::(*DefinitionStore).RecordPreview": {
    "cyclomatic": 16

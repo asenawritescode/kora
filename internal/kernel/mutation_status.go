@@ -129,6 +129,9 @@ func (m *mutation) saveTransition(ctx context.Context, doc, oldDoc *doctype.Docu
 	if err := m.run.Mgr.SaveInTxWithScope(m.run.Tx, m.dt, doc, m.user, scope, oldDoc); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
 		return wrapORMError(err, m.k.dialect())
 	}
+	if cerr := m.applyStatusEffect(ctx, m.dt, oldDoc, doc); cerr != nil {
+		return cerr
+	}
 	if hookErr := captureLifecycleHooks(ctx, m.run.Mgr, m.run.Tx, m.dt, lifecycleEvent{script.EventAfterSave, doc, oldDoc}); hookErr != nil {
 		return hookErr
 	}

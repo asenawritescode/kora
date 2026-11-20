@@ -3,6 +3,7 @@ package doctype
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
@@ -90,6 +91,12 @@ type QuantityEffect struct {
 	// it and stores the signed number back on the record. A reason that is not
 	// listed keeps the sign as typed. Not used with LinesField.
 	ReasonDirections map[string]string `yaml:"reason_directions" json:"reason_directions,omitempty"`
+	// StatusField and ApplyInStatuses make the effect follow a status: it applies
+	// only while the record's status is one of ApplyInStatuses. A record created
+	// outside the set changes nothing; a status that enters the set applies the
+	// change, and one that leaves it reverses it. Set both or neither (see Gated).
+	StatusField     string   `yaml:"status_field" json:"status_field,omitempty"`
+	ApplyInStatuses []string `yaml:"apply_in_statuses" json:"apply_in_statuses,omitempty"`
 }
 
 // Complete reports whether the effect names everything the kernel needs to apply it.
@@ -110,6 +117,16 @@ func (q *QuantityEffect) ReasonSign(reason string) float64 {
 		return -1
 	}
 	return 0
+}
+
+// Gated reports whether the effect follows a status field.
+func (q *QuantityEffect) Gated() bool {
+	return q != nil && q.StatusField != "" && len(q.ApplyInStatuses) > 0
+}
+
+// AppliesIn reports whether status is one of the statuses that apply the effect.
+func (q *QuantityEffect) AppliesIn(status string) bool {
+	return q != nil && slices.Contains(q.ApplyInStatuses, status)
 }
 
 // Sign is +1 for "increase" (the default) and -1 for "decrease".

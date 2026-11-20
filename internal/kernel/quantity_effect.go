@@ -23,6 +23,10 @@ import (
 // authorized by the permission to create the source record, not by write
 // permission on the target.
 //
+// A gated effect (status_field and apply_in_statuses) is rewritten only when the
+// status the record is created with is one that applies it. Later status changes
+// are handled where the record is written (see applyStatusEffect).
+//
 // Records without an effect, and every command other than record.create, pass
 // through unchanged.
 func prepareQuantityEffect(reg *doctype.Registry, op *Operation) *contract.Error {
@@ -38,56 +42,21 @@ func prepareQuantityEffect(reg *doctype.Registry, op *Operation) *contract.Error
 		return nil
 	}
 	effect := dt.QuantityEffect
-	var data map[string]any
-	if len(create.Data) > 0 {
-		if err := json.Unmarshal(create.Data, &data); err != nil {
-			return nil // the normal create path reports malformed data
-		}
+	data, ok := decodeCreateData(create.Data)
+	if !ok {
+		return nil // the normal create path reports malformed data
 	}
-
-	totals := map[string]float64{}
-	normalised := false
-	add := func(row map[string]any, whole bool) *contract.Error {
-		product, _ := row[effect.SourceRecordField].(string)
-		amount, ok := quantityNumber(row[effect.DeltaField])
-		if product == "" || !ok || math.IsNaN(amount) || math.IsInf(amount, 0) {
-			return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("%s needs a linked record in %s and a number in %s", dt.Name, effect.SourceRecordField, effect.DeltaField))
-		}
-		if amount == 0 {
-			if whole {
-				return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("%s needs a nonzero number in %s", dt.Name, effect.DeltaField))
-			}
-			return nil
-		}
-		// The chosen reason can decide the direction. The person types a plain
-		// amount; the signed number is stored on the record so its history is true.
-		if reason, _ := row[effect.ReasonField].(string); !whole {
-			// lines never use reason_directions
-		} else if sign := effect.ReasonSign(reason); sign != 0 {
-			amount = sign * math.Abs(amount)
-			row[effect.DeltaField] = amount
-			normalised = true
-		}
-		totals[product] += amount * effect.Sign()
+	applies, cerr := createStatusApplies(dt, data)
+	if cerr != nil {
+		return cerr
+	}
+	if !applies {
 		return nil
 	}
-	if effect.LinesField == "" {
-		if err := add(data, true); err != nil {
-			return err
-		}
-	} else {
-		rows, _ := data[effect.LinesField].([]any)
-		for _, raw := range rows {
-			row, ok := raw.(map[string]any)
-			if !ok {
-				return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("%s lines must be objects", dt.Name))
-			}
-			if err := add(row, false); err != nil {
-				return err
-			}
-		}
+	totals, normalised, cerr := createEffectTotals(dt, effect, data)
+	if cerr != nil {
+		return cerr
 	}
-
 	if normalised {
 		signed, err := json.Marshal(data)
 		if err != nil {
@@ -95,21 +64,100 @@ func prepareQuantityEffect(reg *doctype.Registry, op *Operation) *contract.Error
 		}
 		create.Data = signed
 	}
+	products := nonzeroEffectProducts(totals)
+	if len(products) == 0 {
+		return nil
+	}
+	if len(products)+1 > MaxMutationBundleRecords {
+		return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("%s affects too many different records in one save (limit %d)", dt.Name, MaxMutationBundleRecords-1))
+	}
+	return rewriteToEffectBundle(op, dt, create.Data, totals, products)
+}
+
+// decodeCreateData reads the data of a create. Empty data is an empty record;
+// data that is not a JSON object is reported as not decodable.
+func decodeCreateData(raw json.RawMessage) (map[string]any, bool) {
+	if len(raw) == 0 {
+		return nil, true
+	}
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+// createEffectTotals sums the signed change of a new record per target record.
+// normalised reports that a whole-record amount was signed by its reason, so the
+// stored record must carry the signed number.
+func createEffectTotals(dt *doctype.DocType, effect *doctype.QuantityEffect, data map[string]any) (totals map[string]float64, normalised bool, cerr *contract.Error) {
+	totals = map[string]float64{}
+	if effect.LinesField == "" {
+		normalised, cerr = addEffectRow(dt, effect, data, true, totals)
+		return totals, normalised, cerr
+	}
+	rows, _ := data[effect.LinesField].([]any)
+	for _, raw := range rows {
+		row, ok := raw.(map[string]any)
+		if !ok {
+			return nil, false, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("%s lines must be objects", dt.Name))
+		}
+		if _, cerr = addEffectRow(dt, effect, row, false, totals); cerr != nil {
+			return nil, false, cerr
+		}
+	}
+	return totals, false, nil
+}
+
+// addEffectRow adds one row's signed change to totals. A whole record's amount
+// may be signed by its reason; the signed amount is written back to the row so
+// the stored record shows it. It reports whether that happened.
+func addEffectRow(dt *doctype.DocType, effect *doctype.QuantityEffect, row map[string]any, whole bool, totals map[string]float64) (bool, *contract.Error) {
+	product, _ := row[effect.SourceRecordField].(string)
+	amount, ok := quantityNumber(row[effect.DeltaField])
+	if product == "" || !ok || math.IsNaN(amount) || math.IsInf(amount, 0) {
+		return false, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("%s needs a linked record in %s and a number in %s", dt.Name, effect.SourceRecordField, effect.DeltaField))
+	}
+	if amount == 0 {
+		if whole {
+			return false, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("%s needs a nonzero number in %s", dt.Name, effect.DeltaField))
+		}
+		return false, nil
+	}
+	// The chosen reason can decide the direction. The person types a plain
+	// amount; the signed number is stored on the record so its history is true.
+	signed := false
+	if whole {
+		reason, _ := row[effect.ReasonField].(string)
+		if sign := effect.ReasonSign(reason); sign != 0 {
+			amount = sign * math.Abs(amount)
+			row[effect.DeltaField] = amount
+			signed = true
+		}
+	}
+	totals[product] += amount * effect.Sign()
+	return signed, nil
+}
+
+// nonzeroEffectProducts lists the target records whose total changes, sorted: one
+// lock order for every writer, and a stable payload for idempotent replay.
+func nonzeroEffectProducts(totals map[string]float64) []string {
 	products := make([]string, 0, len(totals))
 	for product, total := range totals {
 		if total != 0 {
 			products = append(products, product)
 		}
 	}
-	if len(products) == 0 {
-		return nil
-	}
-	sort.Strings(products) // one lock order for every writer, and a stable payload for idempotent replay
-	if len(products)+1 > MaxMutationBundleRecords {
-		return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("%s affects too many different records in one save (limit %d)", dt.Name, MaxMutationBundleRecords-1))
-	}
+	sort.Strings(products)
+	return products
+}
 
-	records := []RecordMutationBundleItem{{Key: "record", Doctype: dt.Name, Data: create.Data}}
+// rewriteToEffectBundle turns the operation into a record.mutate_bundle: the
+// create, then one adjust per target record. It marks the adjust items so they
+// are authorized by the create.
+func rewriteToEffectBundle(op *Operation, dt *doctype.DocType, data json.RawMessage, totals map[string]float64, products []string) *contract.Error {
+	effect := dt.QuantityEffect
+	records := []RecordMutationBundleItem{{Key: "record", Doctype: dt.Name, Data: data}}
 	effectKeys := make(map[string]struct{}, len(products))
 	for i, product := range products {
 		change, _ := json.Marshal(map[string]float64{effect.TargetQuantityField: totals[product]})
