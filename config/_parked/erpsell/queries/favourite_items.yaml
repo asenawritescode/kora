@@ -1,0 +1,13 @@
+name: favourite_items
+module_owner_id: erpsell.core
+capability: inventory.items
+operation: favourite_items
+source: Product
+permission: read
+scope: tenant
+filters:
+  - {field: favourite_position, op: gt, value: 0}
+fields: [name, product_name, local_name, shelf_code, barcode, unit, selling_price, category, image, favourite_position, stock_qty]
+sort: [{field: favourite_position, dir: asc}]
+limit: 12
+offline_eligible: true

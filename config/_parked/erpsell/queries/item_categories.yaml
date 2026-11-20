@@ -1,0 +1,15 @@
+# The categories a product can be filed under, with how many products each has.
+# Product.category is a fixed list, so the categories are read from the products.
+name: item_categories
+module_owner_id: erpsell.core
+capability: inventory.items
+operation: item_categories
+source: Product
+permission: read
+scope: tenant
+group_by: [category]
+aggregates:
+  - {name: product_count, fn: count}
+sort: [{field: category, dir: asc}]
+limit: 50
+offline_eligible: true

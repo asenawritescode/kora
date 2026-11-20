@@ -1,0 +1,14 @@
+name: my_session
+module_owner_id: erpsell.core
+capability: pos.till
+operation: my_session
+source: Till Session
+permission: read
+scope: tenant
+owner_field: opened_by
+filters:
+  - {field: opened_by, op: eq, value: $actor}
+  - {field: status, op: eq, value: Open}
+fields: [name, shift, register, location, opened_by, opening_cash, expected_cash, creation]
+sort: [{field: creation, dir: desc}]
+limit: 1

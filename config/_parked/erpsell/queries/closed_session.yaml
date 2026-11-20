@@ -1,0 +1,14 @@
+name: closed_session
+module_owner_id: erpsell.core
+capability: pos.till
+operation: closed_session
+source: Till Session
+permission: read
+scope: tenant
+input:
+  name: {type: string, max_length: 140}
+filters:
+  - {field: name, op: eq, value: $input.name}
+  - {field: status, op: eq, value: Closed}
+fields: [name, shift, register, location, opened_by, opening_cash, expected_cash, closing_cash, variance, closed_at]
+limit: 1

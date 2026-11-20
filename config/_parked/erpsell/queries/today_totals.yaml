@@ -1,0 +1,19 @@
+name: today_totals
+module_owner_id: erpsell.core
+capability: pos.sales
+operation: today_totals
+source: Sale
+permission: read
+scope: tenant
+input:
+  since: {type: string, max_length: 40, default: $today}
+  register: {type: string, max_length: 140}
+filters:
+  - {field: status, op: eq, value: Paid}
+  - {field: creation, op: gte, value: $input.since}
+  - {field: register, op: eq, value: $input.register, optional: true}
+group_by: [register]
+aggregates:
+  - {name: sale_count, fn: count}
+  - {name: total, fn: sum, field: total}
+limit: 50
