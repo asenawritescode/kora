@@ -11,6 +11,7 @@ import (
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/management"
 	"github.com/asenawritescode/kora/internal/schema"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 // packageRowCounter reports how many records a table holds.
@@ -30,6 +31,12 @@ func prepareManagementPackageTarget(ctx context.Context, tenant packageTenantDB,
 	target, err := mergeManagementPackageSnapshot(current, incoming)
 	if err != nil {
 		refusal := failed(contract.CodeConflict, "package configuration conflicts with existing tenant configuration")
+		return nil, &refusal
+	}
+	registry := doctype.NewRegistry()
+	registry.LoadFull(target.DocTypes, target.Roles, target.Permissions)
+	if err = site.ValidateWorkflowDefinitions(target.WorkflowDefinitions, registry); err != nil {
+		refusal := failed(contract.CodeValidationFailed, truncateUTF8("package workflow definitions failed validation: "+err.Error(), 480))
 		return nil, &refusal
 	}
 	live, err := schema.LoadLiveSchema(tenant.conn, tenant.name, tenant.dialect)
