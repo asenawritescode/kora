@@ -94,8 +94,8 @@ func TestPrintSourceRecordLinkTitles(t *testing.T) {
 			}
 			// A product deleted after it was sold: the line keeps a link to a record
 			// that no longer exists, and printing must still work.
-			if _, err := dbTx.Exec(kdb.Rebind(dialect, "DELETE FROM "+dialect.QuoteIdent(productDT.RawTableName())+" WHERE name = ?"), "P-9"); err != nil {
-				t.Fatalf("delete product: %v", err)
+			if _, delErr := dbTx.Exec(kdb.Rebind(dialect, "DELETE FROM "+dialect.QuoteIdent(productDT.RawTableName())+" WHERE name = ?"), "P-9"); delErr != nil {
+				t.Fatalf("delete product: %v", delErr)
 			}
 			if err := dbTx.Commit(); err != nil {
 				t.Fatal(err)
