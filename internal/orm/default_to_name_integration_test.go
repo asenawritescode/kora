@@ -63,7 +63,7 @@ fields:
 				t.Fatal(err)
 			}
 			store := configstore.NewStore(database.DB, dialect)
-			if err := store.SaveDocType(trip, ""); err != nil {
+			if err = store.SaveDocType(trip, ""); err != nil {
 				t.Fatalf("save record type: %v", err)
 			}
 			loaded, err := store.LoadAll("")
