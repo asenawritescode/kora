@@ -22,7 +22,8 @@ fields:
   - fieldname: reference
     fieldtype: Data
     label: Reference
-    reqd: true
+    default_to_name: true
+    description: Leave blank to use this record's number.
     unique: true
     in_list_view: true
     search_index: true
