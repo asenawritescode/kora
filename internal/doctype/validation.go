@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -133,29 +134,8 @@ func ValidateDocumentWithResolvers(dt *DocType, doc *Document, registry *Registr
 			val = doc.GetTable(field.Fieldname)
 		}
 
-		// Check required.
-		if field.Reqd {
-			if isNilOrEmpty(val) {
-				// Check if conditionally required.
-				if field.MandatoryDependsOn != "" {
-					if evaluateCondition(field.MandatoryDependsOn, doc, nil) {
-						errors = append(errors, &ValidationError{
-							Type:    "ValidationError",
-							Message: fmt.Sprintf("%s is required.", field.Label),
-							Field:   field.Fieldname,
-							DocType: dt.Name,
-						})
-					}
-				} else {
-					errors = append(errors, &ValidationError{
-						Type:    "ValidationError",
-						Message: fmt.Sprintf("%s is required.", field.Label),
-						Field:   field.Fieldname,
-						DocType: dt.Name,
-					})
-				}
-			}
-		}
+		errors = append(errors, requiredValueErrors(&field, val, doc, dt.Name)...)
+		errors = append(errors, selectValueErrors(&field, val, dt.Name)...)
 
 		// Skip further validation if value is empty and not required.
 		if isNilOrEmpty(val) {
@@ -811,4 +791,52 @@ func computeChildFields(dt *DocType, doc *Document, registry *Registry) Validati
 		}
 	}
 	return errors
+}
+
+// selectChoices lists a Select field's options, one per line, trimmed, with
+// blank lines dropped. A field without options has no fixed choices.
+func (f *Field) selectChoices() []string {
+	var choices []string
+	for _, line := range strings.Split(f.Options, "\n") {
+		if choice := strings.TrimSpace(line); choice != "" {
+			choices = append(choices, choice)
+		}
+	}
+	return choices
+}
+
+// selectValueErrors reports a set Select value that is not one of the field's
+// options. Empty values and fields without options are not checked here.
+func selectValueErrors(field *Field, val any, doctypeName string) ValidationErrors {
+	value, ok := val.(string)
+	if field.Fieldtype != "Select" || !ok || value == "" {
+		return nil
+	}
+	choices := field.selectChoices()
+	if len(choices) == 0 || slices.Contains(choices, value) {
+		return nil
+	}
+	return ValidationErrors{&ValidationError{
+		Type:    "ValidationError",
+		Message: fmt.Sprintf("%s: %q is not one of the allowed options.", field.Label, value),
+		Field:   field.Fieldname,
+		DocType: doctypeName,
+	}}
+}
+
+// requiredValueErrors reports a required field left empty. A field required
+// only under a condition is reported when that condition holds.
+func requiredValueErrors(field *Field, val any, doc *Document, doctypeName string) ValidationErrors {
+	if !field.Reqd || !isNilOrEmpty(val) {
+		return nil
+	}
+	if field.MandatoryDependsOn != "" && !evaluateCondition(field.MandatoryDependsOn, doc, nil) {
+		return nil
+	}
+	return ValidationErrors{&ValidationError{
+		Type:    "ValidationError",
+		Message: fmt.Sprintf("%s is required.", field.Label),
+		Field:   field.Fieldname,
+		DocType: doctypeName,
+	}}
 }
