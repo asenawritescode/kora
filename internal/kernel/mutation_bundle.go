@@ -391,6 +391,8 @@ func (m *mutation) validateItem(ctx context.Context, b *bundle, i int, resolver 
 // result: the primary record, with the others as related records.
 func (m *mutation) persistBundle(ctx context.Context, b *bundle) *contract.Error {
 	related := make([]RelatedRecordResult, 0, len(b.payload.Records)-1)
+	m.run.Mgr.DeferLinkChecks = true
+	defer func() { m.run.Mgr.DeferLinkChecks = false }()
 	for i, doc := range b.docs {
 		auditID, cerr := m.persistItem(ctx, b, i)
 		if cerr != nil {
@@ -405,6 +407,9 @@ func (m *mutation) persistBundle(ctx context.Context, b *bundle) *contract.Error
 		}
 	}
 	m.result.Related = related
+	if cerr := m.checkBundleLinks(b); cerr != nil {
+		return cerr
+	}
 	// Stock moves after every item is written, so a target that another item
 	// of this bundle also changed is read at its written value.
 	for i, doc := range b.docs {
@@ -470,4 +475,15 @@ func (m *mutation) writeItem(ctx context.Context, recordDT *doctype.DocType, doc
 		return "", hookErr
 	}
 	return beforeHash, nil
+}
+
+// checkBundleLinks checks the links of every written item once the whole
+// bundle exists, so an item may link to one written after it.
+func (m *mutation) checkBundleLinks(b *bundle) *contract.Error {
+	for i, doc := range b.docs {
+		if err := m.run.Mgr.CheckLinkTargets(m.run.Tx, b.types[i], doc); err != nil {
+			return wrapORMError(err, m.k.dialect())
+		}
+	}
+	return nil
 }
