@@ -1,6 +1,14 @@
 name: Sale
 module: Selling
-is_submittable: true
+quantity_effect:
+  target_doctype: Product
+  target_quantity_field: stock_qty
+  lines_field: items
+  source_record_field: product
+  delta_field: quantity
+  direction: decrease
+  status_field: status
+  apply_in_statuses: [Awaiting Payment, Partially Paid, Paid]
 title_field: reference
 search_fields: reference, status
 sort_field: modified
@@ -94,15 +102,21 @@ fields:
   - fieldname: discount_amount
     fieldtype: Currency
     label: Discount
-    default: "0"
+    description: The discounts given on the lines, added up.
+    computed: "SUM(items.discount_amount)"
+    read_only: true
   - fieldname: tax_amount
     fieldtype: Currency
     label: Tax
-    default: "0"
+    description: The tax charged on the lines, added up.
+    computed: "SUM(items.tax_amount)"
+    read_only: true
   - fieldname: total
     fieldtype: Currency
     label: Total
-    default: "0"
+    description: What the customer pays. Each line total already takes off its discount and adds its tax.
+    computed: "subtotal"
+    read_only: true
     in_list_view: true
   - fieldname: base_total
     fieldtype: Currency
