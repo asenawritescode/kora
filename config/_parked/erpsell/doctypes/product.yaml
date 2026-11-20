@@ -1,7 +1,7 @@
 name: Product
 module: Products
 title_field: product_name
-search_fields: product_name, reference, barcode, status
+search_fields: product_name, reference, barcode, local_name, shelf_code, status
 sort_field: modified
 sort_order: DESC
 description: >-
@@ -82,3 +82,21 @@ fields:
       Inactive
     default: Active
     in_list_view: true
+  - fieldname: local_name
+    fieldtype: Data
+    label: Local name
+    description: The name the shop's staff use, if different from the product name.
+    search_index: true
+  - fieldname: shelf_code
+    fieldtype: Data
+    label: Shelf code
+    description: Where the product sits on the shelf. Used to find it at the register.
+    search_index: true
+  - fieldname: image
+    fieldtype: Attach Image
+    label: Image
+    description: Shown on the register next to the product.
+  - fieldname: favourite_position
+    fieldtype: Int
+    label: Favourite position
+    description: Place on the register's favourites row. Leave empty for a product that is not a favourite.
