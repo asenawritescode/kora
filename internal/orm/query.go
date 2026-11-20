@@ -350,12 +350,7 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 		columns = append(columns, f.Fieldname)
 		placeholders = append(placeholders, "?")
 
-		fillFromName(f, doc)
-		val := doc.Get(f.Fieldname)
-		if val == nil && f.Default != "" {
-			val = convertDefault(f.Default, f.Fieldtype, tx.todayDefault(f.Fieldtype, f.Default))
-			doc.Set(f.Fieldname, val)
-		}
+		val := tx.insertValue(f, doc)
 		val, err := canonicalizeDecimal(doc, f, val)
 		if err != nil {
 			return err
@@ -603,10 +598,7 @@ func (tx *TxManager) SaveInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, doc *d
 		// Note: read_only is a UI hint, not an ORM constraint.
 		// Kernel command policy decides whether the current operation may change
 		// the field (for example, a trusted workflow transition).
-		if _, present := doc.Fields[f.Fieldname]; present {
-			fillFromName(f, doc)
-		}
-		newVal, err := canonicalizeDecimal(doc, f, doc.Get(f.Fieldname))
+		newVal, err := canonicalizeDecimal(doc, f, savedValue(f, doc))
 		if err != nil {
 			return err
 		}
@@ -1468,6 +1460,27 @@ func normalizeSQLValue(f doctype.Field, v any) (any, error) {
 		}
 		return string(b), nil
 	}
+}
+
+// insertValue is the value a new record stores for f: a blank default_to_name
+// field takes the record's name, and a missing value takes the field default.
+func (tx *TxManager) insertValue(f doctype.Field, doc *doctype.Document) any {
+	fillFromName(f, doc)
+	val := doc.Get(f.Fieldname)
+	if val == nil && f.Default != "" {
+		val = convertDefault(f.Default, f.Fieldtype, tx.todayDefault(f.Fieldtype, f.Default))
+		doc.Set(f.Fieldname, val)
+	}
+	return val
+}
+
+// savedValue is the value an update writes for f. A default_to_name field that
+// the update clears takes the record's name; fields the update leaves out stay.
+func savedValue(f doctype.Field, doc *doctype.Document) any {
+	if _, present := doc.Fields[f.Fieldname]; present {
+		fillFromName(f, doc)
+	}
+	return doc.Get(f.Fieldname)
 }
 
 // fillFromName sets a blank default_to_name field to the record's name, so a

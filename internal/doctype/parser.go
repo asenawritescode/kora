@@ -1,6 +1,7 @@
 package doctype
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -496,9 +497,6 @@ func (d *DocType) Validate() error {
 		if err := validateFieldName(f.Fieldname); err != nil {
 			return fmt.Errorf("doctype %s, field %d: %w", d.Name, i, err)
 		}
-		if f.DefaultToName && (f.Fieldtype != "Data" || f.Default != "") {
-			return fmt.Errorf("doctype %s: field %q: default_to_name needs a Data field without a default", d.Name, f.Fieldname)
-		}
 
 		if fieldnames[f.Fieldname] {
 			return fmt.Errorf("doctype %s: duplicate fieldname %q", d.Name, f.Fieldname)
@@ -508,7 +506,7 @@ func (d *DocType) Validate() error {
 		if f.Fieldtype == "" {
 			return fmt.Errorf("doctype %s: field %s has no fieldtype", d.Name, f.Fieldname)
 		}
-		if err := validateFieldType(f.Fieldtype); err != nil {
+		if err := f.validateType(); err != nil {
 			return fmt.Errorf("doctype %s, field %s: %w", d.Name, f.Fieldname, err)
 		}
 		if f.Fieldtype == "User" && f.SearchIndex {
@@ -782,6 +780,17 @@ func validateDependsOn(dependsOn string, knownFields map[string]bool) error {
 		if !knownFields[f] {
 			return fmt.Errorf("depends_on references unknown field %q", f)
 		}
+	}
+	return nil
+}
+
+// validateType checks the field's type and the options only some types take.
+func (f *Field) validateType() error {
+	if err := validateFieldType(f.Fieldtype); err != nil {
+		return err
+	}
+	if f.DefaultToName && (f.Fieldtype != "Data" || f.Default != "") {
+		return errors.New("default_to_name needs a Data field without a default")
 	}
 	return nil
 }

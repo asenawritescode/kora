@@ -603,42 +603,6 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 		`ALTER TABLE "_kora_doctype" ADD COLUMN "config_json" JSONB`,
 		`CREATE INDEX IF NOT EXISTS "idx_doctype_site" ON "_kora_doctype" ("site")`,
 
-		// _kora_field
-		`CREATE TABLE IF NOT EXISTS "_kora_field" (
-			"name" VARCHAR(140) PRIMARY KEY,
-			"site" VARCHAR(140) NOT NULL DEFAULT '',
-			"parent" VARCHAR(140) NOT NULL,
-			"fieldname" VARCHAR(140) NOT NULL,
-			"fieldtype" VARCHAR(50) NOT NULL,
-			"label" VARCHAR(255) NOT NULL DEFAULT '',
-			"options" TEXT,
-			"reqd" SMALLINT NOT NULL DEFAULT 0,
-			"unique_constraint" SMALLINT NOT NULL DEFAULT 0,
-			"default_value" VARCHAR(255),
-			"hidden" SMALLINT NOT NULL DEFAULT 0,
-			"read_only" SMALLINT NOT NULL DEFAULT 0,
-			"bold" SMALLINT NOT NULL DEFAULT 0,
-			"in_list_view" SMALLINT NOT NULL DEFAULT 0,
-			"in_standard_filter" SMALLINT NOT NULL DEFAULT 0,
-			"search_index" SMALLINT NOT NULL DEFAULT 0,
-			"description" TEXT,
-			"depends_on" TEXT,
-			"mandatory_depends_on" TEXT,
-			"constraints_json" JSONB,
-			"renamed_from" VARCHAR(140),
-			"linked_field" VARCHAR(255) NOT NULL DEFAULT '',
-			"computed" TEXT,
-			"idx" INTEGER NOT NULL DEFAULT 0
-		)`,
-		`ALTER TABLE "_kora_field" ADD COLUMN "linked_field" VARCHAR(255) NOT NULL DEFAULT ''`,
-		`ALTER TABLE "_kora_field" ADD COLUMN "computed" TEXT`,
-		`ALTER TABLE "_kora_field" ADD COLUMN "accept" TEXT`,
-		`ALTER TABLE "_kora_field" ADD COLUMN "default_to_name" SMALLINT NOT NULL DEFAULT 0`,
-		`ALTER TABLE "_kora_field" ADD COLUMN "field_precision" INTEGER`,
-		`ALTER TABLE "_kora_field" ADD COLUMN "site" VARCHAR(140) NOT NULL DEFAULT ''`,
-		`CREATE INDEX IF NOT EXISTS "idx_parent" ON "_kora_field" ("parent")`,
-		`CREATE INDEX IF NOT EXISTS "idx_parent_fieldname" ON "_kora_field" ("parent", "fieldname")`,
-
 		// _kora_role
 		`CREATE TABLE IF NOT EXISTS "_kora_role" (
 			"name" VARCHAR(140) PRIMARY KEY,
@@ -832,5 +796,46 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 
 		// Backward compat: existing _kora_view tables may lack idx column.
 		`ALTER TABLE "_kora_view" ADD COLUMN IF NOT EXISTS "idx" INTEGER NOT NULL DEFAULT 0`,
-	}...), PaymentTablesPostgres()...)
+	}...), append(postgresFieldTableSQL(), PaymentTablesPostgres()...)...)
+}
+
+// postgresFieldTableSQL creates _kora_field, the stored fields of each record
+// type, and adds the columns later releases introduced.
+func postgresFieldTableSQL() []string {
+	return []string{
+		`CREATE TABLE IF NOT EXISTS "_kora_field" (
+			"name" VARCHAR(140) PRIMARY KEY,
+			"site" VARCHAR(140) NOT NULL DEFAULT '',
+			"parent" VARCHAR(140) NOT NULL,
+			"fieldname" VARCHAR(140) NOT NULL,
+			"fieldtype" VARCHAR(50) NOT NULL,
+			"label" VARCHAR(255) NOT NULL DEFAULT '',
+			"options" TEXT,
+			"reqd" SMALLINT NOT NULL DEFAULT 0,
+			"unique_constraint" SMALLINT NOT NULL DEFAULT 0,
+			"default_value" VARCHAR(255),
+			"hidden" SMALLINT NOT NULL DEFAULT 0,
+			"read_only" SMALLINT NOT NULL DEFAULT 0,
+			"bold" SMALLINT NOT NULL DEFAULT 0,
+			"in_list_view" SMALLINT NOT NULL DEFAULT 0,
+			"in_standard_filter" SMALLINT NOT NULL DEFAULT 0,
+			"search_index" SMALLINT NOT NULL DEFAULT 0,
+			"description" TEXT,
+			"depends_on" TEXT,
+			"mandatory_depends_on" TEXT,
+			"constraints_json" JSONB,
+			"renamed_from" VARCHAR(140),
+			"linked_field" VARCHAR(255) NOT NULL DEFAULT '',
+			"computed" TEXT,
+			"idx" INTEGER NOT NULL DEFAULT 0
+		)`,
+		`ALTER TABLE "_kora_field" ADD COLUMN "linked_field" VARCHAR(255) NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_field" ADD COLUMN "computed" TEXT`,
+		`ALTER TABLE "_kora_field" ADD COLUMN "accept" TEXT`,
+		`ALTER TABLE "_kora_field" ADD COLUMN "default_to_name" SMALLINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE "_kora_field" ADD COLUMN "field_precision" INTEGER`,
+		`ALTER TABLE "_kora_field" ADD COLUMN "site" VARCHAR(140) NOT NULL DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS "idx_parent" ON "_kora_field" ("parent")`,
+		`CREATE INDEX IF NOT EXISTS "idx_parent_fieldname" ON "_kora_field" ("parent", "fieldname")`,
+	}
 }

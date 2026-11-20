@@ -528,17 +528,6 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		"ALTER TABLE _kora_doctype ADD COLUMN config_json JSON",
 		"ALTER TABLE _kora_doctype ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
 
-		// _kora_field
-		"CREATE TABLE IF NOT EXISTS _kora_field (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tparent VARCHAR(140) NOT NULL,\n\t\t\tfieldname VARCHAR(140) NOT NULL,\n\t\t\tfieldtype VARCHAR(50) NOT NULL,\n\t\t\tlabel VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\toptions TEXT,\n\t\t\treqd TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tunique_constraint TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tdefault_value VARCHAR(255),\n\t\t\thidden TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tread_only TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tbold TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tin_list_view TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tin_standard_filter TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tsearch_index TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tdescription TEXT,\n\t\t\tdepends_on TEXT,\n\t\t\tmandatory_depends_on TEXT,\n\t\t\tconstraints_json JSON,\n\t\t\trenamed_from VARCHAR(140),\n\t\t\tlinked_field VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tcomputed TEXT,\n\t\t\tidx INT NOT NULL DEFAULT 0,\n\t\t\tINDEX idx_parent (parent),\n\t\t\tINDEX idx_parent_fieldname (parent, fieldname)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-
-		// Add columns for backwards compat.
-		"ALTER TABLE _kora_field ADD COLUMN linked_field VARCHAR(255) NOT NULL DEFAULT ''",
-		"ALTER TABLE _kora_field ADD COLUMN computed TEXT",
-		"ALTER TABLE _kora_field ADD COLUMN accept TEXT",
-		"ALTER TABLE _kora_field ADD COLUMN default_to_name TINYINT(1) NOT NULL DEFAULT 0",
-		"ALTER TABLE _kora_field ADD COLUMN field_precision INT",
-		"ALTER TABLE _kora_field ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
-
 		// _kora_role
 		"CREATE TABLE IF NOT EXISTS _kora_role (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tworkspace_access TINYINT(1) NOT NULL DEFAULT 1,\n\t\t\tdescription TEXT\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 		"ALTER TABLE _kora_role ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
@@ -603,7 +592,7 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		"ALTER TABLE _kora_view ADD COLUMN idx INT NOT NULL DEFAULT 0",
 		"ALTER TABLE _kora_view DROP PRIMARY KEY",
 		"ALTER TABLE _kora_view ADD PRIMARY KEY (name)",
-	}...), PaymentTablesMySQL()...)
+	}...), append(mysqlFieldTableSQL(), PaymentTablesMySQL()...)...)
 }
 
 func parseMySQLKeyField(msg string) string {
@@ -637,4 +626,20 @@ func parseMySQLNotNullField(msg string) string {
 		}
 	}
 	return ""
+}
+
+// mysqlFieldTableSQL creates _kora_field, the stored fields of each record
+// type, and adds the columns later releases introduced.
+func mysqlFieldTableSQL() []string {
+	return []string{
+		"CREATE TABLE IF NOT EXISTS _kora_field (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tparent VARCHAR(140) NOT NULL,\n\t\t\tfieldname VARCHAR(140) NOT NULL,\n\t\t\tfieldtype VARCHAR(50) NOT NULL,\n\t\t\tlabel VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\toptions TEXT,\n\t\t\treqd TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tunique_constraint TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tdefault_value VARCHAR(255),\n\t\t\thidden TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tread_only TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tbold TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tin_list_view TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tin_standard_filter TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tsearch_index TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tdescription TEXT,\n\t\t\tdepends_on TEXT,\n\t\t\tmandatory_depends_on TEXT,\n\t\t\tconstraints_json JSON,\n\t\t\trenamed_from VARCHAR(140),\n\t\t\tlinked_field VARCHAR(255) NOT NULL DEFAULT '',\n\t\t\tcomputed TEXT,\n\t\t\tidx INT NOT NULL DEFAULT 0,\n\t\t\tINDEX idx_parent (parent),\n\t\t\tINDEX idx_parent_fieldname (parent, fieldname)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+		// Add columns for backwards compat.
+		"ALTER TABLE _kora_field ADD COLUMN linked_field VARCHAR(255) NOT NULL DEFAULT ''",
+		"ALTER TABLE _kora_field ADD COLUMN computed TEXT",
+		"ALTER TABLE _kora_field ADD COLUMN accept TEXT",
+		"ALTER TABLE _kora_field ADD COLUMN default_to_name TINYINT(1) NOT NULL DEFAULT 0",
+		"ALTER TABLE _kora_field ADD COLUMN field_precision INT",
+		"ALTER TABLE _kora_field ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
+	}
 }
