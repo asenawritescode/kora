@@ -75,6 +75,100 @@ fields:
   - fieldname: notes
     fieldtype: Text
     label: Notes
+  - fieldname: shift
+    fieldtype: Link
+    options: Shift
+    label: Shift
+    search_index: true
+    in_list_view: true
+    description: The shift the till was opened under. Set by the register.
+  - fieldname: location
+    fieldtype: Data
+    label: Location
+    read_only: true
+  - fieldname: opening_note
+    fieldtype: Data
+    label: Opening note
+    description: Why the opening cash differs from what the last till left in the drawer.
+  - fieldname: opening_counts
+    fieldtype: Table
+    options: Till Count Line
+    label: Opening count
+    description: Notes and coins counted into the till at open. Optional.
+  - fieldname: closing_counts
+    fieldtype: Table
+    options: Till Count Line
+    label: Closing count lines
+    description: Notes and coins counted out of the till at close. Optional.
+  - fieldname: left_in_drawer
+    fieldtype: Currency
+    label: Left in drawer
+    description: Cash kept in the drawer for the next shift.
+  - fieldname: taken_out
+    fieldtype: Currency
+    label: Taken out
+    read_only: true
+    computed: "closing_cash - left_in_drawer"
+    description: Counted cash that leaves the till.
+  - fieldname: variance
+    fieldtype: Currency
+    label: Variance
+    read_only: true
+    computed: "closing_cash - expected_cash"
+  - fieldname: difference_reason
+    fieldtype: Select
+    label: Difference reason
+    options: |
+      Wrong change given
+      Pay-out not recorded
+      Sale not rung up
+      Don't know
+    description: Why counted cash differs from expected. Required when the difference is over 100 in the base currency.
+  - fieldname: difference_note
+    fieldtype: Data
+    label: Difference note
+    description: What happened, in the cashier's words.
+  - fieldname: cash_sale_count
+    fieldtype: Int
+    label: Cash sale count
+    default: 0
+    read_only: true
+    description: Cash payments taken on this till, kept by the register.
+  - fieldname: cash_sale_total
+    fieldtype: Currency
+    label: Cash sales
+    default: 0
+    read_only: true
+  - fieldname: cash_refund_count
+    fieldtype: Int
+    label: Cash refund count
+    default: 0
+    read_only: true
+  - fieldname: cash_refund_total
+    fieldtype: Currency
+    label: Cash refunds
+    default: 0
+    read_only: true
+  - fieldname: payin_count
+    fieldtype: Int
+    label: Pay-in count
+    default: 0
+    read_only: true
+  - fieldname: payin_total
+    fieldtype: Currency
+    label: Pay-ins
+    default: 0
+    read_only: true
+  - fieldname: payout_count
+    fieldtype: Int
+    label: Pay-out count
+    default: 0
+    read_only: true
+  - fieldname: payout_total
+    fieldtype: Currency
+    label: Pay-outs
+    default: 0
+    read_only: true
 doc_constraints:
   - type: field_dependency
     condition: "status == 'Closed'"
@@ -85,3 +179,15 @@ doc_constraints:
     status_values: [Closed]
     immutable_fields: [reference, register, register_code, opening_cash, expected_cash, opened_by, opened_at]
     message: "A closed till cannot be changed."
+  - type: field_dependency
+    condition: '(and (== status "Closed") (or (> (- closing_cash expected_cash) 100) (> (- expected_cash closing_cash) 100)))'
+    require_fields: [difference_reason]
+    message: "Pick a reason before closing."
+  - type: predicate
+    condition: '(> (count "opening_counts") 0)'
+    predicate: '(== (round opening_cash 2) (round (sum "opening_counts" "amount") 2))'
+    message: Counted notes and coins don't add up to the total.
+  - type: predicate
+    condition: '(> (count "closing_counts") 0)'
+    predicate: '(== (round closing_cash 2) (round (sum "closing_counts" "amount") 2))'
+    message: Counted notes and coins don't add up to the total.

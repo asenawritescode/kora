@@ -72,3 +72,11 @@ fields:
   - fieldname: approved_by
     fieldtype: User
     label: Approved by
+  - fieldname: note
+    fieldtype: Data
+    label: Note
+    description: For example the slip number or who the money went to.
+doc_constraints:
+  - type: predicate
+    predicate: '(if (== movement_type "Cash out") (<= base_amount 1000) 1)'
+    message: Needs owner approval (coming soon)

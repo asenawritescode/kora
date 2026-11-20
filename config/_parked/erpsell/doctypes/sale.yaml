@@ -51,6 +51,9 @@ fields:
       Paid
       Refunded
       Cancelled
+      Held
+      Void
+      Return
     default: Draft
     in_list_view: true
     in_standard_filter: true
@@ -125,6 +128,39 @@ fields:
     computed: "(round (* (round total 9) (round exchange_rate 9)) 2)"
     read_only: true
     in_list_view: true
+  - fieldname: location
+    fieldtype: Data
+    label: Location
+    description: The location the sale was rung up at. Free text; there is no location record in this pack.
+  - fieldname: return_against
+    fieldtype: Link
+    options: Sale
+    label: Return against
+    description: The paid sale a return refers to. Set on Return sales only.
+  - fieldname: return_reason
+    fieldtype: Select
+    label: Return reason
+    options: |
+      Damaged
+      Wrong item
+      Changed their mind
+      Other
+    description: Why the items came back. Set on Return sales only.
+  - fieldname: held_name
+    fieldtype: Data
+    label: Held name
+    description: What the cashier named a held sale, or its held time.
+  - fieldname: held_at
+    fieldtype: Datetime
+    label: Held at
+  - fieldname: held_by
+    fieldtype: Data
+    label: Held by
+  - fieldname: payments
+    fieldtype: Table
+    label: Payments
+    options: Sale Payment
+    description: How the sale was paid, one line per payment. Only the register fills these in.
   - fieldname: notes
     fieldtype: Text
     label: Notes
