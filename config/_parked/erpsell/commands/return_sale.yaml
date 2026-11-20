@@ -1,0 +1,92 @@
+name: return_sale
+namespace: pos
+version: 1
+module_owner_id: erpsell.core
+capability: pos.checkout
+operation: return_sale
+presentation:
+  title: Return sale
+permission: create
+input:
+  record: Sale
+  # The board's refund reasons (WS-Till refund). Stored on the Return sale.
+  enum:
+    reason: [Damaged, Wrong item, Changed their mind, Other]
+  extra:
+    reason: {type: string, required: true}
+require:
+  - lock:
+      record: Sale
+      name: $input.return_against
+  - exists:
+      record: Sale
+      where:
+        name: $input.return_against
+        register: $input.register
+        status: Paid
+    as: original
+    message: Only a paid sale can be returned
+  - exists:
+      record: Register
+      where:
+        name: $input.register
+        location: $input.location
+    message: Register does not belong to this location
+  - exists:
+      record: Till Session
+      where:
+        name: $input.till_session
+        status: Open
+    message: Till is not open
+  - exists:
+      record: Till Session
+      where:
+        name: $input.till_session
+        opened_by: $actor
+    unless_role: [Owner, Manager, Administrator]
+    message: This till belongs to another cashier
+  - equal: [$computed.paid, $computed.total]
+    message: Refund payments must add up to the return total
+compute:
+  total: {sum: $input.items, expr: "quantity * unit_price"}
+  paid: {sum: $input.payments, expr: "amount"}
+# The return is its own Sale record, written as Return. Return is outside the
+# quantity effect's applying set, so it moves no stock. The board's "put the
+# items back in stock" option is not ported: a return cannot restock through the
+# sale's status-gated quantity effect yet.
+transaction:
+  - for_each: $input.items
+    update:
+      record: Sale Line Balance
+      where:
+        sale: $steps.original.name
+        product: $item.product
+        unit_price: $item.unit_price
+      adjust:
+        remaining_quantity: { decrease: $item.quantity, min: "0" }
+  - as: ret
+    create:
+      record: Sale
+      values:
+        register: $input.register
+        location: $input.location
+        till_session: $input.till_session
+        return_against: $steps.original.name
+        items: $input.items
+        payments: $input.payments
+        status: Return
+        return_reason: $input.reason
+  - for_each: $input.payments
+    where: {method: Cash}
+    update:
+      record: Till Session
+      name: $input.till_session
+      adjust:
+        expected_cash: { decrease: $item.amount }
+        cash_refund_count: { increase: "1" }
+        cash_refund_total: { increase: $item.amount }
+output:
+  reference: $steps.ret.name
+  refund: $computed.total
+emit:
+  - pos.sale.returned
