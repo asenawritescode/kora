@@ -1,0 +1,14 @@
+name: shipments_charge_collected
+label: "Charge: Collected"
+type: simple
+model: "Shipment"
+measure:
+  agg: sum
+  field: charge
+filters:
+  - field: status
+    op: "="
+    value: "Collected"
+time: business_date
+format: currency
+description: "Charge: Collected from the Shipment records (sum)."

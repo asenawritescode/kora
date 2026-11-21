@@ -1,0 +1,14 @@
+name: shipments_charge_delivered
+label: "Charge: Delivered"
+type: simple
+model: "Shipment"
+measure:
+  agg: sum
+  field: charge
+filters:
+  - field: status
+    op: "="
+    value: "Delivered"
+time: business_date
+format: currency
+description: "Charge: Delivered from the Shipment records (sum)."

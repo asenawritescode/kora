@@ -1,0 +1,13 @@
+name: shipments_count_failed
+label: "Shipments: Failed"
+type: simple
+model: "Shipment"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Failed"
+time: business_date
+format: number
+description: "Shipments: Failed from the Shipment records (count)."

@@ -1,0 +1,9 @@
+name: shipments_count
+label: "Shipments"
+type: simple
+model: "Shipment"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Shipments from the Shipment records (count)."

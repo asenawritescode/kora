@@ -1,0 +1,13 @@
+name: shipments_count_collected
+label: "Shipments: Collected"
+type: simple
+model: "Shipment"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Collected"
+time: business_date
+format: number
+description: "Shipments: Collected from the Shipment records (count)."

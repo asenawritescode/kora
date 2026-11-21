@@ -1,0 +1,14 @@
+name: shipments_charge_booked
+label: "Charge: Booked"
+type: simple
+model: "Shipment"
+measure:
+  agg: sum
+  field: charge
+filters:
+  - field: status
+    op: "="
+    value: "Booked"
+time: business_date
+format: currency
+description: "Charge: Booked from the Shipment records (sum)."

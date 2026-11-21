@@ -1,0 +1,16 @@
+name: shipments_insights
+label: "Shipments insights"
+description: "Figures and charts that reproduce the shipments overview report."
+default_range: last_30_days
+tiles:
+  - metric: shipments_count_booked
+  - metric: shipments_count_collected
+  - metric: shipments_count_in_transit
+  - metric: shipments_count_delivered
+  - metric: shipments_count_failed
+  - metric: shipments_charge_booked
+  - metric: shipments_charge_collected
+  - metric: shipments_charge_in_transit
+  - metric: shipments_charge_delivered
+  - metric: shipments_charge_failed
+charts:
