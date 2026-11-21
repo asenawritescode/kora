@@ -105,8 +105,8 @@ func checkShape(q Query) error {
 	switch {
 	case len(q.Metrics) == 0:
 		return errors.New("a query names at least one metric")
-	case q.Grain != GrainDay && q.Grain != GrainWeek && q.Grain != GrainMonth:
-		return fmt.Errorf("grain %q must be day, week or month", q.Grain)
+	case q.Grain != GrainDay && q.Grain != GrainWeek && q.Grain != GrainMonth && q.Grain != GrainRange:
+		return fmt.Errorf("grain %q must be day, week, month or range", q.Grain)
 	case toTime(q.To).Before(toTime(q.From)):
 		return fmt.Errorf("range ends %s before it starts %s", q.To, q.From)
 	case q.Compare != "" && q.Compare != CompareNone && q.Compare != ComparePreviousPeriod:
@@ -125,8 +125,12 @@ func checkShape(q Query) error {
 var maxBuckets = map[Grain]int{GrainDay: 366, GrainWeek: 157, GrainMonth: 120}
 
 // rangeTooLarge reports whether q covers more buckets than maxBuckets allows. It stops counting
-// one bucket past the cap, so a huge range costs no more than the cap.
+// one bucket past the cap, so a huge range costs no more than the cap. A range grain is one bucket
+// and never exceeds the cap.
 func rangeTooLarge(q Query) bool {
+	if q.Grain == GrainRange {
+		return false
+	}
 	limit := maxBuckets[q.Grain]
 	n := 0
 	for b := periodStart(toTime(q.From), q.Grain); !b.After(toTime(q.To)); b = stepPeriod(b, q.Grain, 1) {

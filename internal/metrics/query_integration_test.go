@@ -202,6 +202,21 @@ func queries() []expectation {
 		{"monthly bucket", span(GrainMonth, all), []string{
 			"2026-11-01||350.00,3.00,116.67",
 		}, nil},
+		// Range is one bucket keyed by 18 Nov: Paid 100+50+200 = 350 over 3 receipts. The previous
+		// window is 15-17 Nov, three days, which holds SAL-7 (40, one receipt).
+		{"range is one bucket keyed by its first day", span(GrainRange, all), []string{
+			"2026-11-18||350.00,3.00,116.67",
+		}, nil},
+		{"range compares with as many days before it", Query{Metrics: all, From: day(18), To: day(20), Grain: GrainRange, Compare: ComparePreviousPeriod}, []string{
+			"2026-11-18||350.00,3.00,116.67",
+		}, []string{
+			"2026-11-15||40.00,1.00,40.00",
+		}},
+		// R1 is 100 + 200 (SAL-3 and SAL-6 are returns); R2 is 50.
+		{"range sums each group over the range", Query{Metrics: []string{"sales"}, Dimensions: []string{"register"}, From: day(18), To: day(20), Grain: GrainRange}, []string{
+			"2026-11-18|R1|300.00",
+			"2026-11-18|R2|50.00",
+		}, nil},
 		{"owner scope reads the facts", Query{Metrics: all, From: day(18), To: day(20), Grain: GrainDay, Scope: Scope{Owner: "u1"}}, []string{
 			"2026-11-18||100.00,1.00,100.00",
 			"2026-11-19||0.00,0.00,null",

@@ -19,11 +19,13 @@ var ErrRangeTooLarge = errors.New("metrics: range covers too many buckets")
 // Grain is the width of one result bucket. Weeks start on Monday.
 type Grain string
 
-// Bucket widths.
+// Bucket widths. GrainRange is one bucket for the whole range, keyed by its first day; it has no
+// bucket cap.
 const (
 	GrainDay   Grain = "day"
 	GrainWeek  Grain = "week"
 	GrainMonth Grain = "month"
+	GrainRange Grain = "range"
 )
 
 // Scope narrows a query to what the caller may read. An empty field is not applied.
@@ -102,11 +104,14 @@ func periodStart(t time.Time, g Grain) time.Time {
 		return t.AddDate(0, 0, -((int(t.Weekday()) + 6) % 7))
 	case GrainMonth:
 		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+	case GrainRange:
+		return t
 	}
 	return t
 }
 
-// stepPeriod moves a bucket start by n buckets; a negative n moves back.
+// stepPeriod moves a bucket start by n buckets; a negative n moves back. A range has one bucket
+// and never steps, so its start stays put.
 func stepPeriod(t time.Time, g Grain, n int) time.Time {
 	switch g {
 	case GrainDay:
@@ -115,12 +120,18 @@ func stepPeriod(t time.Time, g Grain, n int) time.Time {
 		return t.AddDate(0, 0, 7*n)
 	case GrainMonth:
 		return t.AddDate(0, n, 0)
+	case GrainRange:
+		return t
 	}
 	return t.AddDate(0, 0, n)
 }
 
-// bucketStarts lists the start of every bucket that touches [from, to], in order.
+// bucketStarts lists the start of every bucket that touches [from, to], in order. A range is the
+// single bucket starting at from.
 func bucketStarts(from, to tenanttime.Date, g Grain) []time.Time {
+	if g == GrainRange {
+		return []time.Time{toTime(from)}
+	}
 	var starts []time.Time
 	end := toTime(to)
 	for b := periodStart(toTime(from), g); !b.After(end); b = stepPeriod(b, g, 1) {

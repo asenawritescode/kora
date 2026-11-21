@@ -18,8 +18,14 @@ const (
 )
 
 // previousRange is the window of as many buckets as the range has, ending the day before its
-// first bucket. For a range that starts on a bucket boundary that is the day before From.
+// first bucket. For a range that starts on a bucket boundary that is the day before From. A range
+// grain takes as many days as the range has, ending the day before From.
 func (p plan) previousRange() (tenanttime.Date, tenanttime.Date) {
+	if p.grain == GrainRange {
+		start := toTime(p.from)
+		days := int(toTime(p.to).Sub(start).Hours()/24) + 1
+		return toDate(start.AddDate(0, 0, -days)), toDate(start.AddDate(0, 0, -1))
+	}
 	first := periodStart(toTime(p.from), p.grain)
 	n := len(bucketStarts(p.from, p.to, p.grain))
 	return toDate(stepPeriod(first, p.grain, -n)), toDate(first.AddDate(0, 0, -1))
