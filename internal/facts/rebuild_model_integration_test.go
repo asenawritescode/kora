@@ -60,7 +60,7 @@ func TestRebuildModelEndToEnd(t *testing.T) {
 			if err = store.Cancel(ctx, job.ID); err == nil {
 				t.Fatal("cancel of a done job was accepted")
 			}
-			queued, err := store.Enqueue(ctx, "Sale")
+			queued, err := store.Enqueue(ctx, "Sale", Window{})
 			if err != nil {
 				t.Fatal(err)
 			}
