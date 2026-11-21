@@ -336,9 +336,6 @@ func DiffFullSnapshots(old, new *ConfigSnapshot) *ConfigDiffFull {
 	// Compare Permissions by doctype+role key.
 	result.SectionChanges = append(result.SectionChanges, diffNamedSection("permissions", old.Permissions, new.Permissions, func(p *Permission) string { return p.Doctype + "|" + p.Role })...)
 
-	// Compare AnalyticsMetrics by name.
-	result.SectionChanges = append(result.SectionChanges, diffNamedSection("analytics_metrics", old.AnalyticsMetrics, new.AnalyticsMetrics, func(m *AnalyticsMetricConfig) string { return m.Name })...)
-
 	// Compare Scripts by name and all versioned metadata, including the body hash.
 	newScriptMap := make(map[string]struct{}, len(new.Scripts))
 	for _, s := range new.Scripts {
@@ -436,8 +433,6 @@ func diffNamedSection[T any](section string, old, next []*T, nameOf func(*T) str
 
 func sectionEntityLabel(section string) string {
 	switch section {
-	case "analytics_metrics":
-		return "Analytics metric"
 	case "permissions":
 		return "Permission"
 	default:

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/kernel"
 	"github.com/asenawritescode/kora/internal/metrics"
@@ -216,7 +215,6 @@ type packResourceNames struct {
 	workflows        map[string]string
 	views            map[string]string
 	scripts          map[string]string
-	reports          map[string]string
 	metrics          map[string]string
 	dashboards       map[string]string
 	queries          map[string]string
@@ -227,7 +225,7 @@ type packResourceNames struct {
 func newPackResourceNames() packResourceNames {
 	return packResourceNames{
 		doctypes: map[string]string{}, doctypeResources: map[string]string{}, roles: map[string]string{}, permissions: map[string]string{},
-		workflows: map[string]string{}, views: map[string]string{}, scripts: map[string]string{}, reports: map[string]string{}, metrics: map[string]string{},
+		workflows: map[string]string{}, views: map[string]string{}, scripts: map[string]string{}, metrics: map[string]string{},
 		dashboards: map[string]string{}, queries: map[string]string{}, commands: map[string]string{}, printFormats: map[string]string{},
 	}
 }
@@ -314,13 +312,13 @@ func (names packResourceNames) add(file PackFile) error {
 			return err
 		}
 		return register(names.printFormats, definition.Name, "print format")
-	case "report", "metric", "dashboard":
+	case "metric", "dashboard":
 		return names.addDefinition(file, register)
 	}
 	return nil
 }
 
-// addDefinition claims the names of a report (and its route), a metric or a dashboard definition.
+// addDefinition claims the names of a metric or a dashboard definition.
 func (names packResourceNames) addDefinition(file PackFile, register func(map[string]string, string, string) error) error {
 	switch file.ContentType {
 	case "metric":
@@ -335,16 +333,6 @@ func (names packResourceNames) addDefinition(file PackFile, register func(map[st
 			return err
 		}
 		return register(names.dashboards, definition.Name, "dashboard")
-	}
-	definition, err := analytics.ParseReportYAML([]byte(file.Content), file.Path)
-	if err != nil {
-		return err
-	}
-	if err := register(names.reports, definition.Name, "report"); err != nil {
-		return err
-	}
-	if definition.Route != "" {
-		return register(names.views, "route:"+definition.Route, "report route")
 	}
 	return nil
 }
@@ -385,7 +373,7 @@ func validatePackFileSyntax(file PackFile) error {
 	case "view":
 		_, err := doctype.ParseViewYAML(data)
 		return err
-	case "report", "metric", "dashboard":
+	case "metric", "dashboard":
 		return validateYAMLDefinition(file.ContentType, file.Path, data)
 	case "command":
 		_, err := kernel.ParseCommandResource(data)
@@ -442,7 +430,7 @@ func ParsePackDigest(value string) error {
 	return contract.ParsePackDigest(value)
 }
 
-// validateYAMLDefinition checks a report, metric or dashboard document against its parser.
+// validateYAMLDefinition checks a metric or dashboard document against its parser.
 func validateYAMLDefinition(contentType, path string, data []byte) error {
 	switch contentType {
 	case "metric":
@@ -452,6 +440,5 @@ func validateYAMLDefinition(contentType, path string, data []byte) error {
 		_, err := metrics.ParseDashboardYAML(data, path)
 		return err
 	}
-	_, err := analytics.ParseReportYAML(data, path)
-	return err
+	return nil
 }

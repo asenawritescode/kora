@@ -54,7 +54,7 @@ func TestMergeManagementPackageSnapshotCarriesPOSMetricsUnchanged(t *testing.T) 
 		}
 		dts = append(dts, parsed...)
 	}
-	_, incoming, _, err := site.LoadPackReportsAndMetrics(filepath.Join("..", "..", "config", "pos"), dts)
+	_, incoming, err := site.LoadPackMetricsAndDashboards(filepath.Join("..", "..", "config", "pos"), dts)
 	if err != nil {
 		t.Fatal(err)
 	}

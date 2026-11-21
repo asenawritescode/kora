@@ -38,14 +38,12 @@ var configChangeTypeMap = map[ChangeType]string{
 
 // sectionChangeTypeKey builds a lookup key from section and change direction.
 var sectionChangeTypeMap = map[string]string{
-	"roles.added":               "add-role",
-	"roles.removed":             "remove-role",
-	"permissions.added":         "add-perm",
-	"permissions.removed":       "remove-perm",
-	"analytics_metrics.added":   "add-metric",
-	"analytics_metrics.removed": "remove-metric",
-	"scripts.added":             "add-script-ref",
-	"scripts.removed":           "remove-script-ref",
+	"roles.added":         "add-role",
+	"roles.removed":       "remove-role",
+	"permissions.added":   "add-perm",
+	"permissions.removed": "remove-perm",
+	"scripts.added":       "add-script-ref",
+	"scripts.removed":     "remove-script-ref",
 }
 
 // ConvertConfigChanges converts the existing ConfigChange and SectionChange slices

@@ -18,7 +18,6 @@ import (
 	"github.com/goccy/go-yaml"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/configstore"
 	sqlDialect "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
@@ -85,10 +84,6 @@ func parsePackSnapshot(configPath string) (*doctype.ConfigSnapshot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing views: %w", err)
 	}
-	reportDefinitions, err := analytics.ParseReportsDirectory(configPath + "/reports")
-	if err != nil {
-		return nil, fmt.Errorf("parsing reports: %w", err)
-	}
 	commandDefinitions, err := kernel.ParseCommandDir(filepath.Join(configPath, "commands"))
 	if err != nil {
 		return nil, fmt.Errorf("parsing commands: %w", err)
@@ -113,7 +108,7 @@ func parsePackSnapshot(configPath string) (*doctype.ConfigSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	reports, metricsRaw, dashboardsRaw, err := encodeReportsAndMetrics(reportDefinitions, configPath, doctypes)
+	metricsRaw, dashboardsRaw, err := LoadPackMetricsAndDashboards(configPath, doctypes)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +119,6 @@ func parsePackSnapshot(configPath string) (*doctype.ConfigSnapshot, error) {
 		Permissions:         permissions,
 		WorkflowDefinitions: workflowDefinitions,
 		Views:               views,
-		Reports:             reports,
 		Metrics:             metricsRaw,
 		Dashboards:          dashboardsRaw,
 		Commands:            commands,
@@ -728,7 +722,6 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 	var permissions []*doctype.Permission
 	var workflowDefinitions []contract.WorkflowDefinition
 	var views []*doctype.View
-	var reports []json.RawMessage
 	var commandDefs []*kernel.CommandResource
 	var commandPaths []string
 	var queryFiles, printFiles []PackFile
@@ -790,10 +783,6 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 			if !strings.HasPrefix(f.Path, "views/") {
 				return nil, nil, fmt.Errorf("pack file %q: content_type view requires path under views/", f.Path)
 			}
-		case "report":
-			if !strings.HasPrefix(f.Path, "reports/") {
-				return nil, nil, fmt.Errorf("pack file %q: content_type report requires path under reports/", f.Path)
-			}
 		case "query", "command", "print_format", "metric", "dashboard":
 			if dir := map[string]string{"query": "queries/", "command": "commands/", "print_format": "print_formats/", "metric": "metrics/", "dashboard": "dashboards/"}[f.ContentType]; !strings.HasPrefix(f.Path, dir) {
 				return nil, nil, fmt.Errorf("pack file %q: content_type %s requires path under %s", f.Path, f.ContentType, dir)
@@ -807,7 +796,7 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 				return nil, nil, fmt.Errorf("pack file %q: script files must be .js, got %q", f.Path, ext)
 			}
 		default:
-			return nil, nil, fmt.Errorf("pack file %q: unknown content_type %q (allowed: doctype, roles, permissions, workflow_definition, view, report, metric, dashboard, query, command, print_format, script)", f.Path, f.ContentType)
+			return nil, nil, fmt.Errorf("pack file %q: unknown content_type %q (allowed: doctype, roles, permissions, workflow_definition, view, metric, dashboard, query, command, print_format, script)", f.Path, f.ContentType)
 		}
 
 		// ── Size limits ────────────────────────────────────────────
@@ -858,17 +847,6 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 			}
 			views = append(views, v)
 
-		case "report":
-			report, err := analytics.ParseReportYAML(data, f.Path)
-			if err != nil {
-				return nil, nil, fmt.Errorf("pack file %q: %w", f.Path, err)
-			}
-			encoded, err := json.Marshal(report)
-			if err != nil {
-				return nil, nil, fmt.Errorf("pack file %q: encoding report: %w", f.Path, err)
-			}
-			reports = append(reports, encoded)
-
 		case "command":
 			def, err := kernel.ParseCommandResource(data)
 			if err != nil {
@@ -915,7 +893,6 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 		Permissions:         permissions,
 		WorkflowDefinitions: workflowDefinitions,
 		Views:               views,
-		Reports:             reports,
 		Commands:            commands,
 		Queries:             queries,
 		PrintFormats:        printFormats,

@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -35,7 +34,6 @@ func TestMergeManagementPackageSnapshotPreservesAndUpsertsTenantConfig(t *testin
 		Roles:         []*doctype.Role{{Name: "Operator"}, {Name: "Viewer"}},
 		Permissions:   []*doctype.Permission{{Doctype: "Customer", Role: "Viewer", Read: true}},
 		Views:         []*doctype.View{{Name: "Customers", Route: "/customers"}},
-		Reports:       []json.RawMessage{json.RawMessage(`{"name":"Existing report"}`)},
 		Scripts:       []*doctype.ScriptSnapshot{{Name: "old_script", ScriptHash: "old-hash", Source: "return false;"}},
 		ScheduledJobs: []contract.ScheduledJobDefinition{{Name: "old_job", Type: "custom", Schedule: "0 8 * * *"}},
 	}
@@ -62,9 +60,6 @@ func TestMergeManagementPackageSnapshotPreservesAndUpsertsTenantConfig(t *testin
 	}
 	if len(merged.Views) != 2 || merged.Views[0].Label != "Package label" || merged.Views[1].Name != "Invoices" {
 		t.Fatalf("merged views = %#v", merged.Views)
-	}
-	if len(merged.Reports) != 1 || string(merged.Reports[0]) != string(current.Reports[0]) {
-		t.Fatalf("reports were not preserved: %#v", merged.Reports)
 	}
 	if len(merged.Scripts) != 2 || merged.Scripts[0].Name != "new_script" || merged.Scripts[1].Name != "old_script" {
 		t.Fatalf("merged scripts = %#v", merged.Scripts)

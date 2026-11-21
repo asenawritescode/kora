@@ -62,7 +62,7 @@ func TestDashboardDefinitionsAgreeAcrossInstallPaths(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(packDir, "dashboards", "till_insights.yaml"), []byte(testDashboardYAML), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, directory, err := LoadPackReportsAndMetrics(packDir, dts)
+	_, directory, err := LoadPackMetricsAndDashboards(packDir, dts)
 	if err != nil {
 		t.Fatal(err)
 	}

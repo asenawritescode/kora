@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/asenawritescode/kora/internal/db"
 	"strings"
+
+	"github.com/asenawritescode/kora/internal/db"
 )
 
 var ErrSiteAliasIndexUnavailable = errors.New("site alias index is unavailable")

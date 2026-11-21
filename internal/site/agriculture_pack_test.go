@@ -1,13 +1,10 @@
 package site
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/asenawritescode/kora/internal/analytics"
 )
 
 func TestAgriculturePackIsUniqueImportableAndHasUserAssignmentsAndReport(t *testing.T) {
@@ -48,25 +45,6 @@ func TestAgriculturePackIsUniqueImportableAndHasUserAssignmentsAndReport(t *test
 		if got := byName[doctype][field]; got != "User" {
 			t.Errorf("%s.%s fieldtype = %q; want User picker", doctype, field, got)
 		}
-	}
-	if len(snapshot.Reports) != 1 {
-		t.Fatalf("got %d reports; want one farm performance report", len(snapshot.Reports))
-	}
-	var report map[string]any
-	if err := json.Unmarshal(snapshot.Reports[0], &report); err != nil {
-		t.Fatal(err)
-	}
-	if report["name"] != "farm_season_performance" {
-		t.Fatalf("unexpected farm report snapshot: %s", snapshot.Reports[0])
-	}
-	var definition analytics.ReportDefinition
-	if err := json.Unmarshal(snapshot.Reports[0], &definition); err != nil {
-		t.Fatal(err)
-	}
-	catalog := analytics.BuildSemanticCatalog(snapshot.DocTypes)
-	catalog.Reports = []analytics.ReportDefinition{definition}
-	if err := catalog.Validate(); err != nil {
-		t.Fatalf("farm report does not match its source records: %v", err)
 	}
 }
 
@@ -116,18 +94,6 @@ func TestFarmTeamControlsPackValidatesItsReportsAndUsesWorkspaceUsers(t *testing
 			t.Errorf("%s.%s fieldtype = %q; want User picker", doctype, field, got)
 		}
 	}
-	if len(snapshot.Reports) != 1 {
-		t.Fatalf("got %d team reports; want one", len(snapshot.Reports))
-	}
-	var report analytics.ReportDefinition
-	if err := json.Unmarshal(snapshot.Reports[0], &report); err != nil {
-		t.Fatal(err)
-	}
-	catalog := analytics.BuildSemanticCatalog(snapshot.DocTypes)
-	catalog.Reports = []analytics.ReportDefinition{report}
-	if err := catalog.Validate(); err != nil {
-		t.Fatalf("team report does not match its source records: %v", err)
-	}
 }
 
 func loadConfigProfilePackFiles(t *testing.T, profile string) []PackFile {
@@ -176,14 +142,4 @@ func loadConfigProfilePackFiles(t *testing.T, profile string) []PackFile {
 		t.Fatal(err)
 	}
 	return files
-}
-
-func TestParseConfigPackRejectsReportWithExecutableOrUnknownShape(t *testing.T) {
-	files := []PackFile{{
-		Path: "reports/farm.yaml", ContentType: "report",
-		Content: "name: farm_report\nlabel: Farm report\nqueries: []\n",
-	}}
-	if snapshot, _, err := parseConfigPack("farm", files); err == nil || snapshot != nil {
-		t.Fatalf("invalid report pack returned snapshot=%v err=%v; want fail closed", snapshot, err)
-	}
 }
