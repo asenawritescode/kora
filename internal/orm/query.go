@@ -418,7 +418,7 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 		if childDT == nil {
 			continue
 		}
-		if err := tx.deriveChildRows(dbTx, childDT, children, computedHook); err != nil {
+		if err := tx.deriveChildRows(dbTx, childDT, children, nil, computedHook); err != nil {
 			return fmt.Errorf("populating linked fields in %s: %w", f.Fieldname, err)
 		}
 		if err := persistComputedChildFields(dbTx, dt, f.Fieldname, childDT, children, tx.Dialect); err != nil {
@@ -426,7 +426,7 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 		}
 	}
 
-	if err := tx.deriveParent(dbTx, dt, doc, computedHook); err != nil {
+	if err := tx.deriveParent(dbTx, dt, doc, nil, computedHook); err != nil {
 		return fmt.Errorf("populating linked fields: %w", err)
 	}
 
@@ -442,82 +442,127 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 	return nil
 }
 
+// fieldText is a field's value as trimmed text, empty when it is unset.
+func fieldText(value any) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
 // populateLinkedFields resolves Link values to their configured linked_field
 // values before computed fields run. Link inputs may use either the document
 // name or its title field, which keeps API payloads human-friendly.
-func (tx *TxManager) populateLinkedFields(ex db.Queryer, dt *doctype.DocType, doc *doctype.Document) error {
+//
+// stored is the row as it is saved, nil for a new row. An update takes the
+// stored value when the source link is unchanged and the stored value is set,
+// whatever the client sent; otherwise it copies from the source. A later change
+// to the source record does not rewrite a saved document.
+func (tx *TxManager) populateLinkedFields(ex db.Queryer, dt *doctype.DocType, doc, stored *doctype.Document) error {
 	if dt == nil || doc == nil {
 		return nil
 	}
 	for _, field := range dt.Fields {
-		if field.LinkedField == "" || field.Fieldtype == "Table" {
-			continue
-		}
-		sourceField, targetField, ok := strings.Cut(field.LinkedField, ".")
-		if !ok || sourceField == "" || targetField == "" {
-			continue
-		}
-		linkValue := strings.TrimSpace(fmt.Sprint(doc.Get(sourceField)))
-		if linkValue == "" || linkValue == "<nil>" {
-			continue
-		}
-		source := dt.GetField(sourceField)
-		if source == nil || source.Fieldtype != "Link" {
-			continue
-		}
-		targetDT := tx.Registry.Get(source.Options)
-		if targetDT == nil {
-			continue
-		}
-		where := "name = ?"
-		args := []any{linkValue}
-		if targetDT.TitleField != "" && targetDT.GetField(targetDT.TitleField) != nil {
-			where += " OR " + targetDT.TitleField + " = ?"
-			args = append(args, linkValue)
-		}
-		if targetDT.BusinessScopePolicy == contract.ScopeEntityOwned {
-			if contract.ValidateResourceBusinessScope(tx.BusinessScope, targetDT.BusinessScopePolicy) != nil || targetDT.BusinessScopeField == "" {
-				return fmt.Errorf("entity-owned linked resource %s requires verified entity scope", targetDT.Name)
-			}
-			where = "(" + where + ") AND " + tx.Dialect.QuoteIdent(targetDT.BusinessScopeField) + " = ?"
-			args = append(args, tx.BusinessScope.LegalEntityID)
-		}
-		targetMeta := targetDT.GetField(targetField)
-		if targetMeta == nil {
-			continue
-		}
-		query := fmt.Sprintf("SELECT %s FROM %s WHERE %s LIMIT 1", targetField, tx.tableName(targetDT), where)
-		var value any
-		if err := ex.QueryRow(db.Rebind(tx.Dialect, query), args...).Scan(&value); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				continue
-			}
+		if err := tx.populateLinkedField(ex, dt, field, doc, stored); err != nil {
 			return err
-		}
-		if bytes, ok := value.([]byte); ok {
-			textValue := string(bytes)
-			switch targetMeta.Fieldtype {
-			case "Float", "Currency", "Percent":
-				if number, err := numeric.Normalize(textValue); err == nil {
-					value = number
-				} else {
-					value = textValue
-				}
-			case "Int":
-				if number, err := strconv.ParseFloat(textValue, 64); err == nil {
-					value = number
-				} else {
-					value = textValue
-				}
-			default:
-				value = textValue
-			}
-		}
-		if value != nil {
-			doc.Set(field.Fieldname, value)
 		}
 	}
 	return nil
+}
+
+// populateLinkedField copies the linked value of one field, if the rules in
+// populateLinkedFields call for it.
+func (tx *TxManager) populateLinkedField(ex db.Queryer, dt *doctype.DocType, field doctype.Field, doc, stored *doctype.Document) error {
+	if field.LinkedField == "" || field.Fieldtype == "Table" {
+		return nil
+	}
+	sourceField, targetField, ok := strings.Cut(field.LinkedField, ".")
+	if !ok || sourceField == "" || targetField == "" {
+		return nil
+	}
+	linkValue := fieldText(doc.Get(sourceField))
+	if linkValue == "" || restoreStoredValue(doc, stored, field.Fieldname, sourceField, linkValue) {
+		return nil
+	}
+	source := dt.GetField(sourceField)
+	if source == nil || source.Fieldtype != "Link" {
+		return nil
+	}
+	targetDT := tx.Registry.Get(source.Options)
+	if targetDT == nil {
+		return nil
+	}
+	targetMeta := targetDT.GetField(targetField)
+	if targetMeta == nil {
+		return nil
+	}
+	value, err := tx.linkedValue(ex, targetDT, targetField, linkValue)
+	if err != nil {
+		return err
+	}
+	if value != nil {
+		doc.Set(field.Fieldname, linkedRowValue(value, targetMeta))
+	}
+	return nil
+}
+
+// linkedValue reads targetField of the record that linkValue names (by name or
+// by title field). It returns nil when no record matches.
+func (tx *TxManager) linkedValue(ex db.Queryer, targetDT *doctype.DocType, targetField, linkValue string) (any, error) {
+	where := "name = ?"
+	args := []any{linkValue}
+	if targetDT.TitleField != "" && targetDT.GetField(targetDT.TitleField) != nil {
+		where += " OR " + targetDT.TitleField + " = ?"
+		args = append(args, linkValue)
+	}
+	if targetDT.BusinessScopePolicy == contract.ScopeEntityOwned {
+		if contract.ValidateResourceBusinessScope(tx.BusinessScope, targetDT.BusinessScopePolicy) != nil || targetDT.BusinessScopeField == "" {
+			return nil, fmt.Errorf("entity-owned linked resource %s requires verified entity scope", targetDT.Name)
+		}
+		where = "(" + where + ") AND " + tx.Dialect.QuoteIdent(targetDT.BusinessScopeField) + " = ?"
+		args = append(args, tx.BusinessScope.LegalEntityID)
+	}
+	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s LIMIT 1", targetField, tx.tableName(targetDT), where)
+	var value any
+	if err := ex.QueryRow(db.Rebind(tx.Dialect, query), args...).Scan(&value); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return value, nil
+}
+
+// linkedRowValue turns a value read from the database into the Go type its
+// target field takes: text from a decimal or integer column becomes a number.
+func linkedRowValue(value any, targetMeta *doctype.Field) any {
+	bytes, ok := value.([]byte)
+	if !ok {
+		return value
+	}
+	textValue := string(bytes)
+	switch targetMeta.Fieldtype {
+	case "Float", "Currency", "Percent":
+		if number, err := numeric.Normalize(textValue); err == nil {
+			return number
+		}
+	case "Int":
+		if number, err := strconv.ParseFloat(textValue, 64); err == nil {
+			return number
+		}
+	}
+	return textValue
+}
+
+// restoreStoredValue sets the target of a saved row back to its stored value
+// when the row has one and its source link is unchanged. It reports whether it
+// did, so the caller skips the lookup.
+func restoreStoredValue(doc, stored *doctype.Document, target, source, linkValue string) bool {
+	if stored == nil || fieldText(stored.Get(target)) == "" || fieldText(stored.Get(source)) != linkValue {
+		return false
+	}
+	doc.Set(target, stored.Get(target))
+	return true
 }
 
 // updateDerivedFieldsExec persists both linked and computed values produced by
@@ -715,7 +760,7 @@ func (tx *TxManager) SaveInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, doc *d
 		if childDT == nil {
 			continue
 		}
-		if err := tx.deriveChildRows(dbTx, childDT, children, computedHook); err != nil {
+		if err := tx.deriveChildRows(dbTx, childDT, children, priorChildren(oldDoc, f.Fieldname), computedHook); err != nil {
 			return fmt.Errorf("populating linked fields in %s: %w", f.Fieldname, err)
 		}
 		if err := persistComputedChildFields(dbTx, dt, f.Fieldname, childDT, children, tx.Dialect); err != nil {
@@ -723,7 +768,7 @@ func (tx *TxManager) SaveInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, doc *d
 		}
 	}
 
-	if err := tx.deriveParent(dbTx, dt, doc, computedHook); err != nil {
+	if err := tx.deriveParent(dbTx, dt, doc, oldDoc, computedHook); err != nil {
 		return fmt.Errorf("populating linked fields: %w", err)
 	}
 

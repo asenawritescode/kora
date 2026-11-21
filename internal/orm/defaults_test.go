@@ -107,7 +107,7 @@ func TestPopulateLinkedFieldsResolvesDocumentTitle(t *testing.T) {
 	doc := doctype.NewDocument("Order")
 	doc.Set("product", "CAKE-001")
 	tx := &TxManager{DB: dbConn, Registry: reg, Dialect: db.Resolve("mysql")}
-	if err := tx.populateLinkedFields(dbConn, order, doc); err != nil {
+	if err := tx.populateLinkedFields(dbConn, order, doc, nil); err != nil {
 		t.Fatalf("populate linked fields: %v", err)
 	}
 	if got := doc.Get("unit_price"); got != 125.5 {

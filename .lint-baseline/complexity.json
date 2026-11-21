@@ -1966,10 +1966,6 @@
   "internal/orm::(*TxManager).computedScriptHook": {
    "cognitive": 33
   },
-  "internal/orm::(*TxManager).populateLinkedFields": {
-   "cognitive": 50,
-   "cyclomatic": 28
-  },
   "internal/orm::(*TxManager).rowScopePredicate": {
    "cognitive": 22,
    "cyclomatic": 20
@@ -2015,9 +2011,6 @@
   },
   "internal/orm::persistComputedChildFields": {
    "cognitive": 16
-  },
-  "internal/orm::populateLinkedFields": {
-   "statements": 50
   },
   "internal/orm::reconcileChildren": {
    "cognitive": 25,
