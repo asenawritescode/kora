@@ -1,0 +1,11 @@
+name: bills_base_amount
+label: Billed in base currency
+type: simple
+model: Supplier Bill
+measure:
+  agg: sum
+  field: base_amount
+time: business_date
+good: down
+format: currency
+description: Supplier bill amounts in base currency, every status (sum).
