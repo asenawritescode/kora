@@ -1,0 +1,15 @@
+name: farm_produce_insights
+label: "Produce insights"
+description: "Figures and charts that reproduce the produce overview report."
+default_range: last_30_days
+charts:
+  - id: deliveries_by_grade
+    title: "Kilograms by grade"
+    kind: bar
+    metrics: [produce_kg]
+    by: grade
+  - id: deliveries_by_farmer
+    title: "Kilograms by farmer"
+    kind: bar
+    metrics: [produce_kg]
+    by: farmer
