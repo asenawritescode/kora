@@ -32,6 +32,7 @@ type plan struct {
 	top       int
 	compare   Compare
 	opening   bool // read only the days before from: the opening of every balance series
+	records   bool // a drill lists records: the fact rows also carry occurred_at
 }
 
 // series is one aggregate of one metric. Its own filters apply only to that series.

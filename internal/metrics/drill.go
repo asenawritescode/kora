@@ -20,10 +20,12 @@ type DrillRequest struct {
 }
 
 // Drill is the record list behind one number: the filters that list its records of the record type
-// Doctype. The list API applies the caller's own record scope.
+// Doctype. The list API applies the caller's own record scope. ListOpenable is false when a group
+// reads a path or a line: the list filters cannot name those, so the list would show another number.
 type Drill struct {
-	Doctype string
-	Filters []Filter
+	Doctype      string
+	Filters      []Filter
+	ListOpenable bool
 }
 
 // drillTimeLayout is the datetime text the list API compares the time field with: UTC, to the second.
@@ -31,6 +33,7 @@ const drillTimeLayout = "2006-01-02 15:04:05"
 
 // Drill turns a simple sum or count into the record list it summarizes. Only a header measure
 // drills: a sum over a line field would list whole records, which does not add up to the number.
+// Groups may follow a path or name a line dimension; those are not list filters, see Drill.ListOpenable.
 // Business days map to instants through clock, so the record time field is compared in UTC.
 func (c Catalog) Drill(req DrillRequest, clock tenanttime.Clock) (Drill, error) {
 	m, ok := c.Metrics[req.Metric]
@@ -51,11 +54,15 @@ func (c Catalog) Drill(req DrillRequest, clock tenanttime.Clock) (Drill, error) 
 	if toTime(req.To).Before(toTime(req.From)) {
 		return Drill{}, fmt.Errorf("range ends %s before it starts %s", req.To, req.From)
 	}
-	out := Drill{Doctype: dt.Name}
+	out := Drill{Doctype: dt.Name, ListOpenable: true}
 	out.Filters = append(out.Filters, m.Filters...)
 	for _, dim := range slices.Sorted(maps.Keys(req.Group)) {
-		if !headerDimension(f, dim) {
+		if _, _, ok := factDimOf(f, dim); !ok {
 			return Drill{}, fmt.Errorf("%q is not a record dimension of %q", dim, m.Model)
+		}
+		if !headerDimension(f, dim) {
+			out.ListOpenable = false
+			continue
 		}
 		out.Filters = append(out.Filters, Filter{Field: dim, Op: "=", Value: req.Group[dim]})
 	}

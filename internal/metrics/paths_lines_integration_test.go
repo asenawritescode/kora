@@ -34,11 +34,13 @@ type saleLine struct {
 	name, product, quantity, total, cost string
 }
 
-// lineSales are the Sale records, all paid. P1 is Tea (Beverages), P2 is Bread (Bakery).
+// lineSales are the Sale records, all paid. P1 is Tea (Beverages), P2 is Bread (Bakery). SAL-D, on 20
+// November, holds two lines of P1: it counts once in a count of sales by product.
 var lineSales = []lineSale{
 	{"SAL-A", "Paid", "2026-11-18", []saleLine{{"L-A1", "P1", "2", "100.00", "60.00"}, {"L-A2", "P2", "1", "50.00", "30.00"}}},
 	{"SAL-B", "Paid", "2026-11-18", []saleLine{{"L-B1", "P1", "1", "50.00", "30.00"}}},
 	{"SAL-C", "Paid", "2026-11-19", []saleLine{{"L-C1", "P2", "3", "150.00", "90.00"}}},
+	{"SAL-D", "Paid", "2026-11-20", []saleLine{{"L-D1", "P1", "1", "40.00", "20.00"}, {"L-D2", "P1", "1", "60.00", "30.00"}}},
 }
 
 // TestSaleLinesGroupByProductAcrossDialects groups selling-pack sale lines by product and by a
@@ -140,7 +142,7 @@ func seedSaleLines(t *testing.T, conn *sql.DB, dialect db.Dialect) {
 	ctx := context.Background()
 	q := dialect.QuoteIdent
 	steps := []string{
-		fmt.Sprintf("CREATE TABLE %s (name VARCHAR(140) NOT NULL PRIMARY KEY, owner VARCHAR(140) NOT NULL, creation TIMESTAMP NOT NULL)", q("tabSale")),
+		fmt.Sprintf("CREATE TABLE %s (name VARCHAR(140) NOT NULL PRIMARY KEY, owner VARCHAR(140) NOT NULL, creation TIMESTAMP NOT NULL, reference VARCHAR(140) NOT NULL DEFAULT '')", q("tabSale")),
 		"CREATE TABLE _kora_site_setting (site VARCHAR(140) NOT NULL, setting_key VARCHAR(140) NOT NULL, setting_value VARCHAR(140) NOT NULL, PRIMARY KEY (site, setting_key))",
 		fmt.Sprintf("CREATE TABLE %s (name VARCHAR(140) NOT NULL PRIMARY KEY, product_name VARCHAR(140) NOT NULL, category VARCHAR(140) NOT NULL)", q("tabProduct")),
 	}

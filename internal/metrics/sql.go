@@ -53,7 +53,7 @@ func (p plan) summarySQL(d db.Dialect) (string, []any) {
 
 // factsSQL aggregates the fact rows, header and line, per day and group. Measures sum over every row,
 // as the summary does. A count takes header rows only, so a record with lines counts once, unless the
-// query groups by a line dimension: then it reads the line rows only.
+// query groups by a line dimension: then it reads the line rows only and counts distinct records.
 func (p plan) factsSQL(d db.Dialect) (string, []any) {
 	q := d.QuoteIdent
 	var args []any
@@ -67,30 +67,37 @@ func (p plan) factsSQL(d db.Dialect) (string, []any) {
 	for _, s := range p.series {
 		sel = append(sel, p.factsAggregate(d, f, s, &args))
 	}
+	stmt := fmt.Sprintf("SELECT %s FROM (%s) AS f GROUP BY %s",
+		strings.Join(sel, ", "), p.factsUnion(d, &args), strings.Join(group, ", "))
+	return stmt, args
+}
+
+// factsUnion is the fact rows the query reads: the header rows unless a line dimension is grouped by,
+// and the line rows when the record type has lines. Its arguments are appended to args.
+func (p plan) factsUnion(d db.Dialect, args *[]any) string {
 	var parts []string
 	if !p.hasLineDim() {
-		parts = append(parts, p.factsPart(d, p.model.Facts.TableName(p.model), &args))
+		parts = append(parts, p.factsPart(d, p.model.Facts.TableName(p.model), args))
 	}
 	if p.model.Facts.Lines != "" {
-		parts = append(parts, p.factsPart(d, p.model.Facts.LineTableName(p.model), &args))
+		parts = append(parts, p.factsPart(d, p.model.Facts.LineTableName(p.model), args))
 	}
-	stmt := fmt.Sprintf("SELECT %s FROM (%s) AS f GROUP BY %s",
-		strings.Join(sel, ", "), strings.Join(parts, " UNION ALL "), strings.Join(group, ", "))
-	return stmt, args
+	return strings.Join(parts, " UNION ALL ")
 }
 
 // factsAggregate renders one series over the derived table alias f.
 func (p plan) factsAggregate(d db.Dialect, f string, s series, args *[]any) string {
 	switch s.agg {
 	case aggCount:
-		// A query on a line dimension reads line rows only, so each line counts once.
-		conds := s.conds
-		if !p.hasLineDim() {
-			conds = append([]predicate{{field: "line_id", op: "=", value: ""}}, conds...)
+		if p.hasLineDim() {
+			// A line dimension reads line rows, so a record with several lines in one group counts once.
+			if len(s.conds) == 0 {
+				return "COUNT(DISTINCT " + f + d.QuoteIdent("record_id") + ")"
+			}
+			return "COUNT(DISTINCT CASE WHEN " + p.condition(d, f, s.conds, args) + " THEN " + f + d.QuoteIdent("record_id") + " ELSE NULL END)"
 		}
-		if len(conds) == 0 {
-			return "COUNT(*)"
-		}
+		// Without a line dimension a count takes header rows only.
+		conds := append([]predicate{{field: "line_id", op: "=", value: ""}}, s.conds...)
 		return "SUM(" + p.caseWhen(d, f, conds, "1", args) + ")"
 	case aggSum:
 		return "SUM(" + p.withConds(d, f, s.conds, f+d.QuoteIdent(s.column), args) + ")"
@@ -119,7 +126,10 @@ func (p plan) factsPart(d db.Dialect, table string, args *[]any) string {
 // factsColumns lists the fact columns a fact part selects, each once: the fixed columns, the plain
 // dimensions, the measures and the columns the filters read.
 func (p plan) factsColumns() []string {
-	cols := []string{"business_date", "line_id", "status"}
+	cols := []string{"record_id", "business_date", "line_id", "status"}
+	if p.records {
+		cols = append(cols, "occurred_at")
+	}
 	add := func(name string) {
 		if !slices.Contains(cols, name) {
 			cols = append(cols, name)

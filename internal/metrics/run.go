@@ -66,6 +66,14 @@ type aggregate struct {
 	groups map[string][]string
 }
 
+// timeout is the bound on one query, zero Timeout meaning defaultTimeout.
+func (e Engine) timeout() time.Duration {
+	if e.Timeout <= 0 {
+		return defaultTimeout
+	}
+	return e.Timeout
+}
+
 // Query compiles q and runs it. A metric or shape this compiler does not run yet fails with
 // ErrNotSupported before any SQL is sent.
 func (e Engine) Query(ctx context.Context, q Query) (Result, error) {
@@ -73,11 +81,7 @@ func (e Engine) Query(ctx context.Context, q Query) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	timeout := e.Timeout
-	if timeout <= 0 {
-		timeout = defaultTimeout
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, e.timeout())
 	defer cancel()
 	cur, err := e.run(ctx, p)
 	if err != nil {
