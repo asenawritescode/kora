@@ -17,7 +17,7 @@ fields:
     read_only: true
     in_list_view: true
     in_standard_filter: true
-  - fieldname: change
+  - fieldname: quantity_change
     fieldtype: Float
     label: Change
     read_only: true

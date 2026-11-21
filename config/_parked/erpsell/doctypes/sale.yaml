@@ -12,7 +12,7 @@ quantity_effect:
   ledger:
     doctype: Stock Movement
     target_field: product
-    change_field: change
+    change_field: quantity_change
     balance_field: balance_after
     source_doctype_field: source_doctype
     source_name_field: source_name
