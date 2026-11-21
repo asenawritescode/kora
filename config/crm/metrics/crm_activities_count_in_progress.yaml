@@ -1,0 +1,13 @@
+name: crm_activities_count_in_progress
+label: "Activities: In Progress"
+type: simple
+model: "Activity"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "In Progress"
+time: business_date
+format: number
+description: "Activities: In Progress from the Activity records (count)."

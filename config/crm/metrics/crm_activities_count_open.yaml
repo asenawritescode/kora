@@ -1,0 +1,13 @@
+name: crm_activities_count_open
+label: "Activities: Open"
+type: simple
+model: "Activity"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Open"
+time: business_date
+format: number
+description: "Activities: Open from the Activity records (count)."

@@ -1,0 +1,14 @@
+name: crm_open_deal_value
+label: "Open pipeline value"
+type: simple
+model: "Deal"
+measure:
+  agg: sum
+  field: total
+filters:
+  - field: pipeline_stage
+    op: "in"
+    value: ["Lead", "Qualified", "Proposal", "Negotiation"]
+time: business_date
+format: currency
+description: "Open pipeline value from the Deal records (sum)."

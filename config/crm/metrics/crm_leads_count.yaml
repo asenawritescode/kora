@@ -1,0 +1,9 @@
+name: crm_leads_count
+label: "Leads"
+type: simple
+model: "Lead"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Leads from the Lead records (count)."

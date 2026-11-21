@@ -1,0 +1,13 @@
+name: crm_activities_count_completed
+label: "Activities: Completed"
+type: simple
+model: "Activity"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Completed"
+time: business_date
+format: number
+description: "Activities: Completed from the Activity records (count)."
