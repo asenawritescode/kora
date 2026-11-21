@@ -1,0 +1,9 @@
+name: job_cards_count
+label: "Job cards"
+type: simple
+model: "Job Card"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Job cards from the Job Card records (count)."

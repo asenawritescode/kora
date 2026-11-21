@@ -1,0 +1,13 @@
+name: job_cards_count_collected
+label: "Job cards: Collected"
+type: simple
+model: "Job Card"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Collected"
+time: business_date
+format: number
+description: "Job cards: Collected from the Job Card records (count)."

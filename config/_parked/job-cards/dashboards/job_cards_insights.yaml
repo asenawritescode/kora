@@ -1,0 +1,11 @@
+name: job_cards_insights
+label: "Workshop insights"
+description: "Figures and charts that reproduce the workshop overview report."
+default_range: last_30_days
+tiles:
+  - metric: job_cards_count_booked
+  - metric: job_cards_count_in_progress
+  - metric: job_cards_count_waiting_for_parts
+  - metric: job_cards_count_done
+  - metric: job_cards_count_collected
+charts:

@@ -1,0 +1,13 @@
+name: job_cards_count_waiting_for_parts
+label: "Job cards: Waiting for parts"
+type: simple
+model: "Job Card"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Waiting for parts"
+time: business_date
+format: number
+description: "Job cards: Waiting for parts from the Job Card records (count)."

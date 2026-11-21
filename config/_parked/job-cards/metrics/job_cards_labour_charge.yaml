@@ -1,0 +1,10 @@
+name: job_cards_labour_charge
+label: "Labour charge"
+type: simple
+model: "Job Card"
+measure:
+  agg: sum
+  field: labour_charge
+time: business_date
+format: currency
+description: "Labour charge from the Job Card records (sum)."

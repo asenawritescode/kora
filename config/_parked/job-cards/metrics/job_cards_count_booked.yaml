@@ -1,0 +1,13 @@
+name: job_cards_count_booked
+label: "Job cards: Booked"
+type: simple
+model: "Job Card"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Booked"
+time: business_date
+format: number
+description: "Job cards: Booked from the Job Card records (count)."
