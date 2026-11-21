@@ -1113,6 +1113,56 @@ func validateQuantityEffect(dt *DocType, dtMap map[string]*DocType, bad func(*Do
 	validateReasonDirections(dt, q, bad)
 	validateQuantityStatusGate(dt, q, bad)
 	validateQuantityTargets(dt, dtMap, q, bad)
+	validateQuantityLedger(dt, dtMap, q, bad)
+}
+
+// validateQuantityLedger checks the ledger an effect writes to: an append-only
+// record type whose named fields hold the target link, the signed change, the
+// quantity after it, the source record and, when named, the reason.
+func validateQuantityLedger(dt *DocType, dtMap map[string]*DocType, q *QuantityEffect, bad func(*DocType, string, string)) {
+	l := q.Ledger
+	if l == nil {
+		return
+	}
+	ledger := dtMap[l.Doctype]
+	if ledger == nil {
+		bad(dt, "ledger", fmt.Sprintf("quantity_effect ledger doctype %q does not exist", l.Doctype))
+		return
+	}
+	if !ledger.AppendOnly {
+		bad(dt, "ledger", fmt.Sprintf("quantity_effect ledger %s must be append_only so its rows cannot be edited or deleted", ledger.Name))
+	}
+	checks := []struct {
+		key, name, want string
+		ok              func(*Field) bool
+		optional        bool
+	}{
+		{"target_field", l.TargetField, "a Link to " + q.TargetDocType, func(f *Field) bool { return f.Fieldtype == "Link" && f.Options == q.TargetDocType }, false},
+		{"change_field", l.ChangeField, "a number", isNumberField, false},
+		{"balance_field", l.BalanceField, "a number", isNumberField, false},
+		{"source_doctype_field", l.SourceDoctypeField, "text", isTextField, false},
+		{"source_name_field", l.SourceNameField, "text", isTextField, false},
+		{"reason_field", l.ReasonField, "text", isTextField, true},
+	}
+	for _, c := range checks {
+		if c.name == "" {
+			if !c.optional {
+				bad(dt, c.key, fmt.Sprintf("quantity_effect ledger %s is required", c.key))
+			}
+			continue
+		}
+		if f := ledger.GetField(c.name); f == nil || !c.ok(f) {
+			bad(dt, c.key, fmt.Sprintf("quantity_effect ledger %s %q must be %s on %s", c.key, c.name, c.want, ledger.Name))
+		}
+	}
+}
+
+func isNumberField(f *Field) bool {
+	return f.Fieldtype == "Int" || f.Fieldtype == "Float" || f.Fieldtype == "Currency"
+}
+
+func isTextField(f *Field) bool {
+	return f.Fieldtype == "Data" || f.Fieldtype == "Small Text"
 }
 
 // validateReasonDirections checks the reason-decided direction of a record-level effect.

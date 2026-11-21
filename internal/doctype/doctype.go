@@ -97,6 +97,23 @@ type QuantityEffect struct {
 	// change, and one that leaves it reverses it. Set both or neither (see Gated).
 	StatusField     string   `yaml:"status_field" json:"status_field,omitempty"`
 	ApplyInStatuses []string `yaml:"apply_in_statuses" json:"apply_in_statuses,omitempty"`
+	// Ledger, when set, appends one row per target record each time the effect
+	// changes its quantity, so the stock history says why it changed.
+	Ledger *QuantityLedger `yaml:"ledger" json:"ledger,omitempty"`
+}
+
+// QuantityLedger names the append-only record type that logs a quantity effect.
+// Each move writes one row in the effect's transaction: the target record it
+// changed, the signed change, the target quantity after the change, the record
+// that caused it and, optionally, the reason. Only the reason is optional.
+type QuantityLedger struct {
+	Doctype            string `yaml:"doctype" json:"doctype"`
+	TargetField        string `yaml:"target_field" json:"target_field"`
+	ChangeField        string `yaml:"change_field" json:"change_field"`
+	BalanceField       string `yaml:"balance_field" json:"balance_field"`
+	SourceDoctypeField string `yaml:"source_doctype_field" json:"source_doctype_field"`
+	SourceNameField    string `yaml:"source_name_field" json:"source_name_field"`
+	ReasonField        string `yaml:"reason_field" json:"reason_field,omitempty"`
 }
 
 // Complete reports whether the effect names everything the kernel needs to apply it.
