@@ -248,6 +248,8 @@ func askZanaRouter(t *testing.T, database *sql.DB, reg *doctype.Registry, dialec
 // modelStep is one scripted provider answer: a tool call with its JSON arguments, or else the reply text.
 type modelStep struct {
 	tool, args, content string
+	// finish overrides the finish reason of a reply; empty is "stop".
+	finish string
 }
 
 // fakeModel is the chat provider: it answers each request with the next scripted step and keeps every request body.
@@ -307,6 +309,9 @@ func (m *fakeModel) serve(w http.ResponseWriter, r *http.Request) {
 	m.steps = m.steps[1:]
 	message := map[string]any{"role": "assistant", "content": step.content}
 	finish := "stop"
+	if step.finish != "" {
+		finish = step.finish
+	}
 	if step.tool != "" {
 		finish = "tool_calls"
 		message = map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{
@@ -671,6 +676,19 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 				{tool: "query_metrics", args: lastWeekQuery},
 				{content: wrongOnce},
 				{content: wrongAgain},
+			},
+			check: func(t *testing.T, got ai.ChatResponse, _ []string) {
+				if got.Reply != "Here are sales for last week." {
+					t.Fatalf("reply = %q, want the numberless sentence", got.Reply)
+				}
+				requireCards(t, got, 1)
+			},
+		}}},
+		{name: "a reply cut at the length limit is checked too", user: goldenAdminUser, roles: doctype.AdminRole, turns: []goldenTurn{{
+			message: "How did sales do last week?",
+			steps: []modelStep{
+				{tool: "query_metrics", args: lastWeekQuery},
+				{content: wrongOnce, finish: "length"},
 			},
 			check: func(t *testing.T, got ai.ChatResponse, _ []string) {
 				if got.Reply != "Here are sales for last week." {

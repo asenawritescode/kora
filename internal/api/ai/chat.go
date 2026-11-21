@@ -469,7 +469,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			// Fallback: return the last assistant message content if available.
 			fallbackReply := "I encountered an error while processing your request. Please try again."
 			if lastContent := findLastAssistantContent(messages); lastContent != "" {
-				fallbackReply = lastContent
+				fallbackReply = answers.finalReply(lastContent, req.Message)
 			}
 			_ = AppendConversationMessage(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID, Role: "assistant", Content: fallbackReply, Kind: "summary", StepID: stepID})
 			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, StepUpdate{Status: "partial", Summary: fallbackReply, ErrorMessage: err.Error()})
@@ -599,7 +599,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			if len(toolCalls) == 0 {
 				// finish_reason says tool_calls but none present — treat as stop.
 				if content != "" {
-					writeChatResponse(c, ChatResponse{Reply: content, RunID: runID})
+					writeChatResponse(c, ChatResponse{Reply: answers.finalReply(content, req.Message), RunID: runID, Cards: answers.cards()})
 					return
 				}
 				continue
@@ -709,6 +709,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			if content == "" {
 				content = "I ran out of space processing your request. Could you try a more specific query?"
 			}
+			content = answers.finalReply(content, req.Message)
 			_ = AppendConversationMessage(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID, Role: "assistant", Content: content, Kind: "summary", StepID: stepID})
 			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, StepUpdate{Status: "failed", Summary: content, OutputJSON: content, ErrorMessage: "length"})
 			_ = MarkTaskStatus(requestCtx, tx.DB, stepID, "failed", "length")
@@ -724,7 +725,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 				Model:          model,
 				Provider:       providerKey,
 			})
-			writeChatResponse(c, ChatResponse{Reply: content, Action: "truncated", RunID: runID})
+			writeChatResponse(c, ChatResponse{Reply: content, Action: "truncated", RunID: runID, Cards: answers.cards()})
 			return
 
 		case "content_filter":
@@ -750,6 +751,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		default:
 			// Unknown finish_reason. If there's content, return it.
 			if content != "" {
+				content = answers.finalReply(content, req.Message)
 				_ = AppendConversationMessage(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID, Role: "assistant", Content: content, Kind: "summary", StepID: stepID})
 				_ = UpdateStepStatus(requestCtx, tx.DB, stepID, StepUpdate{Status: "completed", Summary: content, OutputJSON: content})
 				_ = MarkTaskStatus(requestCtx, tx.DB, stepID, "done", content)
@@ -767,7 +769,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 					Provider:       providerKey,
 				})
 				_ = SummarizeRun(requestCtx, tx.DB, runID)
-				writeChatResponse(c, ChatResponse{Reply: content, RunID: runID})
+				writeChatResponse(c, ChatResponse{Reply: content, RunID: runID, Cards: answers.cards()})
 				return
 			}
 			// Otherwise continue the loop.
