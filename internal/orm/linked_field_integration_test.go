@@ -93,14 +93,30 @@ func (s *linkedFieldSite) run() {
 	s.write(s.sale, doc, old)
 	s.expectSale("link changed", "SALE-1", "200", "200")
 
-	// 4. A blank linked value is filled from the current source value.
+	// 3b. The client sends other values with the same link: the stored ones stay.
+	old = s.load("SALE-1")
+	doc = s.load("SALE-1")
+	doc.Set("unit_price", "999")
+	doc.GetTable("items")[0].Set("unit_price", "999")
+	s.write(s.sale, doc, old)
+	s.expectSale("client value, same link", "SALE-1", "200", "200")
+
+	// 4a. A blank value on an unchanged link keeps the stored value, not the
+	// current source value.
 	s.setPrice("P2", "250")
 	old = s.load("SALE-1")
 	doc = s.load("SALE-1")
 	doc.Set("unit_price", "")
 	doc.GetTable("items")[0].Set("unit_price", "")
 	s.write(s.sale, doc, old)
-	s.expectSale("blank filled", "SALE-1", "250", "250")
+	s.expectSale("blank with stored value kept", "SALE-1", "200", "200")
+
+	// 4b. A blank stored value is filled from the current source value.
+	s.setStored("SALE-1", "")
+	old = s.load("SALE-1")
+	doc = s.load("SALE-1")
+	s.write(s.sale, doc, old)
+	s.expectSale("blank stored filled", "SALE-1", "250", "250")
 
 	// 5. A child row added on save takes the source value; stored rows keep theirs.
 	old = s.load("SALE-1")
@@ -167,6 +183,25 @@ func (s *linkedFieldSite) load(name string) *doctype.Document {
 		s.t.Fatalf("load %s: %v", name, err)
 	}
 	return doc
+}
+
+// setStored blanks the stored unit_price of a sale and its only child row, as
+// a row saved before the link was populated would look.
+func (s *linkedFieldSite) setStored(name, value string) {
+	s.t.Helper()
+	items := s.load(name).GetTable("items")
+	for _, query := range []string{
+		"UPDATE " + s.dialect.QuoteIdent("tabSale") + " SET unit_price = ? WHERE name = ?",
+		"UPDATE " + s.dialect.QuoteIdent("tabSale__items") + " SET unit_price = ? WHERE name = ?",
+	} {
+		args := []any{value, name}
+		if strings.Contains(query, "tabSale__items") {
+			args[1] = items[0].Name
+		}
+		if _, err := s.database.DB.Exec(db.Rebind(s.dialect, query), args...); err != nil {
+			s.t.Fatalf("blank stored unit_price of %s: %v", name, err)
+		}
+	}
 }
 
 func (s *linkedFieldSite) setPrice(code, price string) {

@@ -9,8 +9,9 @@ import (
 	"github.com/asenawritescode/kora/internal/doctype"
 )
 
-// A linked value is looked up for a new row, a blank target or a changed link.
-// An unchanged link on a stored row keeps the value the row already has.
+// A linked value is looked up for a new row, a blank stored target or a changed
+// link. An unchanged link on a stored row takes the stored value, whatever the
+// client sent.
 func TestPopulateLinkedFieldsCopiesOnlyWhenNeeded(t *testing.T) {
 	order := &doctype.DocType{
 		Name: "Order",
@@ -33,9 +34,10 @@ func TestPopulateLinkedFieldsCopiesOnlyWhenNeeded(t *testing.T) {
 	}{
 		{"new row copies", nil, map[string]any{"product": "CAKE-001"}, true, 125.5},
 		{"new row copies over a typed value, as before", nil, map[string]any{"product": "CAKE-001", "unit_price": 9.0}, true, 125.5},
-		{"unchanged link keeps the stored value", map[string]any{"product": "CAKE-001", "unit_price": 99.0}, map[string]any{"product": "CAKE-001", "unit_price": 99.0}, false, 99.0},
+		{"unchanged link restores the stored value over a client value", map[string]any{"product": "CAKE-001", "unit_price": 99.0}, map[string]any{"product": "CAKE-001", "unit_price": 9.0}, false, 99.0},
+		{"unchanged link restores the stored value over a blank", map[string]any{"product": "CAKE-001", "unit_price": 99.0}, map[string]any{"product": "CAKE-001", "unit_price": ""}, false, 99.0},
 		{"changed link copies", map[string]any{"product": "OTHER", "unit_price": 99.0}, map[string]any{"product": "CAKE-001", "unit_price": 99.0}, true, 125.5},
-		{"blank target on unchanged link copies", map[string]any{"product": "CAKE-001", "unit_price": 99.0}, map[string]any{"product": "CAKE-001", "unit_price": ""}, true, 125.5},
+		{"blank stored value on unchanged link copies", map[string]any{"product": "CAKE-001", "unit_price": ""}, map[string]any{"product": "CAKE-001", "unit_price": ""}, true, 125.5},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
