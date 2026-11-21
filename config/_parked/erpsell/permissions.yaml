@@ -488,3 +488,9 @@
   write: false
   create: false
   delete: false
+- doctype: Stock Movement
+  role: Stock Manager
+  read: true
+  write: false
+  create: false
+  delete: false
