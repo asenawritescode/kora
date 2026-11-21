@@ -20,7 +20,7 @@ import (
 func ledgerFixture(t *testing.T, driver, dsnEnv string) *siteFixture {
 	t.Helper()
 	ledger := &doctype.QuantityLedger{
-		Doctype: "Stock Movement", TargetField: "product", ChangeField: "change", BalanceField: "balance_after",
+		Doctype: "Stock Movement", TargetField: "product", ChangeField: "quantity_change", BalanceField: "balance_after",
 		SourceDoctypeField: "source_doctype", SourceNameField: "source_name", ReasonField: "reason",
 	}
 	product := &doctype.DocType{
@@ -31,7 +31,7 @@ func ledgerFixture(t *testing.T, driver, dsnEnv string) *siteFixture {
 		Name: "Stock Movement", Module: "Kernel Test", NamingSeries: "MOVE-.#####", AppendOnly: true,
 		Fields: []doctype.Field{
 			{Fieldname: "product", Fieldtype: "Link", Options: "Product"},
-			{Fieldname: "change", Fieldtype: "Float"},
+			{Fieldname: "quantity_change", Fieldtype: "Float"},
 			{Fieldname: "balance_after", Fieldtype: "Float"},
 			{Fieldname: "source_doctype", Fieldtype: "Data"},
 			{Fieldname: "source_name", Fieldtype: "Data"},
@@ -97,7 +97,7 @@ type ledgerRow struct {
 func ledgerRows(t *testing.T, s *siteFixture) []ledgerRow {
 	t.Helper()
 	table := s.Dialect.QuoteIdent(s.Registry.Get("Stock Movement").RawTableName())
-	query := "SELECT product, " + s.Dialect.QuoteIdent("change") + ", balance_after, source_doctype, source_name, COALESCE(reason, ''), owner FROM " + table + " ORDER BY name"
+	query := "SELECT product, quantity_change, balance_after, source_doctype, source_name, COALESCE(reason, ''), owner FROM " + table + " ORDER BY name"
 	rows, err := s.DB.Query(query)
 	if err != nil {
 		t.Fatalf("read ledger: %v", err)
@@ -156,6 +156,9 @@ func seedLedgerProducts(t *testing.T, s *siteFixture, k *kernel.Kernel, stock ..
 			t.Fatal(err)
 		}
 		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate products: %v", err)
 	}
 	return names
 }
@@ -261,7 +264,7 @@ func TestLedgerRowsCannotBeChangedOrDeleted(t *testing.T) {
 		before := ledgerRows(t, s)
 		row := latestLedgerName(t, s)
 
-		update, _ := json.Marshal(map[string]any{"doctype": "Stock Movement", "name": row, "data": map[string]any{"change": 99}})
+		update, _ := json.Marshal(map[string]any{"doctype": "Stock Movement", "name": row, "data": map[string]any{"quantity_change": 99}})
 		if res := exec(t, s, k, kernel.Operation{Command: "record.update", Payload: update, Context: opCtx(s.Name, "Administrator")}); res.Status == contract.StatusCompleted {
 			t.Fatal("a ledger row was changed")
 		}

@@ -58,7 +58,7 @@ func (w commandWriter) save(ctx context.Context, dt *doctype.DocType, doc, oldDo
 
 // effects returns the effect writer of this command's writes.
 func (w commandWriter) effects() effectWriter {
-	return effectWriter{k: w.k, run: w.run, op: w.op, writeTarget: w.saveTarget}
+	return effectWriter{k: w.k, run: w.run, op: w.op, owner: commandOwner(w.op, w.user), user: w.user, writeTarget: w.saveTarget}
 }
 
 // saveTarget saves a stock record a status effect moved, with its audit and

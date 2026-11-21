@@ -170,8 +170,24 @@ func (m *mutation) authorizeItem(item RecordMutationBundleItem, recordDT *doctyp
 
 // loadItem reads the record an update, decrement or adjust item changes and
 // checks the revision and version the caller expects of it.
+// lockEffectItem locks a bundle item an effect adjusts before it is read, as
+// moveTarget locks its target, so the ledger balance is the quantity this write
+// leaves.
+func (m *mutation) lockEffectItem(item RecordMutationBundleItem, recordDT *doctype.DocType, name string) *contract.Error {
+	if !m.op.Context.isEffectItem(item.Key) {
+		return nil
+	}
+	if lockErr := lockRecordRow(m.run.Tx, m.k.dialect(), recordDT, name); lockErr != nil && !errors.Is(lockErr, sql.ErrNoRows) {
+		return contract.NewError(contract.CodeDependencyUnavailable, "lock stock record failed")
+	}
+	return nil
+}
+
 func (m *mutation) loadItem(item RecordMutationBundleItem, i int, recordDT *doctype.DocType, name string) (*doctype.Document, *contract.Error) {
 	reg, txMgr := m.run.Reg, m.run.Mgr
+	if cerr := m.lockEffectItem(item, recordDT, name); cerr != nil {
+		return nil, cerr
+	}
 	oldDoc, err := txMgr.GetDocWithScope(recordDT, name, scopeForOperation(reg, m.op, recordDT.Name, "write")) //nolint:contextcheck // the context travels in txMgr.Context
 	if err != nil {
 		if errors.Is(err, orm.ErrNotFound) {
@@ -418,7 +434,7 @@ func (m *mutation) persistBundle(ctx context.Context, b *bundle) *contract.Error
 			return cerr
 		}
 	}
-	return nil
+	return m.effectLedger(b) //nolint:contextcheck // the context travels in txMgr.Context
 }
 
 // persistItem inserts or saves prepared record i and writes its audit and

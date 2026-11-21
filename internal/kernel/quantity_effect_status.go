@@ -47,6 +47,8 @@ type effectWriter struct {
 	k   *Kernel
 	run txRun
 	op  Operation
+	// owner and user stamp the ledger rows a move writes, as the write stamps its own.
+	owner, user string
 	// writeTarget saves a stock record the effect changed, with its audit rows
 	// and its completion after commit. oldDoc is the stored record.
 	writeTarget func(ctx context.Context, target *doctype.DocType, doc, oldDoc *doctype.Document) *contract.Error
@@ -54,7 +56,7 @@ type effectWriter struct {
 
 // effects returns the effect writer of a record-command mutation.
 func (m *mutation) effects() effectWriter {
-	return effectWriter{k: m.k, run: m.run, op: m.op, writeTarget: m.writeEffectTarget}
+	return effectWriter{k: m.k, run: m.run, op: m.op, owner: m.owner, user: m.user, writeTarget: m.writeEffectTarget}
 }
 
 // writeEffectTarget saves a stock record a mutation moved and tracks it so its
@@ -92,13 +94,14 @@ func applyGatedEffect(ctx context.Context, w effectWriter, dt *doctype.DocType, 
 	}
 	wasIn := effect.AppliesIn(oldDoc.GetString(effect.StatusField))
 	isIn := effect.AppliesIn(doc.GetString(effect.StatusField))
+	cause := moveCause{dt: dt, name: doc.Name, reason: ledgerReason(effect, doc)}
 	switch {
 	case wasIn && isIn:
 		return refuseLineChange(dt, oldDoc, doc, effect)
 	case isIn:
-		return moveStock(ctx, w, dt, doc, 1)
+		return moveStock(ctx, w, cause, doc, 1)
 	case wasIn:
-		return moveStock(ctx, w, dt, oldDoc, -1)
+		return moveStock(ctx, w, cause, oldDoc, -1)
 	}
 	return nil
 }
@@ -114,10 +117,10 @@ func refuseLineChange(dt *doctype.DocType, oldDoc, doc *doctype.Document, effect
 
 // moveStock applies the stored change of source, scaled by dir (+1 applies it,
 // -1 reverses it), to every target record it touches, in product order.
-func moveStock(ctx context.Context, w effectWriter, dt *doctype.DocType, source *doctype.Document, dir float64) *contract.Error {
-	totals := effectTotalsOf(dt.QuantityEffect, source)
+func moveStock(ctx context.Context, w effectWriter, cause moveCause, source *doctype.Document, dir float64) *contract.Error {
+	totals := effectTotalsOf(cause.dt.QuantityEffect, source)
 	for _, product := range nonzeroEffectProducts(totals) {
-		if cerr := moveTarget(ctx, w, dt.QuantityEffect, product, dir*totals[product]); cerr != nil {
+		if cerr := moveTarget(ctx, w, cause, product, dir*totals[product]); cerr != nil {
 			return cerr
 		}
 	}
@@ -162,7 +165,9 @@ func sameEffectTotals(a, b map[string]float64) bool {
 // moveTarget applies one signed change to a target record inside the transaction
 // of the write that caused it. It is checked and written like a bundle adjust
 // item, and it is authorized by the write of the source record, as a create is.
-func moveTarget(ctx context.Context, w effectWriter, effect *doctype.QuantityEffect, product string, change float64) *contract.Error {
+// It then appends the ledger row of the move, if the effect has a ledger.
+func moveTarget(ctx context.Context, w effectWriter, cause moveCause, product string, change float64) *contract.Error {
+	effect := cause.dt.QuantityEffect
 	reg, txMgr := w.run.Reg, w.run.Mgr
 	target := reg.Get(effect.TargetDocType)
 	if target == nil {
@@ -205,5 +210,8 @@ func moveTarget(ctx context.Context, w effectWriter, effect *doctype.QuantityEff
 	if prepErr := txMgr.PrepareSave(target, doc, oldDoc); prepErr != nil { //nolint:contextcheck // the context travels in txMgr.Context
 		return contract.NewError(contract.CodeValidationFailed, prepErr.Error())
 	}
-	return w.writeTarget(ctx, target, doc, oldDoc)
+	if cerr := w.writeTarget(ctx, target, doc, oldDoc); cerr != nil {
+		return cerr
+	}
+	return w.appendLedger(cause, product, change, quantityAfter(doc, effect.TargetQuantityField)) //nolint:contextcheck // the context travels in txMgr.Context
 }
