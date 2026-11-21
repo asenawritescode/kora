@@ -15,8 +15,7 @@ fields:
     reqd: true
     in_list_view: true
   - fieldname: currency
-    fieldtype: Link
-    options: Currency
+    fieldtype: Data
     label: Currency
     description: Leave empty for the base currency.
   - fieldname: amount
