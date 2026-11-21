@@ -105,6 +105,17 @@ type QuantityEffect struct {
 	// Ledger, when set, appends one row per target record each time the effect
 	// changes its quantity, so the ledger says why it changed.
 	Ledger *QuantityLedger `yaml:"ledger" json:"ledger,omitempty"`
+	// AverageCost keeps a moving average cost on the target: each move that
+	// increases the target quantity folds its cost rows into TargetField.
+	AverageCost *AverageCost `yaml:"average_cost" json:"average_cost,omitempty"`
+}
+
+// AverageCost names the numeric field on the target that holds the moving
+// average, and the numeric field on the source row (the line when the effect has
+// LinesField, else the record) that carries each row's unit cost.
+type AverageCost struct {
+	TargetField string `yaml:"target_field" json:"target_field"`
+	CostField   string `yaml:"cost_field" json:"cost_field"`
 }
 
 // QuantityLedger names the append-only record type that logs a quantity effect.
