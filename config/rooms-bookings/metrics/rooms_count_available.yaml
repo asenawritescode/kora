@@ -1,0 +1,13 @@
+name: rooms_count_available
+label: "Rooms: Available"
+type: simple
+model: "Room"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Available"
+time: business_date
+format: number
+description: "Rooms: Available from the Room records (count)."

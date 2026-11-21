@@ -1,0 +1,13 @@
+name: rooms_count_out_of_service
+label: "Rooms: Out of service"
+type: simple
+model: "Room"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Out of service"
+time: business_date
+format: number
+description: "Rooms: Out of service from the Room records (count)."

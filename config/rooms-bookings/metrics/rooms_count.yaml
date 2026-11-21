@@ -1,0 +1,9 @@
+name: rooms_count
+label: "Rooms"
+type: simple
+model: "Room"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Rooms from the Room records (count)."

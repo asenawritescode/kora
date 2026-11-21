@@ -1,0 +1,14 @@
+name: rooms_booking_value_cancelled
+label: "Booking value: Cancelled"
+type: simple
+model: "Booking"
+measure:
+  agg: sum
+  field: total
+filters:
+  - field: status
+    op: "="
+    value: "Cancelled"
+time: business_date
+format: currency
+description: "Booking value: Cancelled from the Booking records (sum)."

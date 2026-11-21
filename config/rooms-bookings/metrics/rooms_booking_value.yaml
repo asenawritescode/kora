@@ -1,0 +1,10 @@
+name: rooms_booking_value
+label: "Booking value"
+type: simple
+model: "Booking"
+measure:
+  agg: sum
+  field: total
+time: business_date
+format: currency
+description: "Booking value from the Booking records (sum)."

@@ -1,0 +1,14 @@
+name: rooms_booking_value_checked_out
+label: "Booking value: Checked out"
+type: simple
+model: "Booking"
+measure:
+  agg: sum
+  field: total
+filters:
+  - field: status
+    op: "="
+    value: "Checked out"
+time: business_date
+format: currency
+description: "Booking value: Checked out from the Booking records (sum)."

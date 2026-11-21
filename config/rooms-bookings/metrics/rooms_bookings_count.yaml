@@ -1,0 +1,9 @@
+name: rooms_bookings_count
+label: "Bookings"
+type: simple
+model: "Booking"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Bookings from the Booking records (count)."

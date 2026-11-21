@@ -1,0 +1,14 @@
+name: rooms_booking_value_booked
+label: "Booking value: Booked"
+type: simple
+model: "Booking"
+measure:
+  agg: sum
+  field: total
+filters:
+  - field: status
+    op: "="
+    value: "Booked"
+time: business_date
+format: currency
+description: "Booking value: Booked from the Booking records (sum)."
