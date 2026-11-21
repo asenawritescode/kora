@@ -109,6 +109,8 @@ func periodStart(t time.Time, g Grain) time.Time {
 // stepPeriod moves a bucket start by n buckets; a negative n moves back.
 func stepPeriod(t time.Time, g Grain, n int) time.Time {
 	switch g {
+	case GrainDay:
+		return t.AddDate(0, 0, n)
 	case GrainWeek:
 		return t.AddDate(0, 0, 7*n)
 	case GrainMonth:
