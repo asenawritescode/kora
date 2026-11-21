@@ -1,6 +1,6 @@
 name: dispensary_prescriptions_count
 label: "Prescriptions"
-type: simple
+type: balance
 model: "Prescription"
 measure:
   agg: count

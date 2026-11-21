@@ -1,6 +1,6 @@
 name: documents_count
 label: "Documents"
-type: simple
+type: balance
 model: "Document"
 measure:
   agg: count

@@ -1,6 +1,6 @@
 name: job_cards_count
 label: "Job cards"
-type: simple
+type: balance
 model: "Job Card"
 measure:
   agg: count

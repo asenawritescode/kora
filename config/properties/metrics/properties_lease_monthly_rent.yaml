@@ -1,6 +1,6 @@
 name: properties_lease_monthly_rent
 label: "Lease monthly rent"
-type: simple
+type: balance
 model: "Lease"
 measure:
   agg: sum

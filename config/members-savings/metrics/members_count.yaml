@@ -1,6 +1,6 @@
 name: members_count
 label: "Members"
-type: simple
+type: balance
 model: "Member"
 measure:
   agg: count

@@ -1,6 +1,6 @@
 name: rooms_count
 label: "Rooms"
-type: simple
+type: balance
 model: "Room"
 measure:
   agg: count

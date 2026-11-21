@@ -1,6 +1,6 @@
 name: rooms_booking_value
 label: "Booking value"
-type: simple
+type: balance
 model: "Booking"
 measure:
   agg: sum

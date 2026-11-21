@@ -1,6 +1,6 @@
 name: appointments_count
 label: "Appointments"
-type: simple
+type: balance
 model: "Appointment"
 measure:
   agg: count

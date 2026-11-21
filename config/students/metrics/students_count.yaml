@@ -1,6 +1,6 @@
 name: students_count
 label: "Students"
-type: simple
+type: balance
 model: "Student"
 measure:
   agg: count

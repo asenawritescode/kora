@@ -1,6 +1,6 @@
 name: subscriptions_active_count
 label: "Active subscriptions"
-type: simple
+type: balance
 model: "Subscription"
 measure:
   agg: count

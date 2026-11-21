@@ -1,6 +1,6 @@
 name: dispensary_batches_count
 label: "Batches"
-type: simple
+type: balance
 model: "Medicine Batch"
 measure:
   agg: count

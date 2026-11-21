@@ -1,6 +1,6 @@
 name: crm_open_deal_value
 label: "Open pipeline value"
-type: simple
+type: balance
 model: "Deal"
 measure:
   agg: sum

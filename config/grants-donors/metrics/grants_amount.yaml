@@ -1,6 +1,6 @@
 name: grants_amount
 label: "Grant amount"
-type: simple
+type: balance
 model: "Grant"
 measure:
   agg: sum

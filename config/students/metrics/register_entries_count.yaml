@@ -1,6 +1,6 @@
 name: register_entries_count
 label: "Register entries"
-type: simple
+type: balance
 model: "Class Register Entry"
 measure:
   agg: count

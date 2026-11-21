@@ -1,6 +1,6 @@
 name: crm_leads_count
 label: "Leads"
-type: simple
+type: balance
 model: "Lead"
 measure:
   agg: count

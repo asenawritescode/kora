@@ -1,6 +1,6 @@
 name: loans_amount
 label: "Loan amount"
-type: simple
+type: balance
 model: "Loan"
 measure:
   agg: sum

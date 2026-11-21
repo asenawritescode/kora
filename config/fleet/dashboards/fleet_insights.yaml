@@ -3,11 +3,13 @@ label: "Fleet insights"
 description: "Figures and charts that reproduce the fleet overview report."
 default_range: last_30_days
 tiles:
-  - metric: fleet_trips_count_planned
-  - metric: fleet_trips_count_on_the_road
-  - metric: fleet_trips_count_delivered
-  - metric: fleet_trips_count_cancelled
+  - metric: fleet_trips_count
 charts:
+  - id: trips_by_status
+    title: "Trips by status"
+    kind: bar
+    metrics: [fleet_trips_count]
+    by: status
   - id: fuel_cost_by_vehicle
     title: "Fuel cost by vehicle"
     kind: bar

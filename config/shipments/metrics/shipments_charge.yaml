@@ -1,6 +1,6 @@
 name: shipments_charge
 label: "Charge"
-type: simple
+type: balance
 model: "Shipment"
 measure:
   agg: sum

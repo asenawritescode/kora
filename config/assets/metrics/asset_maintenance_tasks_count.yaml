@@ -1,6 +1,6 @@
 name: asset_maintenance_tasks_count
 label: "Maintenance tasks"
-type: simple
+type: balance
 model: "Maintenance Task"
 measure:
   agg: count

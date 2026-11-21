@@ -3,14 +3,19 @@ label: "Assets insights"
 description: "Figures and charts that reproduce the assets overview report."
 default_range: last_30_days
 tiles:
-  - metric: assets_count_in_use
-  - metric: assets_count_in_store
-  - metric: assets_count_under_repair
-  - metric: assets_count_retired
-  - metric: asset_maintenance_tasks_count_planned
-  - metric: asset_maintenance_tasks_count_done
-  - metric: asset_maintenance_tasks_count_cancelled
+  - metric: assets_count
+  - metric: asset_maintenance_tasks_count
 charts:
+  - id: assets_by_status
+    title: "Assets by status"
+    kind: bar
+    metrics: [assets_count]
+    by: status
+  - id: tasks_by_status
+    title: "Maintenance tasks by status"
+    kind: bar
+    metrics: [asset_maintenance_tasks_count]
+    by: status
   - id: assets_by_category
     title: "Assets by category"
     kind: bar

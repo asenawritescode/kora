@@ -1,6 +1,6 @@
 name: menu_items_count
 label: "Menu items"
-type: simple
+type: balance
 model: "Menu Item"
 measure:
   agg: count

@@ -1,6 +1,6 @@
 name: properties_units_count
 label: "Units"
-type: simple
+type: balance
 model: "Unit"
 measure:
   agg: count

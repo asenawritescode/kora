@@ -1,6 +1,6 @@
 name: manufacturing_work_orders_count
 label: "Work orders"
-type: simple
+type: balance
 model: "Work Order"
 measure:
   agg: count

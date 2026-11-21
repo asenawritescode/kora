@@ -1,6 +1,6 @@
 name: assets_count
 label: "Assets"
-type: simple
+type: balance
 model: "Asset"
 measure:
   agg: count

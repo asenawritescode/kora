@@ -3,9 +3,16 @@ label: "Properties insights"
 description: "Figures and charts that reproduce the properties overview report."
 default_range: last_30_days
 tiles:
-  - metric: properties_units_count_vacant
-  - metric: properties_units_count_occupied
-  - metric: properties_units_count_maintenance
-  - metric: properties_leases_count_active
-  - metric: properties_leases_count_ended
+  - metric: properties_units_count
+  - metric: properties_leases_count
 charts:
+  - id: units_by_status
+    title: "Units by status"
+    kind: bar
+    metrics: [properties_units_count]
+    by: status
+  - id: leases_by_status
+    title: "Leases by status"
+    kind: bar
+    metrics: [properties_leases_count]
+    by: status

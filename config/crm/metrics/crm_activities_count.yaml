@@ -1,6 +1,6 @@
 name: crm_activities_count
 label: "Activities"
-type: simple
+type: balance
 model: "Activity"
 measure:
   agg: count

@@ -1,6 +1,6 @@
 name: rooms_bookings_count
 label: "Bookings"
-type: simple
+type: balance
 model: "Booking"
 measure:
   agg: count

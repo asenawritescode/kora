@@ -1,6 +1,6 @@
 name: people_employees_count
 label: "Employees"
-type: simple
+type: balance
 model: "Employee"
 measure:
   agg: count

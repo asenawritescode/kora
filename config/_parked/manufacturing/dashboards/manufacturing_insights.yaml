@@ -3,11 +3,13 @@ label: "Manufacturing insights"
 description: "Figures and charts that reproduce the manufacturing overview report."
 default_range: last_30_days
 tiles:
-  - metric: manufacturing_work_orders_count_planned
-  - metric: manufacturing_work_orders_count_in_progress
-  - metric: manufacturing_work_orders_count_done
-  - metric: manufacturing_work_orders_count_cancelled
+  - metric: manufacturing_work_orders_count
 charts:
+  - id: work_orders_by_status
+    title: "Work orders by status"
+    kind: bar
+    metrics: [manufacturing_work_orders_count]
+    by: status
   - id: production_by_product
     title: "Quantity made by product"
     kind: bar

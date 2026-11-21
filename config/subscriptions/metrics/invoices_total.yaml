@@ -1,6 +1,6 @@
 name: invoices_total
 label: "Invoiced"
-type: simple
+type: balance
 model: "Recurring Invoice"
 measure:
   agg: sum

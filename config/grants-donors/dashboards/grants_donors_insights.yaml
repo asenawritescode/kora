@@ -3,12 +3,17 @@ label: "Grants and donors insights"
 description: "Figures and charts that reproduce the grants and donors overview report."
 default_range: last_30_days
 tiles:
-  - metric: grants_amount_proposed
-  - metric: grants_amount_awarded
-  - metric: grants_amount_active
-  - metric: grants_amount_closed
-  - metric: grants_amount_declined
-  - metric: grant_reports_count_due
-  - metric: grant_reports_count_submitted
-  - metric: grant_reports_count_accepted
+  - metric: grants_count
+  - metric: grants_amount
+  - metric: grant_reports_count
 charts:
+  - id: grants_by_status
+    title: "Grant amount by status"
+    kind: bar
+    metrics: [grants_amount]
+    by: status
+  - id: reports_by_status
+    title: "Grant reports by status"
+    kind: bar
+    metrics: [grant_reports_count]
+    by: status

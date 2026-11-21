@@ -1,6 +1,6 @@
 name: properties_leases_count
 label: "Leases"
-type: simple
+type: balance
 model: "Lease"
 measure:
   agg: count

@@ -3,11 +3,14 @@ label: "Menu insights"
 description: "Figures and charts that reproduce the menu overview report."
 default_range: last_30_days
 tiles:
-  - metric: menu_kitchen_orders_count_new
-  - metric: menu_kitchen_orders_count_preparing
-  - metric: menu_kitchen_orders_count_served
-  - metric: menu_kitchen_orders_count_cancelled
+  - metric: menu_kitchen_orders_count
+  - metric: menu_items_count
 charts:
+  - id: kitchen_orders_by_status
+    title: "Kitchen orders by status"
+    kind: bar
+    metrics: [menu_kitchen_orders_count]
+    by: status
   - id: items_by_category
     title: "Menu items by category"
     kind: bar

@@ -1,6 +1,6 @@
 name: grant_reports_count
 label: "Grant reports"
-type: simple
+type: balance
 model: "Grant Report"
 measure:
   agg: count

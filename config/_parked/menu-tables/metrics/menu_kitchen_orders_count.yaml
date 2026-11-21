@@ -1,6 +1,6 @@
 name: menu_kitchen_orders_count
 label: "Kitchen orders"
-type: simple
+type: balance
 model: "Kitchen Order"
 measure:
   agg: count

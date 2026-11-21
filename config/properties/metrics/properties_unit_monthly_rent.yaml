@@ -1,6 +1,6 @@
 name: properties_unit_monthly_rent
 label: "Unit monthly rent"
-type: simple
+type: balance
 model: "Unit"
 measure:
   agg: sum

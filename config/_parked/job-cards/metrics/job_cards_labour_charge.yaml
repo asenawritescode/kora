@@ -1,6 +1,6 @@
 name: job_cards_labour_charge
 label: "Labour charge"
-type: simple
+type: balance
 model: "Job Card"
 measure:
   agg: sum

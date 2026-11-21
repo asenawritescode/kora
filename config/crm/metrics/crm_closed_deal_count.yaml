@@ -1,6 +1,6 @@
 name: crm_closed_deal_count
 label: "Closed deals"
-type: simple
+type: balance
 model: "Deal"
 measure:
   agg: count

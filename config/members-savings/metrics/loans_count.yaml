@@ -1,6 +1,6 @@
 name: loans_count
 label: "Loans"
-type: simple
+type: balance
 model: "Loan"
 measure:
   agg: count

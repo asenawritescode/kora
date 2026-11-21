@@ -1,6 +1,6 @@
 name: subscriptions_active_recurring
 label: "Active recurring amount"
-type: simple
+type: balance
 model: "Subscription"
 measure:
   agg: sum

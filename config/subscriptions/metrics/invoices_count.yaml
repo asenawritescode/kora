@@ -1,6 +1,6 @@
 name: invoices_count
 label: "Recurring invoices"
-type: simple
+type: balance
 model: "Recurring Invoice"
 measure:
   agg: count

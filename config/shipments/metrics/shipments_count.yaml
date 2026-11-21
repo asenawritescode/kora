@@ -1,6 +1,6 @@
 name: shipments_count
 label: "Shipments"
-type: simple
+type: balance
 model: "Shipment"
 measure:
   agg: count

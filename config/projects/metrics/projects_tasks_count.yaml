@@ -1,6 +1,6 @@
 name: projects_tasks_count
 label: "Tasks"
-type: simple
+type: balance
 model: "Task"
 measure:
   agg: count

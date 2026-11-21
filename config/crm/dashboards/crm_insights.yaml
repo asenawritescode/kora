@@ -3,11 +3,15 @@ label: "CRM insights"
 description: "Figures and charts that reproduce the crm overview report."
 default_range: last_30_days
 tiles:
-  - metric: crm_activities_count_open
-  - metric: crm_activities_count_in_progress
-  - metric: crm_activities_count_completed
-  - metric: crm_activities_count_cancelled
+  - metric: crm_open_deal_count
+  - metric: crm_open_deal_value
+  - metric: crm_activities_count
 charts:
+  - id: activities_by_status
+    title: "Activities by status"
+    kind: bar
+    metrics: [crm_activities_count]
+    by: status
   - id: pipeline_by_stage
     title: "Open pipeline value by stage"
     kind: bar
