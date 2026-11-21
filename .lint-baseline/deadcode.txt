@@ -195,7 +195,6 @@ internal/eventbus/queue_admission.go::NewAnalyticsQueueAdmission
 internal/expression/expression.go::ExprError.Error
 internal/facts/rebuild_job.go::JobStore.Renew
 internal/management/operation.go::Digest
-internal/mcp/server.go::WithMetrics
 internal/natsprovider/consumer.go::Consumer.Drain
 internal/natsprovider/consumer.go::drainSubscription
 internal/natsprovider/retry.go::RetryAfter

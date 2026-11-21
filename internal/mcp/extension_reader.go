@@ -5,15 +5,18 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/api"
 	"github.com/asenawritescode/kora/internal/api/ai"
 	"github.com/asenawritescode/kora/internal/auth"
 	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/orm"
+	"github.com/asenawritescode/kora/internal/policy"
 )
 
 const (
@@ -21,36 +24,9 @@ const (
 	extensionReadTimeout        = 5 * time.Second
 )
 
-// NewExtensionReadExecutor creates a bounded MCP executor for a tenant-scoped
-// extension credential. It refreshes the credential and its exact grants on
-// every call, and executes only the catalog's read-only DocType tools.
-func NewExtensionReadExecutor(database *sql.DB, dialect kdb.Dialect, registry *doctype.Registry, tenantID contract.TenantID, siteName, token string) (VerifiedToolExecutor, error) {
-	if database == nil || dialect == nil || registry == nil {
-		return nil, errors.New("MCP read executor requires database, dialect, and registry")
-	}
-	if _, err := contract.ParseTenantID(string(tenantID)); err != nil {
-		return nil, fmt.Errorf("MCP read executor tenant: %w", err)
-	}
-	if strings.TrimSpace(siteName) == "" || siteName != strings.TrimSpace(siteName) {
-		return nil, errors.New("MCP read executor requires a canonical tenant route")
-	}
-	if token == "" || token != strings.TrimSpace(token) || len(token) > 4096 {
-		return nil, errors.New("MCP read executor requires a valid extension credential")
-	}
-
-	reader := &extensionReadExecutor{
-		database: database,
-		dialect:  dialect,
-		registry: registry,
-		tenantID: tenantID,
-		siteName: siteName,
-		token:    token,
-		slots:    make(chan struct{}, maxExtensionReadConcurrency),
-	}
-	return reader.execute, nil
-}
-
-type extensionReadExecutor struct {
+// ExtensionReader answers the MCP read tools for one tenant-scoped extension credential. Every call authenticates the
+// credential again and runs as the extension, so the grants are the ones the API applies to that extension.
+type ExtensionReader struct {
 	database *sql.DB
 	dialect  kdb.Dialect
 	registry *doctype.Registry
@@ -58,9 +34,48 @@ type extensionReadExecutor struct {
 	siteName string
 	token    string
 	slots    chan struct{}
+	metrics  *api.MetricsReader
 }
 
-func (r *extensionReadExecutor) execute(ctx context.Context, tool ai.ToolDescriptor, args map[string]any) (string, error) {
+// ExtensionReaderOptions names the tenant, the site and the extension credential one reader serves.
+type ExtensionReaderOptions struct {
+	Database *sql.DB
+	Dialect  kdb.Dialect
+	Registry *doctype.Registry
+	TenantID contract.TenantID
+	Site     string
+	Token    string
+}
+
+// NewExtensionReader validates the tenant route and credential shape and returns a bounded reader. It does not
+// contact the database; the credential is checked on each call.
+func NewExtensionReader(opts ExtensionReaderOptions) (*ExtensionReader, error) {
+	if opts.Database == nil || opts.Dialect == nil || opts.Registry == nil {
+		return nil, errors.New("MCP read executor requires database, dialect, and registry")
+	}
+	if _, err := contract.ParseTenantID(string(opts.TenantID)); err != nil {
+		return nil, fmt.Errorf("MCP read executor tenant: %w", err)
+	}
+	if strings.TrimSpace(opts.Site) == "" || opts.Site != strings.TrimSpace(opts.Site) {
+		return nil, errors.New("MCP read executor requires a canonical tenant route")
+	}
+	if opts.Token == "" || opts.Token != strings.TrimSpace(opts.Token) || len(opts.Token) > 4096 {
+		return nil, errors.New("MCP read executor requires a valid extension credential")
+	}
+	return &ExtensionReader{
+		database: opts.Database,
+		dialect:  opts.Dialect,
+		registry: opts.Registry,
+		tenantID: opts.TenantID,
+		siteName: opts.Site,
+		token:    opts.Token,
+		slots:    make(chan struct{}, maxExtensionReadConcurrency),
+		metrics:  api.NewMetricsReader(opts.Registry, opts.Database, opts.Dialect),
+	}, nil
+}
+
+// Execute runs one DocType read tool. It is the VerifiedToolExecutor of the server.
+func (r *ExtensionReader) Execute(ctx context.Context, tool ai.ToolDescriptor, args map[string]any) (string, error) {
 	if ctx == nil {
 		return "", errors.New("MCP request context is required")
 	}
@@ -69,23 +84,14 @@ func (r *extensionReadExecutor) execute(ctx context.Context, tool ai.ToolDescrip
 		return "", errors.New("MCP tool is not an authorized DocType read operation")
 	}
 
-	queryCtx, cancel := context.WithTimeout(ctx, extensionReadTimeout)
-	defer cancel()
-	select {
-	case r.slots <- struct{}{}:
-		defer func() { <-r.slots }()
-	case <-queryCtx.Done():
-		return "", queryCtx.Err()
-	}
-
-	execution, _, err := auth.AuthenticateExtensionExecution(queryCtx, r.database, r.dialect, r.tenantID, r.siteName, r.token)
+	queryCtx, release, err := r.admit(ctx)
 	if err != nil {
-		if queryCtx.Err() != nil {
-			return "", queryCtx.Err()
-		}
-		// Authentication backends can expose database details in their cause;
-		// keep those internal to logs and return a stable MCP error.
-		return "", errors.New("MCP extension authentication failed")
+		return "", err
+	}
+	defer release()
+	execution, err := r.authenticate(queryCtx)
+	if err != nil {
+		return "", err
 	}
 	actor := execution.Actor()
 	owner := actor.SubjectUserID
@@ -102,4 +108,59 @@ func (r *extensionReadExecutor) execute(ctx context.Context, tool ai.ToolDescrip
 		return "", errors.New("MCP read operation failed")
 	}
 	return result, nil
+}
+
+// Metrics is the MetricsFactory of the server. It authenticates the credential for one metrics call and returns the
+// runner of that caller; each read it runs takes a read slot of its own.
+func (r *ExtensionReader) Metrics(ctx context.Context) (ai.MetricsRunner, error) {
+	if ctx == nil {
+		return nil, errors.New("MCP request context is required")
+	}
+	authCtx, release, err := r.admit(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	execution, err := r.authenticate(authCtx)
+	if err != nil {
+		return nil, err
+	}
+	return func(route ai.MetricsRoute, body []byte) ai.MetricsResponse {
+		callCtx, done, err := r.admit(ctx)
+		if err != nil {
+			return ai.MetricsResponse{Status: http.StatusServiceUnavailable, Body: []byte(`{"error":"MCP read operation timed out"}`)}
+		}
+		defer done()
+		caller := api.MetricsCaller{Context: callCtx, Site: r.siteName, TenantID: string(r.tenantID), Execution: execution}
+		return r.metrics.Runner(caller)(route, body) //nolint:contextcheck // the caller context travels in the request the runner clones
+	}, nil
+}
+
+// admit takes one read slot and bounds the call by extensionReadTimeout. The returned function releases both.
+func (r *ExtensionReader) admit(ctx context.Context) (context.Context, func(), error) {
+	queryCtx, cancel := context.WithTimeout(ctx, extensionReadTimeout)
+	select {
+	case r.slots <- struct{}{}:
+		return queryCtx, func() {
+			<-r.slots
+			cancel()
+		}, nil
+	case <-queryCtx.Done():
+		cancel()
+		return nil, nil, queryCtx.Err()
+	}
+}
+
+// authenticate verifies the credential against the tenant's extension grants.
+func (r *ExtensionReader) authenticate(ctx context.Context) (policy.Execution, error) {
+	execution, _, err := auth.AuthenticateExtensionExecution(ctx, r.database, r.dialect, r.tenantID, r.siteName, r.token)
+	if err != nil {
+		if ctx.Err() != nil {
+			return policy.Execution{}, ctx.Err()
+		}
+		// Authentication backends can expose database details in their cause; keep those internal to logs and
+		// return a stable MCP error.
+		return policy.Execution{}, errors.New("MCP extension authentication failed")
+	}
+	return execution, nil
 }

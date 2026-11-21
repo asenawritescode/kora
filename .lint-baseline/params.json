@@ -73,7 +73,6 @@
   "internal/management/sqlstore::operationByID": 6,
   "internal/management/sqlstore::recoveryByKey": 6,
   "internal/management::(*Service).accept": 6,
-  "internal/mcp::NewExtensionReadExecutor": 6,
   "internal/net::SetSecureCookie": 6,
   "internal/notifications/sqlstore::(*Store).Accept": 7,
   "internal/notifications/sqlstore::(*Store).Claim": 6,

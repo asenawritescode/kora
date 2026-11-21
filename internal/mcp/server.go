@@ -75,8 +75,8 @@ func NewWithExecutor(reg *doctype.Registry, siteName string, mode Mode, executor
 // NewReadOnlyWithExecutor registers only generated DocType find/list/get
 // tools. The executor must authenticate every call and enforce current tenant
 // grants. Mutating and system tools are deliberately absent from this mode.
-func NewReadOnlyWithExecutor(reg *doctype.Registry, siteName string, executor VerifiedToolExecutor) *Server {
-	return NewWithExecutor(reg, siteName, ModeReadOnly, executor)
+func NewReadOnlyWithExecutor(reg *doctype.Registry, siteName string, executor VerifiedToolExecutor, opts ...Option) *Server {
+	return NewWithExecutor(reg, siteName, ModeReadOnly, executor, opts...)
 }
 
 // Run starts the MCP server on stdio transport (for Claude Desktop).

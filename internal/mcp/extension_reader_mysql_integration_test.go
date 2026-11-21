@@ -47,11 +47,11 @@ func TestExtensionReadExecutorMySQLOwnerScopedRead(t *testing.T) {
 
 	registry := doctype.NewRegistry()
 	registry.Register(&doctype.DocType{Name: "Task", SortField: "name", SortOrder: "ASC", Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data"}}})
-	executor, err := NewExtensionReadExecutor(database, kdb.Resolve("mysql"), registry, contract.TenantID("stable-tenant"), "tenant.example", "test-token")
+	reader, err := NewExtensionReader(ExtensionReaderOptions{Database: database, Dialect: kdb.Resolve("mysql"), Registry: registry, TenantID: contract.TenantID("stable-tenant"), Site: "tenant.example", Token: "test-token"})
 	if err != nil {
-		t.Fatal("create MCP read executor:", err)
+		t.Fatal("create MCP read reader:", err)
 	}
-	result, err := executor(context.Background(), ai.ToolDescriptor{
+	result, err := reader.Execute(context.Background(), ai.ToolDescriptor{
 		ID: "tenant.task_list", Source: "tenant", Name: "task_list", Operation: "list", Doctype: "Task",
 	}, map[string]any{"limit": 10})
 	if err != nil {
@@ -61,7 +61,7 @@ func TestExtensionReadExecutorMySQLOwnerScopedRead(t *testing.T) {
 		t.Fatalf("owner-scoped read result leaked/omitted records: %s", result)
 	}
 
-	result, err = executor(context.Background(), ai.ToolDescriptor{
+	result, err = reader.Execute(context.Background(), ai.ToolDescriptor{
 		ID: "tenant.task_find", Source: "tenant", Name: "task_find", Operation: "find", Doctype: "Task",
 	}, map[string]any{
 		"filters": []any{map[string]any{"field": "title", "op": "=", "value": "mine"}},

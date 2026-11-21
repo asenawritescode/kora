@@ -13,7 +13,12 @@ import (
 // connectMetrics serves a server built with options and returns a client connected to it.
 func connectMetrics(t *testing.T, opts ...Option) *sdkmcp.ClientSession {
 	t.Helper()
-	server := NewWithExecutor(registryWithTask(), "tenant.example", ModeValidationOnly, nil, opts...)
+	return connectServer(t, NewWithExecutor(registryWithTask(), "tenant.example", ModeValidationOnly, nil, opts...))
+}
+
+// connectServer serves server and returns a client connected to it.
+func connectServer(t *testing.T, server *Server) *sdkmcp.ClientSession {
+	t.Helper()
 	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
 	serverSession, err := server.srv.Connect(context.Background(), serverTransport, nil)
 	if err != nil {
