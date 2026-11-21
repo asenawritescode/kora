@@ -183,3 +183,10 @@ fields:
   - fieldname: competitor_notes
     fieldtype: Text
     label: Competitive Notes
+facts:
+  time: creation
+  measures:
+    - field: total
+  dimensions:
+    - field: pipeline_stage
+    - field: owner_user

@@ -1,0 +1,11 @@
+name: deals_total_value
+label: Deal value
+type: balance
+model: Deal
+measure:
+  agg: sum
+  field: total
+time: business_date
+good: up
+format: currency
+description: Total of the deals in each pipeline stage as of the end of the period (sum).

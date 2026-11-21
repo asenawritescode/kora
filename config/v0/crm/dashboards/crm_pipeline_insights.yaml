@@ -1,0 +1,35 @@
+name: crm_pipeline_insights
+label: "CRM pipeline insights"
+description: "Figures and charts that reproduce the CRM pipeline report."
+default_range: last_30_days
+tiles:
+  - metric: deals_count
+  - metric: deals_total_value
+  - metric: leads_count
+  - metric: activities_count
+charts:
+  - id: pipeline_by_stage
+    title: "Deal value by stage"
+    kind: bar
+    metrics: [deals_total_value]
+    by: pipeline_stage
+  - id: deals_by_stage
+    title: "Deals by stage"
+    kind: bar
+    metrics: [deals_count]
+    by: pipeline_stage
+  - id: pipeline_by_owner
+    title: "Deal value by owner"
+    kind: bar
+    metrics: [deals_total_value]
+    by: owner_user
+  - id: leads_by_stage
+    title: "Leads by lifecycle stage"
+    kind: bar
+    metrics: [leads_count]
+    by: lifecycle_stage
+  - id: activities_by_status
+    title: "Activities by status"
+    kind: bar
+    metrics: [activities_count]
+    by: status
