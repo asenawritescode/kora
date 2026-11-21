@@ -168,6 +168,7 @@ internal/doctype/parser.go::validateQuantityLedger
 internal/doctype/parser.go::validateQuantityStatusGate
 internal/doctype/parser.go::validateQuantityTargets
 internal/doctype/parser.go::validateReasonDirections
+internal/doctype/parser.go::validateStatusDirections
 internal/doctype/rollback.go::GenerateRollbackPlan
 internal/doctype/sexpr.go::CanonicalizeSExpr
 internal/doctype/snapshot.go::IsJSONConfig

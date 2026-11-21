@@ -97,6 +97,11 @@ type QuantityEffect struct {
 	// change, and one that leaves it reverses it. Set both or neither (see Gated).
 	StatusField     string   `yaml:"status_field" json:"status_field,omitempty"`
 	ApplyInStatuses []string `yaml:"apply_in_statuses" json:"apply_in_statuses,omitempty"`
+	// StatusDirections sets the direction for some applying statuses, so one
+	// record type can move the target quantity both ways: a return status that
+	// puts back what a paid status took. Each key is one of ApplyInStatuses, each
+	// value "increase" or "decrease"; other statuses use Direction.
+	StatusDirections map[string]string `yaml:"status_directions" json:"status_directions,omitempty"`
 	// Ledger, when set, appends one row per target record each time the effect
 	// changes its quantity, so the ledger says why it changed.
 	Ledger *QuantityLedger `yaml:"ledger" json:"ledger,omitempty"`
@@ -144,6 +149,26 @@ func (q *QuantityEffect) Gated() bool {
 // AppliesIn reports whether status is one of the statuses that apply the effect.
 func (q *QuantityEffect) AppliesIn(status string) bool {
 	return q != nil && slices.Contains(q.ApplyInStatuses, status)
+}
+
+// ForStatus is the effect as it applies to a record in status: the same effect
+// with the status's direction when StatusDirections names one.
+func (q *QuantityEffect) ForStatus(status string) *QuantityEffect {
+	direction, ok := q.statusDirection(status)
+	if !ok {
+		return q
+	}
+	forStatus := *q
+	forStatus.Direction = direction
+	return &forStatus
+}
+
+func (q *QuantityEffect) statusDirection(status string) (string, bool) {
+	if q == nil || !q.Gated() {
+		return "", false
+	}
+	direction, ok := q.StatusDirections[status]
+	return direction, ok
 }
 
 // Sign is +1 for "increase" (the default) and -1 for "decrease".

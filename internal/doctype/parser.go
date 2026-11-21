@@ -1112,6 +1112,7 @@ func validateQuantityEffect(dt *DocType, dtMap map[string]*DocType, bad func(*Do
 	}
 	validateReasonDirections(dt, q, bad)
 	validateQuantityStatusGate(dt, q, bad)
+	validateStatusDirections(dt, q, bad)
 	validateQuantityTargets(dt, dtMap, q, bad)
 	validateQuantityLedger(dt, dtMap, q, bad)
 }
@@ -1183,6 +1184,26 @@ func validateReasonDirections(dt *DocType, q *QuantityEffect, bad func(*DocType,
 		}
 		if reason != nil && reason.Fieldtype == "Select" && !selectHasOption(reason, value) {
 			bad(dt, "reason_directions", fmt.Sprintf("quantity_effect reason %q is not one of the options of %s", value, q.ReasonField))
+		}
+	}
+}
+
+// validateStatusDirections checks the per-status directions of a gated effect:
+// each names an applying status and increase or decrease.
+func validateStatusDirections(dt *DocType, q *QuantityEffect, bad func(*DocType, string, string)) {
+	if len(q.StatusDirections) == 0 {
+		return
+	}
+	if !q.Gated() {
+		bad(dt, "status_directions", "quantity_effect status_directions needs status_field and apply_in_statuses")
+		return
+	}
+	for status, direction := range q.StatusDirections {
+		if !q.AppliesIn(status) {
+			bad(dt, "status_directions", fmt.Sprintf("quantity_effect status %q in status_directions is not one of apply_in_statuses", status))
+		}
+		if direction != "increase" && direction != "decrease" {
+			bad(dt, "status_directions", fmt.Sprintf("quantity_effect status_directions gives %q the direction %q; use increase or decrease", status, direction))
 		}
 	}
 }
