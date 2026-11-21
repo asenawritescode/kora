@@ -139,7 +139,11 @@ func (r reportsAPI) checkDraft(c *gin.Context, name, visibility string, question
 		internalError(c, "loading metric definitions", err)
 		return reportDraft{}, false
 	}
-	models, err := checkSavedQuestion(cat, question)
+	join := map[string]bool{}
+	if reg := analyticsRegistry(c, r.metrics.registry); reg != nil {
+		_, join = exploreAccess(c, reg, reg.All())
+	}
+	models, err := checkSavedQuestion(cat, join, question)
 	if err != nil {
 		writeError(c, http.StatusUnprocessableEntity, "reports.question_invalid", err.Error(), nil)
 		return reportDraft{}, false
@@ -323,6 +327,10 @@ func markBrokenReports(ctx context.Context, database *sql.DB, dialect db.Dialect
 		return
 	}
 	cat := metrics.NewCatalog(defs, reg.All())
+	join := map[string]bool{}
+	for _, dt := range reg.All() {
+		join[dt.Name] = true
+	}
 	store := reportStore{database: database, dialect: dialect}
 	reports, err := store.list(ctx)
 	if err != nil {
@@ -331,7 +339,7 @@ func markBrokenReports(ctx context.Context, database *sql.DB, dialect db.Dialect
 	}
 	now := time.Now().UTC()
 	for _, rep := range reports {
-		if err := store.setState(ctx, rep.recheck(cat, now)); err != nil {
+		if err := store.setState(ctx, rep.recheck(cat, join, now)); err != nil {
 			slog.Error("record saved report state", "report", rep.ID, "error", err)
 		}
 	}

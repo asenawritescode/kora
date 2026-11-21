@@ -40,8 +40,8 @@ func (rep savedReport) contract() contract.SavedReport {
 
 // recheck returns rep with the outcome of its question against cat. A question that still checks keeps its
 // record types; one that does not is broken with the reason, and keeps the moment it first broke.
-func (rep savedReport) recheck(cat metrics.Catalog, now time.Time) savedReport {
-	models, err := checkSavedQuestion(cat, rep.Question)
+func (rep savedReport) recheck(cat metrics.Catalog, join map[string]bool, now time.Time) savedReport {
+	models, err := checkSavedQuestion(cat, join, rep.Question)
 	if err != nil {
 		if rep.BrokenReason != err.Error() || rep.BrokenAt.IsZero() {
 			rep.BrokenAt = now

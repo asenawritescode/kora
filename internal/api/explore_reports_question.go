@@ -13,7 +13,7 @@ import (
 // A record question names an offered measure of a record type, with "by" dimensions the type has and filters
 // the fact model accepts. A metric question names a defined metric whose record types have every "by"
 // dimension and filter field it uses.
-func checkSavedQuestion(cat metrics.Catalog, q contract.SavedQuestion) ([]string, error) {
+func checkSavedQuestion(cat metrics.Catalog, join map[string]bool, q contract.SavedQuestion) ([]string, error) {
 	if (q.RecordType == "") == (q.Metric == "") {
 		return nil, errors.New("a report names one record type or one metric")
 	}
@@ -25,9 +25,9 @@ func checkSavedQuestion(cat metrics.Catalog, q contract.SavedQuestion) ([]string
 		return nil, err
 	}
 	if q.Metric != "" {
-		return checkMetricQuestion(cat, q, filters)
+		return checkMetricQuestion(cat, join, q, filters)
 	}
-	return checkRecordQuestion(cat, q, filters)
+	return checkRecordQuestion(cat, join, q, filters)
 }
 
 // checkQuestionSettings checks the grain, comparison and period a question carries.
@@ -51,8 +51,8 @@ func checkQuestionSettings(q contract.SavedQuestion) error {
 
 // checkRecordQuestion checks a question of one record type's measure. The measure's field and filters are
 // checked the way an unsaved measure of a query is.
-func checkRecordQuestion(cat metrics.Catalog, q contract.SavedQuestion, filters []metrics.Filter) ([]string, error) {
-	rec, ok := cat.ExploreRecord(q.RecordType)
+func checkRecordQuestion(cat metrics.Catalog, join map[string]bool, q contract.SavedQuestion, filters []metrics.Filter) ([]string, error) {
+	rec, ok := cat.ExploreRecord(q.RecordType, join)
 	if !ok {
 		return nil, fmt.Errorf("record type %q is not in the explore catalog", q.RecordType)
 	}
@@ -75,7 +75,7 @@ func checkRecordQuestion(cat metrics.Catalog, q contract.SavedQuestion, filters 
 
 // checkMetricQuestion checks a question of a defined metric: its record types must offer the "by"
 // dimensions and the filter fields.
-func checkMetricQuestion(cat metrics.Catalog, q contract.SavedQuestion, filters []metrics.Filter) ([]string, error) {
+func checkMetricQuestion(cat metrics.Catalog, join map[string]bool, q contract.SavedQuestion, filters []metrics.Filter) ([]string, error) {
 	if _, ok := cat.Metrics[q.Metric]; !ok {
 		return nil, fmt.Errorf("metric %q is not defined", q.Metric)
 	}
@@ -88,7 +88,7 @@ func checkMetricQuestion(cat metrics.Catalog, q contract.SavedQuestion, filters 
 	}
 	models := metrics.Models(ms)
 	for _, model := range models {
-		rec, ok := cat.ExploreRecord(model)
+		rec, ok := cat.ExploreRecord(model, join)
 		if !ok {
 			return nil, fmt.Errorf("record type %q of metric %q is not in the explore catalog", model, q.Metric)
 		}

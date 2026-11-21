@@ -48,7 +48,7 @@ func TestCheckSavedQuestion(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			models, err := checkSavedQuestion(cat, tc.q)
+			models, err := checkSavedQuestion(cat, allJoin(cat), tc.q)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("error = %v, want error %v", err, tc.wantErr)
 			}
@@ -80,17 +80,26 @@ func TestRecheckKeepsBrokenSince(t *testing.T) {
 	later := first.Add(time.Hour)
 	rep := savedReport{ID: "r1", Question: contract.SavedQuestion{RecordType: "Expense", Measure: "sum:cost"}}
 
-	rep = rep.recheck(cat, first)
+	rep = rep.recheck(cat, allJoin(cat), first)
 	if rep.BrokenReason == "" || !rep.BrokenAt.Equal(first) {
 		t.Fatalf("first check: reason %q at %v, want broken at %v", rep.BrokenReason, rep.BrokenAt, first)
 	}
 	reason := rep.BrokenReason
-	if rep = rep.recheck(cat, later); !rep.BrokenAt.Equal(first) || rep.BrokenReason != reason {
+	if rep = rep.recheck(cat, allJoin(cat), later); !rep.BrokenAt.Equal(first) || rep.BrokenReason != reason {
 		t.Fatalf("same break moved: at %v, reason %q", rep.BrokenAt, rep.BrokenReason)
 	}
 	rep.Question = contract.SavedQuestion{RecordType: "Expense", Measure: "sum:amount"}
-	rep = rep.recheck(cat, later)
+	rep = rep.recheck(cat, allJoin(cat), later)
 	if rep.BrokenReason != "" || !rep.BrokenAt.IsZero() || !reflect.DeepEqual(rep.RecordTypes, []string{"Expense"}) {
 		t.Fatalf("fixed report: reason %q, at %v, types %v", rep.BrokenReason, rep.BrokenAt, rep.RecordTypes)
 	}
+}
+
+// allJoin lets every record type of cat be joined, as the activation check does.
+func allJoin(cat metrics.Catalog) map[string]bool {
+	join := map[string]bool{}
+	for name := range cat.Models {
+		join[name] = true
+	}
+	return join
 }
