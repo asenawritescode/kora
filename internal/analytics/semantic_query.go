@@ -20,16 +20,6 @@ type SemanticQueryResponse struct {
 	DataSource  string                `json:"data_source"`
 }
 
-// ProjectionActorScope is derived from verified API authorization. Assignment
-// and owner predicates are applied before report filters, aggregation, and row
-// limits so analytics cannot widen actor visibility.
-type ProjectionActorScope struct {
-	SubjectID      string
-	OwnerOnly      bool
-	OwnerField     string
-	AssignedFields []string
-}
-
 type SemanticQueryResult struct {
 	Model          string                  `json:"model"`
 	Columns        []string                `json:"columns"`

@@ -2,11 +2,13 @@ package engine
 
 import (
 	"context"
-	"github.com/asenawritescode/kora/internal/eventbus"
-	"github.com/asenawritescode/kora/internal/eventstream"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/cloudrelay"
+	"github.com/asenawritescode/kora/internal/eventbus"
+	"github.com/asenawritescode/kora/internal/eventstream"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/internal/analytics"
@@ -64,8 +66,8 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	tenantDB.SetMaxOpenConns(3)
 	loaded := &net.LoadedSite{SiteID: "metrics-tenant", Name: "metrics-tenant", DB: tenantDB, AnalyticsEventBus: fanout}
 	services := loaded.RuntimeServiceSnapshot()
-	cloudRelay := analytics.NewCloudRelay(nil, loaded.Name, analytics.CloudRelayConfig{AccountID: "metrics-account"})
-	cloudEvent := analytics.CloudProductEventDTO{Kind: "first_login", Properties: analytics.FirstLoginPropertiesDTO{User: "user@example.invalid"}}
+	cloudRelay := cloudrelay.New(nil, loaded.Name, cloudrelay.Config{AccountID: "metrics-account"})
+	cloudEvent := cloudrelay.ProductEvent{Kind: "first_login", Properties: cloudrelay.FirstLoginProperties{User: "user@example.invalid"}}
 	for i := 0; i < 32; i++ {
 		if !cloudRelay.EnqueueProductEvent(cloudEvent, "") {
 			t.Fatalf("enqueue Cloud telemetry metric fixture %d", i)

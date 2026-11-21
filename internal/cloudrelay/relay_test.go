@@ -1,15 +1,16 @@
-package analytics
+package cloudrelay
 
 import (
 	"encoding/json"
-	"github.com/asenawritescode/kora/internal/eventbus"
-	"github.com/asenawritescode/kora/internal/eventstream"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/eventbus"
+	"github.com/asenawritescode/kora/internal/eventstream"
 )
 
 type stubBus struct {
@@ -52,7 +53,7 @@ func TestCloudRelayPostsFirstRecordOnlyOncePerDoctype(t *testing.T) {
 	}
 	defer mb.Close()
 
-	relay := NewCloudRelay(mb, "tenant.example.com", CloudRelayConfig{
+	relay := New(mb, "tenant.example.com", Config{
 		EventsURL:   server.URL,
 		SiteID:      "site-1",
 		AccountID:   "acct-1",
@@ -127,7 +128,7 @@ func TestCloudRelayRejectedSubscriptionCanStop(t *testing.T) {
 	if err := mb.TryAddListener(make(chan eventstream.ChangeEvent, 1)); err != nil {
 		t.Fatal(err)
 	}
-	relay := NewCloudRelay(mb, "tenant", CloudRelayConfig{})
+	relay := New(mb, "tenant", Config{})
 	relay.Start()
 	done := make(chan struct{})
 	go func() {
@@ -143,8 +144,8 @@ func TestCloudRelayRejectedSubscriptionCanStop(t *testing.T) {
 }
 
 func TestCloudRelayProductEventQueueIsBounded(t *testing.T) {
-	relay := NewCloudRelay(nil, "tenant.example", CloudRelayConfig{AccountID: "acct-1"})
-	event := CloudProductEventDTO{Kind: "first_login", Properties: FirstLoginPropertiesDTO{User: "user@example.invalid"}}
+	relay := New(nil, "tenant.example", Config{AccountID: "acct-1"})
+	event := ProductEvent{Kind: "first_login", Properties: FirstLoginProperties{User: "user@example.invalid"}}
 	for i := 0; i < cloudProductEventQueueCapacity; i++ {
 		if !relay.EnqueueProductEvent(event, "") {
 			t.Fatalf("EnqueueProductEvent() rejected event %d before queue capacity", i)
@@ -157,7 +158,7 @@ func TestCloudRelayProductEventQueueIsBounded(t *testing.T) {
 		t.Fatalf("ProductEventsDropped() = %d, want 1 for full queue", got)
 	}
 
-	oversized := CloudProductEventDTO{Kind: "first_login", Properties: FirstLoginPropertiesDTO{User: strings.Repeat("x", maxCloudProductEventBytes)}}
+	oversized := ProductEvent{Kind: "first_login", Properties: FirstLoginProperties{User: strings.Repeat("x", maxCloudProductEventBytes)}}
 	if relay.EnqueueProductEvent(oversized, "") {
 		t.Fatal("EnqueueProductEvent() accepted an oversized event")
 	}
@@ -166,10 +167,10 @@ func TestCloudRelayProductEventQueueIsBounded(t *testing.T) {
 	}
 }
 
-func TestLoadCloudRelayConfigRequiresURLAndAccount(t *testing.T) {
+func TestLoadConfigRequiresURLAndAccount(t *testing.T) {
 	t.Setenv("KORA_CLOUD_EVENTS_URL", "")
 	t.Setenv("KORA_CLOUD_ACCOUNT_ID", "")
-	if cfg := LoadCloudRelayConfig(); cfg != nil {
+	if cfg := LoadConfig(); cfg != nil {
 		t.Fatalf("expected nil config, got %#v", cfg)
 	}
 
@@ -177,7 +178,7 @@ func TestLoadCloudRelayConfigRequiresURLAndAccount(t *testing.T) {
 	t.Setenv("KORA_CLOUD_ACCOUNT_ID", "acct-1")
 	t.Setenv("KORA_CLOUD_SITE_ID", "site-1")
 	t.Setenv("KORA_INTEGRATION_TOKEN", "secret")
-	cfg := LoadCloudRelayConfig()
+	cfg := LoadConfig()
 	if cfg == nil {
 		t.Fatal("expected config")
 	}
@@ -186,7 +187,7 @@ func TestLoadCloudRelayConfigRequiresURLAndAccount(t *testing.T) {
 	}
 }
 
-func TestSendCloudProductEventDedupes(t *testing.T) {
+func TestSendProductEventDedupes(t *testing.T) {
 	t.Parallel()
 
 	cloudEventOnceMu.Lock()
@@ -200,7 +201,7 @@ func TestSendCloudProductEventDedupes(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := CloudRelayConfig{
+	cfg := Config{
 		EventsURL:   server.URL,
 		SiteID:      "site-1",
 		AccountID:   "acct-1",
@@ -208,21 +209,21 @@ func TestSendCloudProductEventDedupes(t *testing.T) {
 	}
 	client := &http.Client{Timeout: 2 * time.Second}
 
-	SendCloudProductEvent(client, cfg, CloudProductEventDTO{
+	SendProductEvent(client, cfg, ProductEvent{
 		SiteID:    "site-1",
 		AccountID: "acct-1",
 		Kind:      "first_login",
-		Properties: FirstLoginPropertiesDTO{
+		Properties: FirstLoginProperties{
 			User:  "a@test",
 			Site:  "site-1",
 			Login: "password",
 		},
 	}, "first_login:site-1:a@test")
-	SendCloudProductEvent(client, cfg, CloudProductEventDTO{
+	SendProductEvent(client, cfg, ProductEvent{
 		SiteID:    "site-1",
 		AccountID: "acct-1",
 		Kind:      "first_login",
-		Properties: FirstLoginPropertiesDTO{
+		Properties: FirstLoginProperties{
 			User:  "a@test",
 			Site:  "site-1",
 			Login: "password",

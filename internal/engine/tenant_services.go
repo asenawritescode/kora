@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/asenawritescode/kora/internal/eventbus"
 	"log/slog"
 	"math/rand/v2"
 	"sort"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/cloudrelay"
+	"github.com/asenawritescode/kora/internal/eventbus"
+	"github.com/asenawritescode/kora/internal/projection"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/analytics"
@@ -52,7 +55,7 @@ type TenantServiceConfig struct {
 	ProcessContext          context.Context
 	Common                  *site.CommonConfig
 	Analytics               *analytics.Config
-	CloudRelay              *analytics.CloudRelayConfig
+	CloudRelay              *cloudrelay.Config
 	CloudUsage              *usage.Config
 	AnalyticsQueueAdmission *eventbus.QueueAdmission
 	NATS                    *natsprovider.Provider
@@ -365,7 +368,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	services.LookupPublishedOperationByID = func(ctx context.Context, execution policy.Execution, scope contract.BusinessScope, id contract.OperationID) (contract.OperationReceipt, bool, error) {
 		return moduleStore.LoadPublishedOperationReceipt(ctx, scope.TenantID, id, execution.Actor(), scope)
 	}
-	services.PublishedProjections = &analytics.PublishedProjectionStore{DB: loaded.DB, Dialect: dialect, Site: loaded.SiteID}
+	services.PublishedProjections = &projection.Store{DB: loaded.DB, Dialect: dialect, Site: loaded.SiteID}
 	workAdmission, err := site.ConnectionAdmission(cfg)
 	if err != nil {
 		return fmt.Errorf("resolve tenant work admission: %w", err)
@@ -924,7 +927,7 @@ func withTenantWorkAdmission(ctx context.Context, admission interface {
 // configured: the analytics relay and the usage reporter.
 func registerCloudWorkers(config TenantServiceConfig, loaded *knet.LoadedSite, services *tenantruntime.Services, bus *eventbus.MultiBus, dialect kdb.Dialect) error {
 	if config.CloudRelay != nil {
-		relay := analytics.NewCloudRelay(bus, loaded.Name, *config.CloudRelay)
+		relay := cloudrelay.New(bus, loaded.Name, *config.CloudRelay)
 		services.AnalyticsRelay = relay
 		if err := registerTenantWorkerStart(config, func() error { relay.Start(); return nil }); err != nil {
 			return fmt.Errorf("register analytics relay for tenant %s: %w", loaded.Name, err)

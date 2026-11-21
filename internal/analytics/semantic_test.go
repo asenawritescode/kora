@@ -2,10 +2,12 @@ package analytics
 
 import (
 	"encoding/json"
-	"github.com/asenawritescode/kora/internal/eventstream"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/eventstream"
+	"github.com/asenawritescode/kora/internal/projection"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/doctype"
@@ -83,7 +85,7 @@ func TestPublishedProjectionModelUsesOnlyPublishedOutputFields(t *testing.T) {
 func TestPublishedProjectionSnapshotRejectsUndeclaredExportFields(t *testing.T) {
 	output := contract.SchemaRef{ID: "ar.balance.output", Version: 1}
 	definition := contract.ProjectionDefinition{ID: "ar_balance", OwnerModuleID: "finance.ar", ScopePolicy: contract.ScopeEntityOwned, FactKey: "id", AllowedFields: []string{"id", "amount"}, Sources: []contract.ProjectionSource{{OwnerModuleID: "sales.orders", QueryName: "balances", OutputSchema: output}}, OutputSchema: output, RebuildStrategy: "consistent_snapshot"}
-	snapshot := PublishedProjectionSnapshot{Site: "tenant-a", Definition: definition, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}, SourceID: "published_sources", SourceRevision: "r1", Cursor: `{"sales.orders/balances":"c1"}`, AsOf: time.Now().UTC(), Freshness: contract.QueryFresh, Data: json.RawMessage(`[{"id":"invoice-1","amount":12}]`)}
+	snapshot := projection.Snapshot{Site: "tenant-a", Definition: definition, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}, SourceID: "published_sources", SourceRevision: "r1", Cursor: `{"sales.orders/balances":"c1"}`, AsOf: time.Now().UTC(), Freshness: contract.QueryFresh, Data: json.RawMessage(`[{"id":"invoice-1","amount":12}]`)}
 	if err := snapshot.Validate(); err != nil {
 		t.Fatalf("valid projection snapshot rejected: %v", err)
 	}

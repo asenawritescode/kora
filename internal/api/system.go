@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/asenawritescode/kora/internal/eventbus"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/cloudrelay"
+	"github.com/asenawritescode/kora/internal/eventbus"
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
@@ -648,10 +650,10 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 	if activate {
 		siteName := c.GetString("site_name")
 		if relay := h.runtimeService(c, siteName).AnalyticsRelay; relay != nil {
-			relay.EnqueueProductEvent(analytics.CloudProductEventDTO{
+			relay.EnqueueProductEvent(cloudrelay.ProductEvent{
 				SiteID: siteName,
 				Kind:   "first_doctype",
-				Properties: analytics.FirstDocTypePropertiesDTO{
+				Properties: cloudrelay.FirstDocTypeProperties{
 					DocType: dt.Name,
 					Site:    siteName,
 					Status:  status,

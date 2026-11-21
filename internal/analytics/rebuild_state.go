@@ -81,15 +81,6 @@ func currentSourceSequenceTx(ctx context.Context, tx *sql.Tx, dialect db.QueryDi
 	return sequence, nil
 }
 
-func rebuildFenceTx(ctx context.Context, tx *sql.Tx, dialect db.QueryDialect, site string) (int64, error) {
-	var fence int64
-	err := tx.QueryRowContext(ctx, db.Rebind(dialect, `SELECT fence FROM _kora_analytics_rebuild_lock WHERE site = ?`), site).Scan(&fence)
-	if err != nil {
-		return 0, fmt.Errorf("read analytics rebuild fence: %w", err)
-	}
-	return fence, nil
-}
-
 func saveRebuildCheckpointTx(ctx context.Context, tx *sql.Tx, dialect db.QueryDialect, site, doctype, from string, sequence int64, scopes ...contract.BusinessScope) error {
 	scope := contract.BusinessScope{TenantID: contract.TenantID(site), Kind: contract.ScopeKindTenant}
 	if len(scopes) > 0 {

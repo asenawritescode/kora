@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/asenawritescode/kora/internal/eventbus"
 	"net/http"
 	"runtime"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/cloudrelay"
+	"github.com/asenawritescode/kora/internal/eventbus"
 
 	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/application/process"
@@ -63,7 +65,7 @@ type Config struct {
 	SchedulerExecutionResolverFactory ScheduledJobExecutionResolverFactory
 	HTTPAllowlist                     []string
 	CORSAllowedOrigins                []string
-	CloudRelay                        *analytics.CloudRelayConfig
+	CloudRelay                        *cloudrelay.Config
 	CloudUsage                        *usage.Config
 	Analytics                         *analytics.Config
 	OutboxEnabled                     bool
@@ -258,7 +260,7 @@ func newEngine(ctx context.Context, config Config, deps engineAssemblyDependenci
 		shared.ScriptRunner = budgeted
 		resources.ScriptRunner = budgeted
 	}
-	var relay *analytics.CloudRelayConfig
+	var relay *cloudrelay.Config
 	if config.CloudRelay != nil {
 		copy := *config.CloudRelay
 		relay = &copy

@@ -1,10 +1,8 @@
-package analytics
+package cloudrelay
 
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/asenawritescode/kora/internal/eventbus"
-	"github.com/asenawritescode/kora/internal/eventstream"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/asenawritescode/kora/internal/eventbus"
+	"github.com/asenawritescode/kora/internal/eventstream"
+
 	"github.com/asenawritescode/kora/internal/envcompat"
 )
 
@@ -22,15 +23,18 @@ var (
 	cloudEventOnce   = map[string]bool{}
 )
 
-type CloudRelayConfig struct {
+// Config is the cloud product-event relay configuration, read from the environment.
+type Config struct {
 	EventsURL   string
 	SiteID      string
 	AccountID   string
 	EventsToken string
 }
 
-func LoadCloudRelayConfig() *CloudRelayConfig {
-	cfg := &CloudRelayConfig{
+// LoadConfig returns the relay configuration, or nil when the events URL or
+// account is unset.
+func LoadConfig() *Config {
+	cfg := &Config{
 		EventsURL:   strings.TrimSpace(os.Getenv("KORA_CLOUD_EVENTS_URL")),
 		SiteID:      strings.TrimSpace(os.Getenv("KORA_CLOUD_SITE_ID")),
 		AccountID:   strings.TrimSpace(os.Getenv("KORA_CLOUD_ACCOUNT_ID")),
@@ -42,10 +46,11 @@ func LoadCloudRelayConfig() *CloudRelayConfig {
 	return cfg
 }
 
-type CloudRelay struct {
+// Relay forwards first-record and product events from the event bus to the cloud.
+type Relay struct {
 	Bus                  *eventbus.MultiBus
 	Site                 string
-	Config               CloudRelayConfig
+	Config               Config
 	client               *http.Client
 	closeCh              chan struct{}
 	listenerCh           chan eventstream.ChangeEvent
@@ -65,7 +70,7 @@ const (
 )
 
 type queuedCloudProductEvent struct {
-	event     CloudProductEventDTO
+	event     ProductEvent
 	dedupeKey string
 }
 
@@ -75,9 +80,9 @@ type ProductEventQueueSnapshot struct {
 	Dropped  uint64
 }
 
-// NewCloudRelay creates a relay that forwards tenant bus events to the cloud.
-func NewCloudRelay(bus *eventbus.MultiBus, site string, cfg CloudRelayConfig) *CloudRelay {
-	return &CloudRelay{
+// New creates a relay that forwards tenant bus events to the cloud.
+func New(bus *eventbus.MultiBus, site string, cfg Config) *Relay {
+	return &Relay{
 		Bus:    bus,
 		Site:   site,
 		Config: cfg,
@@ -99,7 +104,7 @@ func NewCloudRelay(bus *eventbus.MultiBus, site string, cfg CloudRelayConfig) *C
 // worker. It never performs network I/O on the caller's request path. The
 // bounded queue drops excess or oversized telemetry rather than delaying
 // tenant operations.
-func (r *CloudRelay) EnqueueProductEvent(event CloudProductEventDTO, dedupeKey string) bool {
+func (r *Relay) EnqueueProductEvent(event ProductEvent, dedupeKey string) bool {
 	if r == nil || event.Kind == "" {
 		return false
 	}
@@ -141,14 +146,14 @@ func (r *CloudRelay) EnqueueProductEvent(event CloudProductEventDTO, dedupeKey s
 // cloudProductEventWithinLimit rejects unknown payload types and bounds all
 // string data before JSON encoding. The conservative six-times expansion
 // accounts for JSON escaping of control characters.
-func cloudProductEventWithinLimit(event CloudProductEventDTO) bool {
+func cloudProductEventWithinLimit(event ProductEvent) bool {
 	stringBytes := len(event.SiteID) + len(event.AccountID) + len(event.Kind)
 	add := func(value string) {
 		stringBytes += len(value)
 	}
 	switch event.Kind {
 	case "first_login":
-		properties, ok := event.Properties.(FirstLoginPropertiesDTO)
+		properties, ok := event.Properties.(FirstLoginProperties)
 		if !ok {
 			return false
 		}
@@ -156,7 +161,7 @@ func cloudProductEventWithinLimit(event CloudProductEventDTO) bool {
 		add(properties.Site)
 		add(properties.Login)
 	case "first_doctype":
-		properties, ok := event.Properties.(FirstDocTypePropertiesDTO)
+		properties, ok := event.Properties.(FirstDocTypeProperties)
 		if !ok {
 			return false
 		}
@@ -164,7 +169,7 @@ func cloudProductEventWithinLimit(event CloudProductEventDTO) bool {
 		add(properties.Site)
 		add(properties.Status)
 	case "first_record":
-		properties, ok := event.Properties.(FirstRecordPropertiesDTO)
+		properties, ok := event.Properties.(FirstRecordProperties)
 		if !ok {
 			return false
 		}
@@ -181,21 +186,23 @@ func cloudProductEventWithinLimit(event CloudProductEventDTO) bool {
 
 // ProductEventsDropped reports optional telemetry events discarded because
 // they exceeded the payload limit or the bounded queue was full.
-func (r *CloudRelay) ProductEventsDropped() uint64 {
+func (r *Relay) ProductEventsDropped() uint64 {
 	if r == nil {
 		return 0
 	}
 	return r.productEventsDropped.Load()
 }
 
-func (r *CloudRelay) ProductEventQueueSnapshot() ProductEventQueueSnapshot {
+// ProductEventQueueSnapshot reports the current queue depth and bytes.
+func (r *Relay) ProductEventQueueSnapshot() ProductEventQueueSnapshot {
 	if r == nil {
 		return ProductEventQueueSnapshot{}
 	}
 	return ProductEventQueueSnapshot{Queued: len(r.productEvents), Capacity: cap(r.productEvents), Dropped: r.productEventsDropped.Load()}
 }
 
-func (r *CloudRelay) Start() {
+// Start subscribes the relay to the event bus and begins forwarding.
+func (r *Relay) Start() {
 	r.startOnce.Do(func() {
 		select {
 		case <-r.closeCh:
@@ -222,7 +229,7 @@ func (r *CloudRelay) Start() {
 				case <-r.closeCh:
 					return
 				case event := <-r.productEvents:
-					SendCloudProductEvent(r.client, r.Config, event.event, event.dedupeKey)
+					SendProductEvent(r.client, r.Config, event.event, event.dedupeKey)
 				case event, ok := <-r.listenerCh:
 					if !ok {
 						return
@@ -236,7 +243,8 @@ func (r *CloudRelay) Start() {
 	slog.Info("cloud telemetry relay started", "site", r.Site, "events_url", r.Config.EventsURL)
 }
 
-func (r *CloudRelay) Stop() {
+// Stop ends forwarding and waits for the relay goroutines to exit.
+func (r *Relay) Stop() {
 	r.stopOnce.Do(func() {
 		close(r.closeCh)
 		r.startOnce.Do(func() { close(r.done) })
@@ -247,7 +255,7 @@ func (r *CloudRelay) Stop() {
 	<-r.done
 }
 
-func (r *CloudRelay) handleEvent(event eventstream.ChangeEvent) {
+func (r *Relay) handleEvent(event eventstream.ChangeEvent) {
 	if event.Operation != eventstream.EventInsert {
 		return
 	}
@@ -258,11 +266,11 @@ func (r *CloudRelay) handleEvent(event eventstream.ChangeEvent) {
 		return
 	}
 
-	SendCloudProductEvent(r.client, r.Config, CloudProductEventDTO{
+	SendProductEvent(r.client, r.Config, ProductEvent{
 		SiteID:    r.siteID(),
 		AccountID: r.Config.AccountID,
 		Kind:      "first_record",
-		Properties: FirstRecordPropertiesDTO{
+		Properties: FirstRecordProperties{
 			DocType:    event.Doctype,
 			DocName:    event.DocName,
 			Operation:  string(event.Operation),
@@ -272,7 +280,7 @@ func (r *CloudRelay) handleEvent(event eventstream.ChangeEvent) {
 	}, "")
 }
 
-func (r *CloudRelay) markFirstRecord(doctype string) bool {
+func (r *Relay) markFirstRecord(doctype string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.firstRecordByType[doctype] {
@@ -282,7 +290,7 @@ func (r *CloudRelay) markFirstRecord(doctype string) bool {
 	return true
 }
 
-func (r *CloudRelay) siteID() string {
+func (r *Relay) siteID() string {
 	if r.Config.SiteID != "" {
 		return r.Config.SiteID
 	}
@@ -292,14 +300,16 @@ func (r *CloudRelay) siteID() string {
 	return "unknown-site"
 }
 
-type CloudProductEventDTO struct {
+// ProductEvent is one product telemetry event sent to the cloud.
+type ProductEvent struct {
 	SiteID     string `json:"site_id"`
 	AccountID  string `json:"account_id"`
 	Kind       string `json:"kind"`
 	Properties any    `json:"properties,omitempty"`
 }
 
-type FirstRecordPropertiesDTO struct {
+// FirstRecordProperties are the properties of a first-record event.
+type FirstRecordProperties struct {
 	DocType    string `json:"doctype"`
 	DocName    string `json:"doc_name"`
 	Operation  string `json:"operation"`
@@ -307,19 +317,22 @@ type FirstRecordPropertiesDTO struct {
 	Site       string `json:"site"`
 }
 
-type FirstLoginPropertiesDTO struct {
+// FirstLoginProperties are the properties of a first-login event.
+type FirstLoginProperties struct {
 	User  string `json:"user"`
 	Site  string `json:"site"`
 	Login string `json:"login"`
 }
 
-type FirstDocTypePropertiesDTO struct {
+// FirstDocTypeProperties are the properties of a first-doctype event.
+type FirstDocTypeProperties struct {
 	DocType string `json:"doctype"`
 	Site    string `json:"site"`
 	Status  string `json:"status"`
 }
 
-func SendCloudProductEvent(client *http.Client, cfg CloudRelayConfig, event CloudProductEventDTO, dedupeKey string) {
+// SendProductEvent posts one event to the cloud, deduplicated by dedupeKey.
+func SendProductEvent(client *http.Client, cfg Config, event ProductEvent, dedupeKey string) {
 	if cfg.EventsURL == "" || event.AccountID == "" {
 		return
 	}

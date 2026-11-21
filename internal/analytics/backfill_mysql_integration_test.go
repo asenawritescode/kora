@@ -16,6 +16,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/projection"
 	"github.com/go-sql-driver/mysql"
 )
 
@@ -88,16 +89,16 @@ func TestMySQLBackfillFailurePreservesPreviouslyCommittedRollups(t *testing.T) {
 		}
 	}
 	projectionDefinition := contract.ProjectionDefinition{ID: "task_snapshot", OwnerModuleID: "analytics.task", ScopePolicy: contract.ScopeTenantShared, FactKey: "id", AllowedFields: []string{"id"}, Sources: []contract.ProjectionSource{{OwnerModuleID: "task.domain", QueryName: "tasks", OutputSchema: contract.SchemaRef{ID: "task.output", Version: 1}}}, OutputSchema: contract.SchemaRef{ID: "task.output", Version: 1}, RebuildStrategy: "consistent_snapshot"}
-	projectionStore := PublishedProjectionStore{DB: database, Dialect: db.Resolve("mysql"), Site: "tenant-a"}
-	projection := PublishedProjectionSnapshot{Definition: projectionDefinition, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, SourceID: "published_sources", SourceRevision: "task-r1", Cursor: `{"task.domain/tasks":"cursor-1"}`, AsOf: time.Date(2026, 2, 4, 0, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh, Data: []byte(`[{"id":"task-1"}]`)}
-	if err := projectionStore.Save(context.Background(), projection); err != nil {
+	projectionStore := projection.Store{DB: database, Dialect: db.Resolve("mysql"), Site: "tenant-a"}
+	snapshot := projection.Snapshot{Definition: projectionDefinition, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, SourceID: "published_sources", SourceRevision: "task-r1", Cursor: `{"task.domain/tasks":"cursor-1"}`, AsOf: time.Date(2026, 2, 4, 0, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh, Data: []byte(`[{"id":"task-1"}]`)}
+	if err = projectionStore.Save(context.Background(), snapshot); err != nil {
 		t.Fatal("save MySQL projection snapshot:", err)
 	}
-	if err := projectionStore.MarkStale(context.Background(), projectionDefinition, projection.Scope, "published_sources"); err != nil {
+	if err = projectionStore.MarkStale(context.Background(), projectionDefinition, snapshot.Scope, "published_sources"); err != nil {
 		t.Fatal("mark MySQL projection stale:", err)
 	}
-	loaded, err := projectionStore.Load(context.Background(), projectionDefinition, projection.Scope, "published_sources")
-	if err != nil || string(loaded.Data) != string(projection.Data) || loaded.Cursor != projection.Cursor || loaded.Freshness != contract.QueryStale {
+	loaded, err := projectionStore.Load(context.Background(), projectionDefinition, snapshot.Scope, "published_sources")
+	if err != nil || string(loaded.Data) != string(snapshot.Data) || loaded.Cursor != snapshot.Cursor || loaded.Freshness != contract.QueryStale {
 		t.Fatalf("MySQL retained projection = %#v, error=%v", loaded, err)
 	}
 

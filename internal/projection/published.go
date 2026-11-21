@@ -1,4 +1,4 @@
-package analytics
+package projection
 
 import (
 	"context"
@@ -16,33 +16,36 @@ import (
 
 const maxPublishedProjectionBytes = 16 << 20
 
-// PublishedProjectionStore binds projection access to one tenant database.
-type PublishedProjectionStore struct {
+// Store binds projection access to one tenant database.
+type Store struct {
 	DB      *sql.DB
 	Dialect kdb.Dialect
 	Site    string
 }
 
-func (s PublishedProjectionStore) Save(ctx context.Context, snapshot PublishedProjectionSnapshot) error {
+// Save publishes a complete provider revision for the store tenant.
+func (s Store) Save(ctx context.Context, snapshot Snapshot) error {
 	if s.Site == "" || snapshot.Site != "" && snapshot.Site != s.Site {
 		return errors.New("published projection snapshot tenant does not match its store")
 	}
 	snapshot.Site = s.Site
-	return SavePublishedProjection(ctx, s.DB, s.Dialect, snapshot)
+	return savePublished(ctx, s.DB, s.Dialect, snapshot)
 }
 
-func (s PublishedProjectionStore) MarkStale(ctx context.Context, definition contract.ProjectionDefinition, scope contract.BusinessScope, sourceID string) error {
-	return MarkPublishedProjectionStale(ctx, s.DB, s.Dialect, s.Site, definition, scope, sourceID)
+// MarkStale keeps the latest output readable and marks it stale.
+func (s Store) MarkStale(ctx context.Context, definition contract.ProjectionDefinition, scope contract.BusinessScope, sourceID string) error {
+	return markPublishedStale(ctx, s.DB, s.Dialect, s.Site, definition, scope, sourceID)
 }
 
-func (s PublishedProjectionStore) Load(ctx context.Context, definition contract.ProjectionDefinition, scope contract.BusinessScope, sourceID string) (PublishedProjectionSnapshot, error) {
-	return LoadPublishedProjection(ctx, s.DB, s.Dialect, s.Site, definition, scope, sourceID)
+// Load returns the latest retained snapshot for the source and scope.
+func (s Store) Load(ctx context.Context, definition contract.ProjectionDefinition, scope contract.BusinessScope, sourceID string) (Snapshot, error) {
+	return loadPublished(ctx, s.DB, s.Dialect, s.Site, definition, scope, sourceID)
 }
 
-// PublishedProjectionSnapshot is an immutable, provider-revision-pinned
+// Snapshot is an immutable, provider-revision-pinned
 // projection value persisted in the analytics database. It shares the tenant
 // rebuild lock with rollup backfills, so a reader never sees a partial rebuild.
-type PublishedProjectionSnapshot struct {
+type Snapshot struct {
 	Site           string
 	Definition     contract.ProjectionDefinition
 	Scope          contract.BusinessScope
@@ -54,7 +57,9 @@ type PublishedProjectionSnapshot struct {
 	Data           json.RawMessage
 }
 
-func (s PublishedProjectionSnapshot) Validate() error {
+// Validate checks that a snapshot is complete, within its size limits, and
+// matches its declared output contract.
+func (s Snapshot) Validate() error {
 	if s.Site == "" || s.Definition.ID == "" || s.Definition.OwnerModuleID == "" || s.Scope.Validate() != nil || contract.ValidateResourceBusinessScope(s.Scope, s.Definition.ScopePolicy) != nil || s.SourceID == "" || s.SourceRevision == "" || s.AsOf.IsZero() {
 		return fmt.Errorf("published projection snapshot identity is incomplete")
 	}
@@ -91,7 +96,7 @@ func (s PublishedProjectionSnapshot) Validate() error {
 	return nil
 }
 
-func (s PublishedProjectionSnapshot) key() string {
+func (s Snapshot) key() string {
 	identity := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s", s.Site, s.Definition.ID, s.Definition.OwnerModuleID, s.Scope.Kind, s.Scope.LegalEntityID, s.SourceID, s.SourceRevision)
 	digest := sha256.Sum256([]byte(identity))
 	return hex.EncodeToString(digest[:])
@@ -99,14 +104,14 @@ func (s PublishedProjectionSnapshot) key() string {
 
 // SavePublishedProjection atomically publishes a complete revision. A failed
 // save leaves the previous provider revision available to report consumers.
-func SavePublishedProjection(ctx context.Context, database *sql.DB, dialect kdb.Dialect, snapshot PublishedProjectionSnapshot) error {
+func savePublished(ctx context.Context, database *sql.DB, dialect kdb.Dialect, snapshot Snapshot) error {
 	if ctx == nil || database == nil || dialect == nil {
 		return errors.New("published projection save requires context, database, and dialect")
 	}
 	if err := snapshot.Validate(); err != nil {
 		return err
 	}
-	if err := BootstrapTables(ctx, database, dialect); err != nil {
+	if err := EnsureSchema(ctx, database, dialect); err != nil {
 		return err
 	}
 	tx, err := database.BeginTx(ctx, nil)
@@ -114,10 +119,7 @@ func SavePublishedProjection(ctx context.Context, database *sql.DB, dialect kdb.
 		return fmt.Errorf("begin published projection save: %w", err)
 	}
 	defer tx.Rollback()
-	if _, err := lockRebuildStateTx(ctx, tx, dialect, snapshot.Site); err != nil {
-		return err
-	}
-	generation, err := rebuildFenceTx(ctx, tx, dialect, snapshot.Site)
+	generation, err := lockFenceTx(ctx, tx, dialect, snapshot.Site)
 	if err != nil {
 		return err
 	}
@@ -136,11 +138,11 @@ func SavePublishedProjection(ctx context.Context, database *sql.DB, dialect kdb.
 
 // LoadPublishedProjection returns the latest authorized-scope snapshot for a
 // source. Provider unavailability does not erase retained historical output.
-func LoadPublishedProjection(ctx context.Context, database *sql.DB, dialect kdb.Dialect, site string, definition contract.ProjectionDefinition, scope contract.BusinessScope, sourceID string) (PublishedProjectionSnapshot, error) {
+func loadPublished(ctx context.Context, database *sql.DB, dialect kdb.Dialect, site string, definition contract.ProjectionDefinition, scope contract.BusinessScope, sourceID string) (Snapshot, error) {
 	if ctx == nil || database == nil || dialect == nil || site == "" || definition.Validate() != nil || scope.Validate() != nil || contract.ValidateResourceBusinessScope(scope, definition.ScopePolicy) != nil || sourceID == "" {
-		return PublishedProjectionSnapshot{}, errors.New("published projection load requires a valid tenant, definition, scope, and source")
+		return Snapshot{}, errors.New("published projection load requires a valid tenant, definition, scope, and source")
 	}
-	var snapshot PublishedProjectionSnapshot
+	var snapshot Snapshot
 	var owner, scopeKind, freshness string
 	var schemaVersion int
 	var asOf time.Time
@@ -148,14 +150,14 @@ func LoadPublishedProjection(ctx context.Context, database *sql.DB, dialect kdb.
 	query := `SELECT owner_module_id, scope_kind, legal_entity_id, source_id, source_revision, source_cursor, output_schema_id, output_schema_version, as_of, freshness, data FROM _kora_analytics_module_projection WHERE site = ? AND projection_id = ? AND scope_kind = ? AND legal_entity_id = ? AND source_id = ? ORDER BY generation DESC LIMIT 1`
 	err := database.QueryRowContext(ctx, kdb.Rebind(dialect, query), site, definition.ID, string(scope.Kind), scope.LegalEntityID, sourceID).Scan(&owner, &scopeKind, &snapshot.Scope.LegalEntityID, &snapshot.SourceID, &snapshot.SourceRevision, &snapshot.Cursor, &snapshot.Definition.OutputSchema.ID, &schemaVersion, &asOf, &freshness, &data)
 	if err != nil {
-		return PublishedProjectionSnapshot{}, err
+		return Snapshot{}, err
 	}
 	if schemaVersion < 1 {
-		return PublishedProjectionSnapshot{}, fmt.Errorf("published projection snapshot has an invalid output schema version")
+		return Snapshot{}, fmt.Errorf("published projection snapshot has an invalid output schema version")
 	}
 	snapshot.Definition.OutputSchema.Version = uint32(schemaVersion)
 	if owner != string(definition.OwnerModuleID) || scopeKind != string(scope.Kind) || snapshot.Definition.OutputSchema != definition.OutputSchema {
-		return PublishedProjectionSnapshot{}, fmt.Errorf("published projection snapshot does not match its current owner contract")
+		return Snapshot{}, fmt.Errorf("published projection snapshot does not match its current owner contract")
 	}
 	snapshot.Site = site
 	snapshot.Definition = definition
@@ -164,18 +166,18 @@ func LoadPublishedProjection(ctx context.Context, database *sql.DB, dialect kdb.
 	snapshot.Freshness = contract.QueryFreshness(freshness)
 	snapshot.Data = json.RawMessage(data)
 	if err := snapshot.Validate(); err != nil {
-		return PublishedProjectionSnapshot{}, err
+		return Snapshot{}, err
 	}
 	return snapshot, nil
 }
 
 // MarkPublishedProjectionStale preserves the most recent output while making
 // provider outages and unavailable sources visible to consumers.
-func MarkPublishedProjectionStale(ctx context.Context, database *sql.DB, dialect kdb.Dialect, site string, definition contract.ProjectionDefinition, scope contract.BusinessScope, sourceID string) error {
+func markPublishedStale(ctx context.Context, database *sql.DB, dialect kdb.Dialect, site string, definition contract.ProjectionDefinition, scope contract.BusinessScope, sourceID string) error {
 	if ctx == nil || database == nil || dialect == nil || site == "" || definition.Validate() != nil || scope.Validate() != nil || contract.ValidateResourceBusinessScope(scope, definition.ScopePolicy) != nil || sourceID == "" {
 		return errors.New("published projection stale marker requires a valid identity and scope")
 	}
-	if err := BootstrapTables(ctx, database, dialect); err != nil {
+	if err := EnsureSchema(ctx, database, dialect); err != nil {
 		return err
 	}
 	tx, err := database.BeginTx(ctx, nil)
@@ -183,10 +185,7 @@ func MarkPublishedProjectionStale(ctx context.Context, database *sql.DB, dialect
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := lockRebuildStateTx(ctx, tx, dialect, site); err != nil {
-		return err
-	}
-	generation, err := rebuildFenceTx(ctx, tx, dialect, site)
+	generation, err := lockFenceTx(ctx, tx, dialect, site)
 	if err != nil {
 		return err
 	}
@@ -194,7 +193,7 @@ func MarkPublishedProjectionStale(ctx context.Context, database *sql.DB, dialect
 	selectLatest := `SELECT source_revision FROM _kora_analytics_module_projection WHERE site = ? AND projection_id = ? AND owner_module_id = ? AND scope_kind = ? AND legal_entity_id = ? AND source_id = ? ORDER BY generation DESC LIMIT 1`
 	err = tx.QueryRowContext(ctx, kdb.Rebind(dialect, selectLatest), site, definition.ID, string(definition.OwnerModuleID), string(scope.Kind), scope.LegalEntityID, sourceID).Scan(&revision)
 	if errors.Is(err, sql.ErrNoRows) {
-		missing := PublishedProjectionSnapshot{Site: site, Definition: definition, Scope: scope, SourceID: sourceID, SourceRevision: "unavailable", AsOf: time.Now().UTC(), Freshness: contract.QueryIncomplete, Data: json.RawMessage(`[]`)}
+		missing := Snapshot{Site: site, Definition: definition, Scope: scope, SourceID: sourceID, SourceRevision: "unavailable", AsOf: time.Now().UTC(), Freshness: contract.QueryIncomplete, Data: json.RawMessage(`[]`)}
 		if validateErr := missing.Validate(); validateErr != nil {
 			return validateErr
 		}

@@ -14,6 +14,7 @@ import (
 	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/policy"
+	"github.com/asenawritescode/kora/internal/projection"
 	"github.com/gin-gonic/gin"
 )
 
@@ -71,7 +72,7 @@ func TestPublishedProjectionAnalyticsPropagatesActorRowScope(t *testing.T) {
 		t.Fatalf("assigned actor query permission was denied: status=%d", ctx.Writer.Status())
 	}
 	value, ok := ctx.Get("analytics_projection_actor_scopes")
-	scopes, cast := value.(map[string]analytics.ProjectionActorScope)
+	scopes, cast := value.(map[string]projection.ActorScope)
 	if !ok || !cast || scopes[model.Name].SubjectID != "analytics-reader" || len(scopes[model.Name].AssignedFields) != 1 || scopes[model.Name].AssignedFields[0] != "assigned_to" {
 		t.Fatalf("projection actor scope = %#v", value)
 	}

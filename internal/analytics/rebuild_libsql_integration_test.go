@@ -5,12 +5,14 @@ package analytics
 import (
 	"context"
 	"database/sql"
-	"github.com/asenawritescode/kora/internal/eventstream"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/eventstream"
+	"github.com/asenawritescode/kora/internal/projection"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/db"
@@ -52,9 +54,9 @@ func TestLibSQLRebuildCutoffAndLaterEvents(t *testing.T) {
 		OutputSchema: contract.SchemaRef{ID: "balance.output", Version: 2}, RebuildStrategy: "consistent_snapshot",
 	}
 	projectionScope := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
-	projectionStore := PublishedProjectionStore{DB: database, Dialect: dialect, Site: "tenant-a"}
+	projectionStore := projection.Store{DB: database, Dialect: dialect, Site: "tenant-a"}
 	projectionData := []byte(`[{"period":"2026-10","amount":21}]`)
-	projectionSnapshot := PublishedProjectionSnapshot{Definition: projectionDefinition, Scope: projectionScope, SourceID: "published_sources", SourceRevision: "source-r1", Cursor: `{"sales.orders/balances":"log-8"}`, AsOf: time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh, Data: projectionData}
+	projectionSnapshot := projection.Snapshot{Definition: projectionDefinition, Scope: projectionScope, SourceID: "published_sources", SourceRevision: "source-r1", Cursor: `{"sales.orders/balances":"log-8"}`, AsOf: time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh, Data: projectionData}
 	if err := projectionStore.Save(context.Background(), projectionSnapshot); err != nil {
 		t.Fatal("save complete LibSQL projection:", err)
 	}

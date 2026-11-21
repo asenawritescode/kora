@@ -147,9 +147,6 @@
   "contract::validateLocalSchemaReferences": {
    "cognitive": 31
   },
-  "internal/analytics::(*CloudRelay).Start": {
-   "cognitive": 20
-  },
   "internal/analytics::(*QueryEngine).Resolve": {
    "cognitive": 23,
    "cyclomatic": 22
@@ -197,10 +194,6 @@
   "internal/analytics::(*Worker).run": {
    "cognitive": 20
   },
-  "internal/analytics::(PublishedProjectionSnapshot).Validate": {
-   "cognitive": 19,
-   "cyclomatic": 27
-  },
   "internal/analytics::(QueryRequest).Validate": {
    "cognitive": 26,
    "cyclomatic": 28
@@ -230,9 +223,6 @@
   "internal/analytics::LoadConfig": {
    "cognitive": 26,
    "cyclomatic": 23
-  },
-  "internal/analytics::MarkPublishedProjectionStale": {
-   "cyclomatic": 18
   },
   "internal/analytics::Resolve": {
    "statements": 49
@@ -1079,6 +1069,9 @@
   "internal/cli::writeDirectoryDescriptorPages": {
    "cognitive": 27,
    "cyclomatic": 16
+  },
+  "internal/cloudrelay::(*Relay).Start": {
+   "cognitive": 20
   },
   "internal/configstore::(*ModuleStore).AdmitCapabilityAttempt": {
    "cognitive": 25,
@@ -2086,6 +2079,13 @@
   "internal/print::walkIdent": {
    "cognitive": 24,
    "cyclomatic": 18
+  },
+  "internal/projection::(Snapshot).Validate": {
+   "cognitive": 19,
+   "cyclomatic": 27
+  },
+  "internal/projection::markPublishedStale": {
+   "cyclomatic": 17
   },
   "internal/query::(*Definition).validate": {
    "cognitive": 18,

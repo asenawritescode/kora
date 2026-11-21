@@ -6,11 +6,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/asenawritescode/kora/internal/eventstream"
 	"io"
 	"net/http"
 	"sort"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/eventstream"
+	"github.com/asenawritescode/kora/internal/projection"
 
 	"github.com/gin-gonic/gin"
 
@@ -437,7 +439,7 @@ func applyProjectionActorScopes(c *gin.Context, qe *analytics.QueryEngine) {
 		return
 	}
 	if value, ok := c.Get("analytics_projection_actor_scopes"); ok {
-		if scopes, ok := value.(map[string]analytics.ProjectionActorScope); ok {
+		if scopes, ok := value.(map[string]projection.ActorScope); ok {
 			qe.ProjectionActorScopes = scopes
 		}
 	}

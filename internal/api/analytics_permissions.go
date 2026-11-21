@@ -12,6 +12,7 @@ import (
 	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/policy"
+	"github.com/asenawritescode/kora/internal/projection"
 	"github.com/gin-gonic/gin"
 )
 
@@ -113,7 +114,7 @@ func checkRelatedModelPermissions(c *gin.Context, registry *doctype.Registry, mo
 		queried[query.Model] = true
 	}
 	checked := make(map[string]bool)
-	projectionActorScopes := make(map[string]analytics.ProjectionActorScope)
+	projectionActorScopes := make(map[string]projection.ActorScope)
 	for _, model := range models {
 		if !queried[model.Name] {
 			continue
@@ -142,7 +143,7 @@ func checkRelatedModelPermissions(c *gin.Context, registry *doctype.Registry, mo
 						return false
 					}
 				}
-				projectionActorScopes[model.Name] = analytics.ProjectionActorScope{SubjectID: scope.UserID, OwnerOnly: scope.Owner, OwnerField: model.ProjectionOwnerField, AssignedFields: append([]string(nil), scope.AssignedFields...)}
+				projectionActorScopes[model.Name] = projection.ActorScope{SubjectID: scope.UserID, OwnerOnly: scope.Owner, OwnerField: model.ProjectionOwnerField, AssignedFields: append([]string(nil), scope.AssignedFields...)}
 			}
 			continue
 		}

@@ -64,7 +64,6 @@ contract/version.go::NewConflictRecord
 contract/version.go::VersionMismatchError.Error
 contract/version.go::itoa64
 internal/analytics/backfill.go::backfillMetric
-internal/analytics/cloud_relay.go::CloudRelay.ProductEventsDropped
 internal/analytics/model.go::BuildDataPointCatalog
 internal/analytics/query.go::QueryEngine.CachedResolve
 internal/analytics/query.go::QueryEngine.InvalidateCache
@@ -127,6 +126,7 @@ internal/auth/session.go::NewSessionManager
 internal/auth/session.go::TenantMagicLinkURL
 internal/auth/session.go::newSessionManager
 internal/auth/site.go::SiteGuard.Close
+internal/cloudrelay/relay.go::Relay.ProductEventsDropped
 internal/db/dialect.go::MySQL
 internal/dbaccess/admission.go::NewAdmission
 internal/disposabledb/disposabledb.go::Open

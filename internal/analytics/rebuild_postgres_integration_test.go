@@ -6,7 +6,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/asenawritescode/kora/internal/eventstream"
 	"net"
 	"net/netip"
 	"net/url"
@@ -14,6 +13,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/eventstream"
+	"github.com/asenawritescode/kora/internal/projection"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/db"
@@ -71,15 +73,16 @@ func TestPostgresRebuildCutoffSerializesWithFlush(t *testing.T) {
 		t.Fatal("bootstrap analytics schema:", err)
 	}
 	projectionDefinition := contract.ProjectionDefinition{ID: "task_snapshot", OwnerModuleID: "analytics.task", ScopePolicy: contract.ScopeTenantShared, FactKey: "id", AllowedFields: []string{"id"}, Sources: []contract.ProjectionSource{{OwnerModuleID: "task.domain", QueryName: "tasks", OutputSchema: contract.SchemaRef{ID: "task.output", Version: 1}}}, OutputSchema: contract.SchemaRef{ID: "task.output", Version: 1}, RebuildStrategy: "consistent_snapshot"}
-	projection := PublishedProjectionSnapshot{Site: "tenant-a", Definition: projectionDefinition, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, SourceID: "published_sources", SourceRevision: "task-r1", Cursor: `{"task.domain/tasks":"cursor-1"}`, AsOf: time.Date(2026, 2, 4, 0, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh, Data: []byte(`[{"id":"task-1"}]`)}
-	if err := SavePublishedProjection(context.Background(), database, dialect, projection); err != nil {
+	projectionSnapshot := projection.Snapshot{Site: "tenant-a", Definition: projectionDefinition, Scope: contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindTenant}, SourceID: "published_sources", SourceRevision: "task-r1", Cursor: `{"task.domain/tasks":"cursor-1"}`, AsOf: time.Date(2026, 2, 4, 0, 0, 0, 0, time.UTC), Freshness: contract.QueryFresh, Data: []byte(`[{"id":"task-1"}]`)}
+	projectionStore := projection.Store{DB: database, Dialect: dialect, Site: "tenant-a"}
+	if err = projectionStore.Save(context.Background(), projectionSnapshot); err != nil {
 		t.Fatal("save PostgreSQL projection snapshot:", err)
 	}
-	if err := MarkPublishedProjectionStale(context.Background(), database, dialect, "tenant-a", projectionDefinition, projection.Scope, "published_sources"); err != nil {
+	if err = projectionStore.MarkStale(context.Background(), projectionDefinition, projectionSnapshot.Scope, "published_sources"); err != nil {
 		t.Fatal("mark PostgreSQL projection stale:", err)
 	}
-	loadedProjection, err := LoadPublishedProjection(context.Background(), database, dialect, "tenant-a", projectionDefinition, projection.Scope, "published_sources")
-	if err != nil || string(loadedProjection.Data) != string(projection.Data) || loadedProjection.Cursor != projection.Cursor || loadedProjection.Freshness != contract.QueryStale {
+	loadedProjection, err := projectionStore.Load(context.Background(), projectionDefinition, projectionSnapshot.Scope, "published_sources")
+	if err != nil || string(loadedProjection.Data) != string(projectionSnapshot.Data) || loadedProjection.Cursor != projectionSnapshot.Cursor || loadedProjection.Freshness != contract.QueryStale {
 		t.Fatalf("PostgreSQL retained projection = %#v, error=%v", loadedProjection, err)
 	}
 	for _, query := range []string{

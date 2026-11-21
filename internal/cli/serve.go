@@ -3,12 +3,14 @@ package cli
 import (
 	"context"
 	"fmt"
-	"github.com/asenawritescode/kora/internal/eventbus"
 	"log/slog"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/cloudrelay"
+	"github.com/asenawritescode/kora/internal/eventbus"
 
 	"github.com/asenawritescode/kora/internal/analytics"
 	purchasingengine "github.com/asenawritescode/kora/internal/application/purchasing/engineadapter"
@@ -430,7 +432,7 @@ func runServe() error {
 		config := natsprovider.FromEnv()
 		natsConfig = &config
 	}
-	cloudRelayConfig := analytics.LoadCloudRelayConfig()
+	cloudRelayConfig := cloudrelay.LoadConfig()
 	cloudUsageConfig, err := usage.LoadConfig(os.Getenv)
 	if err != nil {
 		return fmt.Errorf("configure Cloud usage reporting: %w", err)

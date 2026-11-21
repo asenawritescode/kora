@@ -4,10 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/asenawritescode/kora/internal/eventstream"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/eventstream"
+	"github.com/asenawritescode/kora/internal/projection"
 
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/internal/db"
@@ -25,7 +27,7 @@ type QueryEngine struct {
 	SiteName              string
 	Dialect               kdb.Dialect
 	BusinessScope         contract.BusinessScope
-	ProjectionActorScopes map[string]ProjectionActorScope
+	ProjectionActorScopes map[string]projection.ActorScope
 	cache                 sync.Map // key string → *cacheEntry
 }
 
