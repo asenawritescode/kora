@@ -1,0 +1,9 @@
+name: register_entries_count
+label: "Register entries"
+type: simple
+model: "Class Register Entry"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Register entries from the Class Register Entry records (count)."

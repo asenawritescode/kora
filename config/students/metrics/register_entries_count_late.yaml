@@ -1,0 +1,13 @@
+name: register_entries_count_late
+label: "Register entries: Late"
+type: simple
+model: "Class Register Entry"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Late"
+time: business_date
+format: number
+description: "Register entries: Late from the Class Register Entry records (count)."

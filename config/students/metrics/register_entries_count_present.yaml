@@ -1,0 +1,13 @@
+name: register_entries_count_present
+label: "Register entries: Present"
+type: simple
+model: "Class Register Entry"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Present"
+time: business_date
+format: number
+description: "Register entries: Present from the Class Register Entry records (count)."

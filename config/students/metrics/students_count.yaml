@@ -1,0 +1,9 @@
+name: students_count
+label: "Students"
+type: simple
+model: "Student"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Students from the Student records (count)."

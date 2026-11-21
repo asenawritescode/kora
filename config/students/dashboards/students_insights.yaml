@@ -1,0 +1,14 @@
+name: students_insights
+label: "Students insights"
+description: "Figures and charts that reproduce the students overview report."
+default_range: last_30_days
+tiles:
+  - metric: register_entries_count_present
+  - metric: register_entries_count_absent
+  - metric: register_entries_count_late
+charts:
+  - id: students_by_class
+    title: "Students by class"
+    kind: bar
+    metrics: [students_count]
+    by: class_group
