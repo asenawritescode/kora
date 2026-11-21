@@ -459,7 +459,7 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 	weekBeforeQuery := fmt.Sprintf(`{"metrics":["sales"],"from":%q,"to":%q,"grain":"range"}`,
 		d.weekBeforeMon.Format(time.DateOnly), d.weekBeforeMon.AddDate(0, 0, 6).Format(time.DateOnly))
 	clarify := `{"question":"Which sales do you mean?","choices":[{"label":"Number of sales","hint":"How many sales were made"},{"label":"Sales total","hint":"The base total of the sales"}]}`
-	productQuery := `{"measures":[{"record_type":"Sale","agg":"sum","field":"line_total","filters":[{"field":"status","op":"in","value":["Paid","Partially Paid","Awaiting Payment"]}]}],"dimensions":["items.product"],"top":5,"period":{"preset":"last_week"},"grain":"range"}`
+	productQuery := `{"metrics":["items_sold"],"dimensions":["items.product"],"top":5,"period":{"preset":"last_week"},"grain":"range"}`
 	drill := fmt.Sprintf(`{"metric":"sales","from":%q,"to":%q}`, d.lastMon.Format(time.DateOnly), d.lastMon.AddDate(0, 0, 6).Format(time.DateOnly))
 	const wrongOnce = "Sales last week were KES 1,821."
 	const wrongAgain = "Sales last week were KES 1,822."
@@ -495,13 +495,13 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 			message: "What were my top 5 products last week?",
 			steps: []modelStep{
 				{tool: "query_metrics", args: productQuery},
-				{content: "Bread led last week with 900."},
+				{content: "Soda, Juice and Bread each sold 3 last week."},
 			},
 			check: func(t *testing.T, got ai.ChatResponse, _ []string) {
 				card := requireCards(t, got, 1)[0]
-				want := []string{"Soda KES 450", "Juice KES 470", "Bread KES 900"}
-				if card.Kind != "table" || card.Verified || !sameSet(rowValues(card), want) {
-					t.Fatalf("rows = %v (kind %s verified %v), want %v unchecked", rowValues(card), card.Kind, card.Verified, want)
+				want := []string{"Soda 3", "Juice 3", "Bread 3"}
+				if card.Kind != "table" || !card.Verified || !sameSet(rowValues(card), want) {
+					t.Fatalf("rows = %v (kind %s verified %v), want %v verified", rowValues(card), card.Kind, card.Verified, want)
 				}
 			},
 		}}},
@@ -523,7 +523,7 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 			steps: []modelStep{
 				{tool: "query_metrics", args: `{"metrics":["sales"],"dimensions":["items.product"],"period":{"preset":"last_week"},"grain":"range"}`},
 				{tool: "query_metrics", args: productQuery},
-				{content: "A sale total cannot be split by product, so these are the line sales by product: Bread 900, Juice 470, Soda 450."},
+				{content: "A sale total cannot be split by product, so these are the quantities sold by product: Soda 3, Juice 3, Bread 3."},
 			},
 			check: func(t *testing.T, got ai.ChatResponse, requests []string) {
 				results := toolResults(t, requests[1])
@@ -531,9 +531,9 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 					t.Fatalf("refusal = %q; want the typed refusal with no rows", results)
 				}
 				card := requireCards(t, got, 1)[0]
-				want := []string{"Soda KES 450", "Juice KES 470", "Bread KES 900"}
-				if card.Kind != "table" || !sameSet(rowValues(card), want) {
-					t.Fatalf("rows = %v, want the line measure's %v", rowValues(card), want)
+				want := []string{"Soda 3", "Juice 3", "Bread 3"}
+				if card.Kind != "table" || !card.Verified || !sameSet(rowValues(card), want) {
+					t.Fatalf("rows = %v, want the verified quantities %v", rowValues(card), want)
 				}
 			},
 		}}},
