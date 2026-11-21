@@ -200,6 +200,7 @@ internal/metrics/compare.go::Engine.previousRows
 internal/metrics/compare.go::aggregate.fold
 internal/metrics/compare.go::keptGroups
 internal/metrics/compare.go::plan.previousRange
+internal/metrics/compare.go::plan.rankValue
 internal/metrics/compare.go::plan.topKeys
 internal/metrics/compare.go::rankedGroup.compare
 internal/metrics/formula.go::formulaNode.bind
@@ -208,12 +209,14 @@ internal/metrics/plan.go::checkShape
 internal/metrics/plan.go::plan.addGrouping
 internal/metrics/plan.go::plan.fitsSummary
 internal/metrics/plan.go::plan.metricNames
+internal/metrics/plan.go::plan.needsOpening
 internal/metrics/plan.go::planQuery
 internal/metrics/plan.go::planner.addSeries
 internal/metrics/plan.go::planner.compile
 internal/metrics/plan.go::planner.componentSeries
 internal/metrics/plan.go::planner.derived
 internal/metrics/plan.go::planner.output
+internal/metrics/plan.go::series.running
 internal/metrics/query.go::NewCatalog
 internal/metrics/query.go::bucketStarts
 internal/metrics/query.go::periodStart
@@ -222,7 +225,9 @@ internal/metrics/query.go::toDate
 internal/metrics/query.go::toTime
 internal/metrics/run.go::Engine.Query
 internal/metrics/run.go::Engine.run
+internal/metrics/run.go::Engine.sumRows
 internal/metrics/run.go::bucketSums.add
+internal/metrics/run.go::bucketSums.at
 internal/metrics/run.go::dateOf
 internal/metrics/run.go::nullStringDests
 internal/metrics/run.go::parseDate
@@ -231,6 +236,7 @@ internal/metrics/run.go::plan.addRow
 internal/metrics/run.go::plan.keys
 internal/metrics/run.go::plan.read
 internal/metrics/run.go::plan.rows
+internal/metrics/run.go::plan.settle
 internal/metrics/run.go::plan.sourceName
 internal/metrics/run.go::plan.values
 internal/metrics/sql.go::plan.build
@@ -242,6 +248,7 @@ internal/metrics/sql.go::plan.factsPart
 internal/metrics/sql.go::plan.factsSQL
 internal/metrics/sql.go::plan.filterConds
 internal/metrics/sql.go::plan.predicateSQL
+internal/metrics/sql.go::plan.rangeConds
 internal/metrics/sql.go::plan.scopeConds
 internal/metrics/sql.go::plan.summarySQL
 internal/metrics/sql.go::plan.summaryTable
