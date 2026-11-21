@@ -8,3 +8,4 @@ measure:
 time: business_date
 format: number
 description: Stock of each product after all movements up to the end of the period.
+verified: true

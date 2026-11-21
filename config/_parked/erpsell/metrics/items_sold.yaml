@@ -13,3 +13,4 @@ time: business_date
 good: up
 format: number
 description: Quantity of items on sales that are awaiting payment, part paid or paid.
+verified: true

@@ -13,3 +13,4 @@ time: business_date
 good: down
 format: currency
 description: Cost of the goods on sales. Returns carry negative cost.
+verified: true

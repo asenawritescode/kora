@@ -1,7 +1,7 @@
 name: shop_insights
-label: Insights
-description: Sales, profit and stock for the shop.
-default_range: last_30_days
+label: Shop insights
+description: Sales and profit for the shop.
+default_range: today
 tiles:
   - metric: net_sales
     compare: previous_period
@@ -36,9 +36,3 @@ charts:
     top: 10
     compare: none
     drill: true
-  - id: stock_adjustments
-    title: Stock adjustments
-    kind: table
-    metrics: [stock_adjusted]
-    by: reason
-    compare: none

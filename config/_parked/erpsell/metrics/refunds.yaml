@@ -13,3 +13,4 @@ time: business_date
 good: down
 format: currency
 description: Base-currency total of return sales.
+verified: true

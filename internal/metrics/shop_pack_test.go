@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/asenawritescode/kora/internal/doctype"
@@ -20,22 +21,26 @@ func erpsellDoctypes(t *testing.T) []*doctype.DocType {
 	return dts
 }
 
-// The selling pack ships its metrics and the shop_insights dashboard; both load and validate together.
+// The selling pack ships its metrics, the Shop insights and Stock insights dashboards; all load and validate together.
 func TestErpsellPackMetricsAndDashboardsValidate(t *testing.T) {
 	dts := erpsellDoctypes(t)
 	raw, dashRaw, err := LoadPack(erpsellPackDir, dts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(raw) != 10 || len(dashRaw) != 1 {
-		t.Fatalf("selling pack carries %d metrics and %d dashboards; want 10 and 1", len(raw), len(dashRaw))
+	if len(raw) != 10 || len(dashRaw) != 2 {
+		t.Fatalf("selling pack carries %d metrics and %d dashboards; want 10 and 2", len(raw), len(dashRaw))
 	}
 	dashboards, err := ParseDashboardDirectory(erpsellPackDir + "/dashboards")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(dashboards) != 1 || dashboards[0].Name != "shop_insights" {
-		t.Fatalf("dashboards = %+v; want shop_insights", dashboards)
+	var names []string
+	for _, d := range dashboards {
+		names = append(names, d.Name)
+	}
+	if !slices.Equal(names, []string{"shop_insights", "stock_insights"}) {
+		t.Fatalf("dashboards = %q; want shop_insights and stock_insights", names)
 	}
 }
 

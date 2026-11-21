@@ -13,3 +13,4 @@ time: business_date
 good: up
 format: currency
 description: Base-currency total of sales that are awaiting payment, part paid or paid.
+verified: true

@@ -6,3 +6,4 @@ time: business_date
 good: up
 format: currency
 description: Sales minus refunds.
+verified: true

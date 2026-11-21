@@ -7,3 +7,4 @@ time: business_date
 good: up
 format: currency
 description: Sales divided by receipts.
+verified: true
