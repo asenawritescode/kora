@@ -39,11 +39,8 @@ type metricsAPI struct {
 //
 // It returns the metrics API, which the AI chat reads through the same handlers.
 func registerMetricsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, dialect db.Dialect) metricsAPI {
-	defs := newVersionCache[[]metrics.Metric]()
 	dashboardDefs := newVersionCache[[]metrics.Dashboard]()
-	api := metricsAPI{registry: registry, siteDB: siteDB, dialect: dialect, defs: func(c *gin.Context) ([]metrics.Metric, error) {
-		return cachedConfigValue(c, defs, getSiteDB(c, siteDB), siteDialectFromContext(c, dialect), readMetricDefs)
-	}}
+	api := newMetricsAPI(registry, siteDB, dialect)
 	api.mount(apiGroup.Group("/metrics"))
 	dashboardsAPI{metricsAPI: api, loadDefs: func(c *gin.Context) ([]metrics.Dashboard, error) {
 		return cachedConfigValue(c, dashboardDefs, getSiteDB(c, siteDB), siteDialectFromContext(c, dialect), readDashboardDefs)
@@ -113,6 +110,15 @@ func activeConfigVersion(database *sql.DB, dialect db.Dialect, site string) (int
 		return 0, nil
 	}
 	return version, err
+}
+
+// newMetricsAPI is the metrics API of one process. Its definitions are cached per site and configuration version,
+// so one value serves every request for the site.
+func newMetricsAPI(registry *doctype.Registry, siteDB *sql.DB, dialect db.Dialect) metricsAPI {
+	defs := newVersionCache[[]metrics.Metric]()
+	return metricsAPI{registry: registry, siteDB: siteDB, dialect: dialect, defs: func(c *gin.Context) ([]metrics.Metric, error) {
+		return cachedConfigValue(c, defs, getSiteDB(c, siteDB), siteDialectFromContext(c, dialect), readMetricDefs)
+	}}
 }
 
 // mount binds the metric routes under group.
