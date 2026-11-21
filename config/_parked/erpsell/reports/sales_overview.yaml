@@ -16,12 +16,13 @@ queries:
     dimensions: [status]
   - id: profit_by_day
     model: sale
-    measures: [base_total_sum, cost_total_sum, profit_sum]
+    measures: [cost_total_sum, profit_sum]
     dimensions: [sale_date]
+    # Returns carry negative cost and profit, so a refund takes its profit back.
     filters:
       - field: status
         operator: in
-        values: [Awaiting Payment, Partially Paid, Paid]
+        values: [Awaiting Payment, Partially Paid, Paid, Return]
 visuals:
   - id: profit_trend
     type: bar

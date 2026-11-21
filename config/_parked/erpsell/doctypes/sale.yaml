@@ -116,12 +116,12 @@ fields:
   - fieldname: cost_total
     fieldtype: Currency
     label: Cost of goods
-    computed: "SUM(items.line_cost)"
+    computed: '(if (== status "Return") (- 0 (sum "items" "line_cost")) (sum "items" "line_cost"))'
     read_only: true
   - fieldname: profit
     fieldtype: Currency
     label: Profit
-    computed: "SUM(items.line_profit)"
+    computed: '(if (== status "Return") (- 0 (sum "items" "line_profit")) (sum "items" "line_profit"))'
     read_only: true
   - fieldname: discount_amount
     fieldtype: Currency
