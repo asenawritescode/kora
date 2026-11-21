@@ -86,7 +86,8 @@ func (p plan) factsAggregate(d db.Dialect, f string, s series, args *[]any) stri
 	}
 	// count_distinct: an empty value is not a value, so it is not counted.
 	conds := append([]predicate{{field: s.column, op: "!=", value: ""}}, s.conds...)
-	return "COUNT(DISTINCT " + p.caseWhen(d, f, conds, f+d.QuoteIdent(s.column), args) + ")"
+	// NULL, not 0, is the else branch: Postgres rejects a CASE that mixes a text value with an integer.
+	return "COUNT(DISTINCT CASE WHEN " + p.condition(d, f, conds, args) + " THEN " + f + d.QuoteIdent(s.column) + " ELSE NULL END)"
 }
 
 // factsPart selects the rows of one fact table that fall in the query's scope and range.
@@ -168,11 +169,16 @@ func (p plan) withConds(d db.Dialect, prefix string, conds []predicate, value st
 
 // caseWhen renders CASE WHEN conds THEN value ELSE 0 END, appending the conditions' arguments.
 func (p plan) caseWhen(d db.Dialect, prefix string, conds []predicate, value string, args *[]any) string {
+	return "CASE WHEN " + p.condition(d, prefix, conds, args) + " THEN " + value + " ELSE 0 END"
+}
+
+// condition renders conds joined with AND, appending their arguments.
+func (p plan) condition(d db.Dialect, prefix string, conds []predicate, args *[]any) string {
 	parts := make([]string, len(conds))
 	for i, c := range conds {
 		parts[i] = p.predicateSQL(d, prefix, c, args)
 	}
-	return "CASE WHEN " + strings.Join(parts, " AND ") + " THEN " + value + " ELSE 0 END"
+	return strings.Join(parts, " AND ")
 }
 
 // predicateSQL renders one comparison. The operator was checked against a whitelist when planned.

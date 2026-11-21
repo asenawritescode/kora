@@ -56,29 +56,76 @@ type MetricFilter struct {
 }
 
 // MetricQueryRequest asks for metrics over an inclusive range of business dates. Grain is day, week,
-// month or range; range returns one bucket for the whole range, keyed by From.
+// month or range; range returns one bucket for the whole range, keyed by From. Measures ask for
+// unsaved, unverified measures of a record type, beside the named metrics.
 //
 //contract:wire
 type MetricQueryRequest struct {
-	Metrics    []string       `json:"metrics"`
-	Dimensions []string       `json:"dimensions,omitempty"`
+	Metrics    []string             `json:"metrics"`
+	Measures   []MetricAdHocMeasure `json:"measures,omitempty"`
+	Dimensions []string             `json:"dimensions,omitempty"`
+	Filters    []MetricFilter       `json:"filters,omitempty"`
+	From       string               `json:"from"`
+	To         string               `json:"to"`
+	Grain      string               `json:"grain"`
+	Compare    string               `json:"compare,omitempty"`
+	Top        int                  `json:"top,omitempty"`
+}
+
+// MetricAdHocMeasure is one measure of a record type asked for without a saved metric: a count, a sum
+// of a measure field, or a count_distinct of a dimension field, optionally filtered.
+//
+//contract:wire
+type MetricAdHocMeasure struct {
+	RecordType string         `json:"record_type"`
+	Agg        string         `json:"agg"`
+	Field      string         `json:"field,omitempty"`
 	Filters    []MetricFilter `json:"filters,omitempty"`
-	From       string         `json:"from"`
-	To         string         `json:"to"`
-	Grain      string         `json:"grain"`
-	Compare    string         `json:"compare,omitempty"`
-	Top        int            `json:"top,omitempty"`
 }
 
 // MetricQueryResult holds every bucket of every group. A null value is a ratio or derived metric
-// with no value for that bucket, never zero.
+// with no value for that bucket, never zero. Labels names each unsaved measure of the request.
 //
 //contract:wire
 type MetricQueryResult struct {
-	Metrics    []string    `json:"metrics"`
-	Dimensions []string    `json:"dimensions"`
-	Rows       []MetricRow `json:"rows"`
-	Previous   []MetricRow `json:"previous,omitempty"`
+	Metrics    []string          `json:"metrics"`
+	Dimensions []string          `json:"dimensions"`
+	Rows       []MetricRow       `json:"rows"`
+	Previous   []MetricRow       `json:"previous,omitempty"`
+	Labels     map[string]string `json:"labels,omitempty"`
+}
+
+// ExploreRecordType is one record type a question can read, with the measures and dimensions it offers.
+// Every record type offers a count.
+//
+//contract:wire
+type ExploreRecordType struct {
+	RecordType  string             `json:"record_type"`
+	Label       string             `json:"label"`
+	Description string             `json:"description,omitempty"`
+	TimeField   string             `json:"time_field"`
+	Measures    []ExploreMeasure   `json:"measures"`
+	Dimensions  []ExploreDimension `json:"dimensions"`
+}
+
+// ExploreMeasure is one measure a question can ask for: its aggregate, and the field when it has one.
+//
+//contract:wire
+type ExploreMeasure struct {
+	Key    string `json:"key"`
+	Agg    string `json:"agg"`
+	Field  string `json:"field,omitempty"`
+	Label  string `json:"label"`
+	Format string `json:"format,omitempty"`
+}
+
+// ExploreDimension is one category a question can group by.
+//
+//contract:wire
+type ExploreDimension struct {
+	Path  string `json:"path"`
+	Label string `json:"label"`
+	Kind  string `json:"kind"`
 }
 
 // MetricRow is one bucket of one group. Values follow the result's metrics: each entry is a decimal

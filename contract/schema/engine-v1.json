@@ -878,6 +878,89 @@
       ],
       "type": "object"
     },
+    "ExploreDimension": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "path"
+      ],
+      "type": "object"
+    },
+    "ExploreMeasure": {
+      "additionalProperties": false,
+      "properties": {
+        "agg": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agg",
+        "key",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ExploreRecordType": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "dimensions": {
+          "items": {
+            "$ref": "#/$defs/ExploreDimension"
+          },
+          "type": "array"
+        },
+        "label": {
+          "type": "string"
+        },
+        "measures": {
+          "items": {
+            "$ref": "#/$defs/ExploreMeasure"
+          },
+          "type": "array"
+        },
+        "record_type": {
+          "type": "string"
+        },
+        "time_field": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dimensions",
+        "label",
+        "measures",
+        "record_type",
+        "time_field"
+      ],
+      "type": "object"
+    },
     "FieldHint": {
       "additionalProperties": false,
       "properties": {
@@ -1069,6 +1152,31 @@
       ],
       "type": "object"
     },
+    "MetricAdHocMeasure": {
+      "additionalProperties": false,
+      "properties": {
+        "agg": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "filters": {
+          "items": {
+            "$ref": "#/$defs/MetricFilter"
+          },
+          "type": "array"
+        },
+        "record_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agg",
+        "record_type"
+      ],
+      "type": "object"
+    },
     "MetricDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -1231,6 +1339,12 @@
         "grain": {
           "type": "string"
         },
+        "measures": {
+          "items": {
+            "$ref": "#/$defs/MetricAdHocMeasure"
+          },
+          "type": "array"
+        },
         "metrics": {
           "items": {
             "type": "string"
@@ -1260,6 +1374,12 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
         },
         "metrics": {
           "items": {
@@ -3267,6 +3387,89 @@
       ],
       "type": "object"
     },
+    "ExploreDimension": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "path"
+      ],
+      "type": "object"
+    },
+    "ExploreMeasure": {
+      "additionalProperties": false,
+      "properties": {
+        "agg": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agg",
+        "key",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ExploreRecordType": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "dimensions": {
+          "items": {
+            "$ref": "#/$defs/ExploreDimension"
+          },
+          "type": "array"
+        },
+        "label": {
+          "type": "string"
+        },
+        "measures": {
+          "items": {
+            "$ref": "#/$defs/ExploreMeasure"
+          },
+          "type": "array"
+        },
+        "record_type": {
+          "type": "string"
+        },
+        "time_field": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dimensions",
+        "label",
+        "measures",
+        "record_type",
+        "time_field"
+      ],
+      "type": "object"
+    },
     "FieldHint": {
       "additionalProperties": false,
       "properties": {
@@ -3434,6 +3637,31 @@
       ],
       "type": "object"
     },
+    "MetricAdHocMeasure": {
+      "additionalProperties": false,
+      "properties": {
+        "agg": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "filters": {
+          "items": {
+            "$ref": "#/$defs/MetricFilter"
+          },
+          "type": "array"
+        },
+        "record_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agg",
+        "record_type"
+      ],
+      "type": "object"
+    },
     "MetricDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -3596,6 +3824,12 @@
         "grain": {
           "type": "string"
         },
+        "measures": {
+          "items": {
+            "$ref": "#/$defs/MetricAdHocMeasure"
+          },
+          "type": "array"
+        },
         "metrics": {
           "items": {
             "type": "string"
@@ -3625,6 +3859,12 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
         },
         "metrics": {
           "items": {

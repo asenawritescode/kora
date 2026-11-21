@@ -45,6 +45,7 @@ func registerMetricsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry
 	dashboardsAPI{metricsAPI: api, loadDefs: func(c *gin.Context) ([]metrics.Dashboard, error) {
 		return cachedConfigValue(c, dashboardDefs, getSiteDB(c, siteDB), siteDialectFromContext(c, dialect), readDashboardDefs)
 	}}.mount(apiGroup.Group("/dashboards"))
+	registerExploreRoutes(apiGroup, registry)
 }
 
 // versionCache keeps each site's parsed configuration with the version it came from. A request reads only
@@ -274,6 +275,12 @@ func (m metricsAPI) query(c *gin.Context) {
 		internalError(c, "loading metric definitions", err)
 		return
 	}
+	cat, adHoc, err := withAdHocMeasures(cat, req.Measures)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "metrics.query_invalid", err.Error(), nil)
+		return
+	}
+	q.Metrics = append(q.Metrics, adHoc...)
 	ms, refusal := m.authorizeQuery(c, cat, &q)
 	if refusal != nil {
 		writeError(c, refusal.status, refusal.code, refusal.message, nil)
@@ -296,8 +303,10 @@ func (m metricsAPI) query(c *gin.Context) {
 		metricsRunError(c, "reading metric source sequence", err)
 		return
 	}
+	out := resultOf(res)
+	out.Labels = adHocLabels(cat, adHoc)
 	c.JSON(http.StatusOK, metricsEnvelope{
-		Data: resultOf(res),
+		Data: out,
 		Meta: contract.MetricsMeta{AsOf: time.Now().UTC().Format(time.RFC3339), Tier: "S", SourceSequence: seq},
 	})
 }
@@ -435,20 +444,54 @@ func queryFromContract(req contract.MetricQueryRequest) (metrics.Query, error) {
 	if err != nil {
 		return metrics.Query{}, err
 	}
-	filters := make([]metrics.Filter, 0, len(req.Filters))
-	for _, f := range req.Filters {
-		var value any
-		if len(f.Value) > 0 {
-			if err := json.Unmarshal(f.Value, &value); err != nil {
-				return metrics.Query{}, fmt.Errorf("filter on %q has an invalid value: %w", f.Field, err)
-			}
-		}
-		filters = append(filters, metrics.Filter{Field: f.Field, Op: f.Op, Value: value})
+	filters, err := filtersFromContract(req.Filters)
+	if err != nil {
+		return metrics.Query{}, err
 	}
 	return metrics.Query{
 		Metrics: req.Metrics, Dimensions: req.Dimensions, Filters: filters, From: from, To: to,
 		Grain: metrics.Grain(req.Grain), Compare: metrics.Compare(req.Compare), Top: req.Top,
 	}, nil
+}
+
+// filtersFromContract decodes wire filters, whose values are JSON scalars or arrays.
+func filtersFromContract(in []contract.MetricFilter) ([]metrics.Filter, error) {
+	filters := make([]metrics.Filter, 0, len(in))
+	for _, f := range in {
+		var value any
+		if len(f.Value) > 0 {
+			if err := json.Unmarshal(f.Value, &value); err != nil {
+				return nil, fmt.Errorf("filter on %q has an invalid value: %w", f.Field, err)
+			}
+		}
+		filters = append(filters, metrics.Filter{Field: f.Field, Op: f.Op, Value: value})
+	}
+	return filters, nil
+}
+
+// withAdHocMeasures adds the request's unsaved measures to the catalog and returns their metric names.
+func withAdHocMeasures(cat metrics.Catalog, measures []contract.MetricAdHocMeasure) (metrics.Catalog, []string, error) {
+	adHoc := make([]metrics.AdHoc, 0, len(measures))
+	for _, a := range measures {
+		filters, err := filtersFromContract(a.Filters)
+		if err != nil {
+			return metrics.Catalog{}, nil, err
+		}
+		adHoc = append(adHoc, metrics.AdHoc{Model: a.RecordType, Agg: a.Agg, Field: a.Field, Filters: filters})
+	}
+	return cat.WithAdHoc(adHoc)
+}
+
+// adHocLabels maps each unsaved measure's name to its label; nil when the query has none.
+func adHocLabels(cat metrics.Catalog, names []string) map[string]string {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(names))
+	for _, name := range names {
+		out[name] = cat.Metrics[name].Label
+	}
+	return out
 }
 
 // parseMetricRange reads an inclusive range of business dates written YYYY-MM-DD.
