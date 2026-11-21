@@ -674,7 +674,7 @@
    "statements": 78
   },
   "internal/api::RegisterRoutesOnGroup": {
-   "statements": 79
+   "statements": 73
   },
   "internal/api::RegisterSystemRoutes": {
    "statements": 41
