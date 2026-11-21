@@ -1088,7 +1088,7 @@ func (d *DocType) validateNamingSeries() error {
 }
 
 // validateQuantityEffects checks every record-level quantity effect against the
-// record types it names, so a typo cannot leave stock silently unchanged.
+// record types it names, so a typo cannot leave the target quantity silently unchanged.
 func validateQuantityEffects(doctypes []*DocType, dtMap map[string]*DocType) []CrossFileError {
 	var errs []CrossFileError
 	bad := func(dt *DocType, field, message string) {
@@ -1105,7 +1105,7 @@ func validateQuantityEffects(doctypes []*DocType, dtMap map[string]*DocType) []C
 func validateQuantityEffect(dt *DocType, dtMap map[string]*DocType, bad func(*DocType, string, string)) {
 	q := dt.QuantityEffect
 	if dt.IsSubmittable {
-		bad(dt, "quantity_effect", "quantity_effect applies when the record is created, so it cannot be used on a submittable record (stock would change on save, not on submit)")
+		bad(dt, "quantity_effect", "quantity_effect applies when the record is created, so it cannot be used on a submittable record (the target quantity would change on save, not on submit)")
 	}
 	if q.Direction != "" && q.Direction != "increase" && q.Direction != "decrease" {
 		bad(dt, "direction", fmt.Sprintf("quantity_effect direction %q must be increase or decrease", q.Direction))

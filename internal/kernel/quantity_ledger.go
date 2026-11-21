@@ -14,7 +14,7 @@ import (
 // ledger, and it is written by the same kernel path, so a replay that returns
 // the stored result writes nothing again.
 
-// moveCause is the record whose save moved stock: its type, its name, and the
+// moveCause is the record whose save moved a target quantity: its type, its name, and the
 // reason the ledger shows for the move.
 type moveCause struct {
 	dt     *doctype.DocType
@@ -34,9 +34,9 @@ func ledgerReason(effect *doctype.QuantityEffect, doc *doctype.Document) string 
 	return ""
 }
 
-// appendLedger writes one ledger row for a move of change to product, which
+// appendLedger writes one ledger row for a move of change to a target record, which
 // leaves the target at balance. It does nothing for an effect without a ledger.
-func (w effectWriter) appendLedger(cause moveCause, product string, change, balance float64) *contract.Error {
+func (w effectWriter) appendLedger(cause moveCause, targetName string, change, balance float64) *contract.Error {
 	ledgerConfig := cause.dt.QuantityEffect.Ledger
 	if ledgerConfig == nil {
 		return nil
@@ -46,7 +46,7 @@ func (w effectWriter) appendLedger(cause moveCause, product string, change, bala
 		return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("quantity_effect ledger doctype %q does not exist", ledgerConfig.Doctype))
 	}
 	row := doctype.NewDocument(ledger.Name)
-	row.Set(ledgerConfig.TargetField, product)
+	row.Set(ledgerConfig.TargetField, targetName)
 	row.Set(ledgerConfig.ChangeField, change)
 	row.Set(ledgerConfig.BalanceField, balance)
 	row.Set(ledgerConfig.SourceDoctypeField, cause.dt.Name)
@@ -87,12 +87,12 @@ func (m *mutation) effectLedger(b *bundle) *contract.Error {
 	w := m.effects()
 	cause := moveCause{dt: sourceDT, name: source.Name, reason: ledgerReason(effect, source)}
 	totals := effectTotalsOf(effect, source)
-	for _, product := range nonzeroEffectProducts(totals) {
-		balance, ok := balances[product]
+	for _, targetName := range nonzeroEffectTargets(totals) {
+		balance, ok := balances[targetName]
 		if !ok {
 			return contract.NewError(contract.CodeInternal, "quantity effect target was not written")
 		}
-		if cerr := w.appendLedger(cause, product, totals[product], balance); cerr != nil {
+		if cerr := w.appendLedger(cause, targetName, totals[targetName], balance); cerr != nil {
 			return cerr
 		}
 	}

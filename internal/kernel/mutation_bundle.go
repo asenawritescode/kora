@@ -178,7 +178,7 @@ func (m *mutation) lockEffectItem(item RecordMutationBundleItem, recordDT *docty
 		return nil
 	}
 	if lockErr := lockRecordRow(m.run.Tx, m.k.dialect(), recordDT, name); lockErr != nil && !errors.Is(lockErr, sql.ErrNoRows) {
-		return contract.NewError(contract.CodeDependencyUnavailable, "lock stock record failed")
+		return contract.NewError(contract.CodeDependencyUnavailable, "lock target record failed")
 	}
 	return nil
 }
@@ -427,7 +427,7 @@ func (m *mutation) persistBundle(ctx context.Context, b *bundle) *contract.Error
 	if cerr := m.checkBundleLinks(b); cerr != nil {
 		return cerr
 	}
-	// Stock moves after every item is written, so a target that another item
+	// Target quantities move after every item is written, so a target that another item
 	// of this bundle also changed is read at its written value.
 	for i, doc := range b.docs {
 		if cerr := m.applyStatusEffect(ctx, b.types[i], m.bundleSavedDocs[i].oldDoc, doc); cerr != nil {
