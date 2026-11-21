@@ -138,31 +138,60 @@ func decideShape(stored *storedShape, fingerprint string, want []doctype.FactCol
 }
 
 // evolve applies action to the fact tables and their summary, with DDL outside any transaction (MySQL DDL
-// commits implicitly). Summaries are caches, so they are always rebuilt; the rebuild job refills them.
+// commits implicitly). A recreate empties the summary too. An additive change keeps it: the new measure
+// columns are added, and the refresh of the days the rebuild writes fills them, so dashboards keep their
+// numbers meanwhile.
 func (s *ModelSync) evolve(ctx context.Context, dt *doctype.DocType, action shapeAction, want []doctype.FactColumn) error {
-	q := s.Dialect.QuoteIdent
 	if action == shapeRecreate {
-		drops := []string{"DROP TABLE IF EXISTS " + q(summaryTable(dt)), "DROP TABLE IF EXISTS " + q(dt.Facts.TableName(dt))}
-		if dt.Facts.Lines != "" {
-			drops = append(drops, "DROP TABLE IF EXISTS "+q(dt.Facts.LineTableName(dt)))
-		}
-		if err := s.execAll(ctx, drops); err != nil {
-			return err
-		}
-		return s.execAll(ctx, append(DDL(s.Dialect, dt), summaryDDL(s.Dialect, dt)))
+		return s.recreate(ctx, dt)
 	}
+	return s.addColumns(ctx, dt, want)
+}
+
+// recreate drops the fact and summary tables and creates them again, empty; the rebuild refills them.
+func (s *ModelSync) recreate(ctx context.Context, dt *doctype.DocType) error {
+	q := s.Dialect.QuoteIdent
+	drops := []string{"DROP TABLE IF EXISTS " + q(summaryTable(dt)), "DROP TABLE IF EXISTS " + q(dt.Facts.TableName(dt))}
+	if dt.Facts.Lines != "" {
+		drops = append(drops, "DROP TABLE IF EXISTS "+q(dt.Facts.LineTableName(dt)))
+	}
+	if err := s.execAll(ctx, drops); err != nil {
+		return err
+	}
+	return s.execAll(ctx, append(DDL(s.Dialect, dt), summaryDDL(s.Dialect, dt)))
+}
+
+// addColumns adds the columns of want that the fact tables and the summary lack. The summary holds one column
+// per measure, not per dimension. CREATE IF NOT EXISTS covers a summary that was never written.
+func (s *ModelSync) addColumns(ctx context.Context, dt *doctype.DocType, want []doctype.FactColumn) error {
 	tables := []string{dt.Facts.TableName(dt)}
 	if dt.Facts.Lines != "" {
 		tables = append(tables, dt.Facts.LineTableName(dt))
 	}
 	for _, table := range tables {
-		for _, c := range want {
-			if err := s.addMissingColumn(ctx, table, c); err != nil {
-				return err
-			}
+		if err := s.addAll(ctx, table, want); err != nil {
+			return err
 		}
 	}
-	return s.execAll(ctx, []string{"DROP TABLE IF EXISTS " + q(summaryTable(dt)), summaryDDL(s.Dialect, dt)})
+	if err := s.execAll(ctx, []string{summaryDDL(s.Dialect, dt)}); err != nil {
+		return err
+	}
+	var measures []doctype.FactColumn
+	for _, c := range want {
+		if c.Type == doctype.FactColumnDecimal {
+			measures = append(measures, c)
+		}
+	}
+	return s.addAll(ctx, summaryTable(dt), measures)
+}
+
+func (s *ModelSync) addAll(ctx context.Context, table string, cols []doctype.FactColumn) error {
+	for _, c := range cols {
+		if err := s.addMissingColumn(ctx, table, c); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // addMissingColumn adds c to table unless a probe finds it. A nullable column needs no backfill: the

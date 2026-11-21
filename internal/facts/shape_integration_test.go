@@ -49,12 +49,21 @@ func TestModelSyncEvolvesAndQueuesOneRebuild(t *testing.T) {
 			assertOpenJobs(t, database.DB, dialect, 1)
 
 			// A measure added in place: the column is added, the open job is replaced, and still one is open.
+			// A sentinel summary day stands in for a dashboard's numbers: an additive change must keep it.
+			exec(t, database.DB, dialect, "INSERT INTO "+dialect.QuoteIdent(summaryTable(saleFacts()))+
+				" (business_date, legal_entity, status, grain, grain_value, row_count, total, line_amount) VALUES ('2026-01-01', '', '', '', '', 7, 0, 0)")
 			v2 := doctype.NewRegistry()
 			v2.Register(withSaleMeasure(saleFacts(), doctype.FactMeasure{Field: "items.amount", Name: "line_copy"}))
 			mustSync(t, syncWith(v2, "worker-2"))
 			assertOpenJobs(t, database.DB, dialect, 1)
 			if err := probeColumn(database.DB, dialect, factHeader, "line_copy"); err != nil {
 				t.Fatalf("added column missing: %v", err)
+			}
+			if err := probeColumn(database.DB, dialect, summaryTable(saleFacts()), "line_copy"); err != nil {
+				t.Fatalf("added summary column missing: %v", err)
+			}
+			if n := countRows(t, database.DB, dialect, "SELECT COUNT(*) FROM "+dialect.QuoteIdent(summaryTable(saleFacts()))+" WHERE row_count = 7"); n != 1 {
+				t.Fatalf("additive change dropped the summary: sentinel rows = %d, want 1", n)
 			}
 
 			// Progress while queued, then part-way through a rebuild of 1000 of rebuildSales records.
@@ -131,6 +140,9 @@ func TestModelSyncEvolvesAndQueuesOneRebuild(t *testing.T) {
 			}
 			if n := countRows(t, database.DB, dialect, "SELECT COUNT(*) FROM "+dialect.QuoteIdent(factHeader)); n != 0 {
 				t.Fatalf("recreated fact table has %d rows, want 0 before the rebuild", n)
+			}
+			if n := countRows(t, database.DB, dialect, "SELECT COUNT(*) FROM "+dialect.QuoteIdent(summaryTable(saleFacts()))); n != 0 {
+				t.Fatalf("recreated summary has %d rows, want 0", n)
 			}
 		})
 	}
