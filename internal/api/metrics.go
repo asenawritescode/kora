@@ -396,8 +396,8 @@ func (m metricsAPI) joinable(c *gin.Context, reg *doctype.Registry, cat metrics.
 	return out
 }
 
-// drill answers POST /metrics/drill with the record list behind one number. The list endpoint
-// applies the caller's record scope when the filters are used.
+// drill answers POST /metrics/drill with the record list behind one number: its filters for the record
+// list, and one page of its records. The records apply the caller's record scope.
 func (m metricsAPI) drill(c *gin.Context) {
 	var req contract.MetricDrillRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -409,42 +409,104 @@ func (m metricsAPI) drill(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "metrics.drill_invalid", err.Error(), nil)
 		return
 	}
-	cat, err := m.catalog(c)
+	run, ok := m.resolveDrill(c, req)
+	if !ok {
+		return
+	}
+	page, err := run.engine.DrillRecords(c.Request.Context(), metrics.DrillRequest{Metric: run.name, From: from, To: to, Group: req.Group},
+		run.scope, run.clock, req.Cursor)
 	if err != nil {
-		internalError(c, "loading metric definitions", err)
+		drillError(c, err)
 		return
 	}
-	ms, err := cat.Closure([]string{req.Metric})
-	if err != nil {
-		writeError(c, http.StatusBadRequest, "metrics.drill_invalid", err.Error(), nil)
-		return
-	}
-	if _, denial := metricScope(c, analyticsRegistry(c, m.registry), metrics.Models(ms)); denial != nil {
-		writeError(c, denial.status, "metrics.forbidden", denial.message, nil)
-		return
-	}
-	database := getSiteDB(c, m.siteDB)
-	if database == nil {
-		writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Metrics not available for this site", nil)
-		return
-	}
-	dialect := siteDialectFromContext(c, m.dialect)
-	clock, err := tenanttime.Load(c.Request.Context(), database, dialect, c.GetString("site_name"))
-	if err != nil {
-		internalError(c, "loading tenant business clock", err)
-		return
-	}
-	drill, err := cat.Drill(metrics.DrillRequest{Metric: req.Metric, From: from, To: to, Group: req.Group}, clock)
-	if err != nil {
-		writeError(c, http.StatusUnprocessableEntity, "metrics.drill_invalid", err.Error(), nil)
-		return
-	}
-	out, err := drillOf(drill)
+	out, err := drillOf(page, page.ListOpenable && !run.registry.IsPrivateModuleResource(page.Doctype))
 	if err != nil {
 		internalError(c, "encoding metric drill", err)
 		return
 	}
 	c.JSON(http.StatusOK, Response{Data: out})
+}
+
+// drillRun is what one drill reads: the engine over the tenant's database, the metric or measure it names,
+// the caller's scope on it, the tenant's business clock and the registry that says which lists are open.
+type drillRun struct {
+	engine   metrics.Engine
+	name     string
+	scope    metrics.Scope
+	clock    tenanttime.Clock
+	registry *doctype.Registry
+}
+
+// resolveDrill resolves a drill's metric, the caller's scope on the record types it reads, and the clock. It writes
+// the refusal and reports false when the drill may not run.
+func (m metricsAPI) resolveDrill(c *gin.Context, req contract.MetricDrillRequest) (drillRun, bool) {
+	cat, err := m.catalog(c)
+	if err != nil {
+		internalError(c, "loading metric definitions", err)
+		return drillRun{}, false
+	}
+	cat, name, err := drillMetric(cat, req)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "metrics.drill_invalid", err.Error(), nil)
+		return drillRun{}, false
+	}
+	ms, err := cat.Closure([]string{name})
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "metrics.drill_invalid", err.Error(), nil)
+		return drillRun{}, false
+	}
+	registry := analyticsRegistry(c, m.registry)
+	scope, denial := metricScope(c, registry, metrics.Models(ms))
+	if denial != nil {
+		writeError(c, denial.status, "metrics.forbidden", denial.message, nil)
+		return drillRun{}, false
+	}
+	scope.Joinable = m.joinable(c, registry, cat, slices.Collect(maps.Keys(req.Group)))
+	database := getSiteDB(c, m.siteDB)
+	if database == nil {
+		writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Metrics not available for this site", nil)
+		return drillRun{}, false
+	}
+	dialect := siteDialectFromContext(c, m.dialect)
+	clock, err := tenanttime.Load(c.Request.Context(), database, dialect, c.GetString("site_name"))
+	if err != nil {
+		internalError(c, "loading tenant business clock", err)
+		return drillRun{}, false
+	}
+	engine := metrics.Engine{DB: database, Dialect: dialect, Catalog: cat}
+	return drillRun{engine: engine, name: name, scope: scope, clock: clock, registry: registry}, true
+}
+
+// drillMetric names the metric a drill reads: the saved metric the request names, or the unsaved measure
+// it asks for, added to the catalog. A drill names exactly one of the two.
+func drillMetric(cat metrics.Catalog, req contract.MetricDrillRequest) (metrics.Catalog, string, error) {
+	switch {
+	case req.Metric != "" && req.Measure == nil:
+		return cat, req.Metric, nil
+	case req.Measure != nil && req.Metric == "":
+		out, names, err := withAdHocMeasures(cat, []contract.MetricAdHocMeasure{*req.Measure})
+		if err != nil {
+			return metrics.Catalog{}, "", err
+		}
+		return out, names[0], nil
+	}
+	return metrics.Catalog{}, "", errors.New("a drill names one metric or one measure")
+}
+
+// drillError answers a failed drill: a refused drill or group is 422, a forbidden path 403, a bad
+// cursor 400, a deadline a timeout, and anything else internal.
+func drillError(c *gin.Context, err error) {
+	var refusal metrics.DrillRefusal
+	switch {
+	case errors.Is(err, metrics.ErrForbidden):
+		writeError(c, http.StatusForbidden, "metrics.forbidden", err.Error(), nil)
+	case errors.Is(err, metrics.ErrBadCursor):
+		writeError(c, http.StatusBadRequest, "metrics.drill_invalid", err.Error(), nil)
+	case errors.As(err, &refusal):
+		writeError(c, http.StatusUnprocessableEntity, "metrics.drill_invalid", err.Error(), nil)
+	default:
+		metricsRunError(c, "running metric drill", err)
+	}
 }
 
 // metricsRunError answers a failed metric run: a deadline is a timeout, anything else is internal.
@@ -614,11 +676,16 @@ func decimalJSON(v decimal.NullDecimal) json.RawMessage {
 	return json.RawMessage(strconv.Quote(v.Decimal.String()))
 }
 
-// drillOf encodes a drill's filters as wire filters.
-func drillOf(d metrics.Drill) (contract.MetricDrillResult, error) {
-	filters, err := filtersOf(d.Filters)
+// drillOf encodes a drill page as wire records and filters.
+func drillOf(page metrics.DrillPage, listOpenable bool) (contract.MetricDrillResult, error) {
+	filters, err := filtersOf(page.Filters)
 	if err != nil {
 		return contract.MetricDrillResult{}, err
 	}
-	return contract.MetricDrillResult{Doctype: d.Doctype, Filters: filters}, nil
+	rows := make([]contract.MetricDrillRecord, len(page.Records))
+	for i, r := range page.Records {
+		rows[i] = contract.MetricDrillRecord{Name: r.Name, Title: r.Title, OccurredAt: r.OccurredAt.UTC().Format(time.RFC3339), Value: r.Value.String()}
+	}
+	return contract.MetricDrillResult{Doctype: page.Doctype, Filters: filters, ListOpenable: listOpenable,
+		Total: page.Total.String(), Rows: rows, NextCursor: page.Next}, nil
 }

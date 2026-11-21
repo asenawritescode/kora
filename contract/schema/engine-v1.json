@@ -1285,9 +1285,36 @@
       ],
       "type": "object"
     },
+    "MetricDrillRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "occurred_at": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "occurred_at",
+        "title",
+        "value"
+      ],
+      "type": "object"
+    },
     "MetricDrillRequest": {
       "additionalProperties": false,
       "properties": {
+        "cursor": {
+          "type": "string"
+        },
         "from": {
           "type": "string"
         },
@@ -1296,6 +1323,10 @@
             "type": "string"
           },
           "type": "object"
+        },
+        "measure": {
+          "$ref": "#/$defs/MetricAdHocMeasure",
+          "x-optional-pointer": true
         },
         "metric": {
           "type": "string"
@@ -1306,7 +1337,6 @@
       },
       "required": [
         "from",
-        "metric",
         "to"
       ],
       "type": "object"
@@ -1322,11 +1352,29 @@
             "$ref": "#/$defs/MetricFilter"
           },
           "type": "array"
+        },
+        "list_openable": {
+          "type": "boolean"
+        },
+        "next_cursor": {
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/MetricDrillRecord"
+          },
+          "type": "array"
+        },
+        "total": {
+          "type": "string"
         }
       },
       "required": [
         "doctype",
-        "filters"
+        "filters",
+        "list_openable",
+        "rows",
+        "total"
       ],
       "type": "object"
     },
@@ -3972,9 +4020,36 @@
       ],
       "type": "object"
     },
+    "MetricDrillRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "occurred_at": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "occurred_at",
+        "title",
+        "value"
+      ],
+      "type": "object"
+    },
     "MetricDrillRequest": {
       "additionalProperties": false,
       "properties": {
+        "cursor": {
+          "type": "string"
+        },
         "from": {
           "type": "string"
         },
@@ -3983,6 +4058,10 @@
             "type": "string"
           },
           "type": "object"
+        },
+        "measure": {
+          "$ref": "#/$defs/MetricAdHocMeasure",
+          "x-optional-pointer": true
         },
         "metric": {
           "type": "string"
@@ -3993,7 +4072,6 @@
       },
       "required": [
         "from",
-        "metric",
         "to"
       ],
       "type": "object"
@@ -4009,11 +4087,29 @@
             "$ref": "#/$defs/MetricFilter"
           },
           "type": "array"
+        },
+        "list_openable": {
+          "type": "boolean"
+        },
+        "next_cursor": {
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/MetricDrillRecord"
+          },
+          "type": "array"
+        },
+        "total": {
+          "type": "string"
         }
       },
       "required": [
         "doctype",
-        "filters"
+        "filters",
+        "list_openable",
+        "rows",
+        "total"
       ],
       "type": "object"
     },

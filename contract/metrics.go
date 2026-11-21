@@ -165,22 +165,42 @@ type MetricsHistory struct {
 	Progress float64 `json:"progress"` // 0 to 1: the least progress across the models being rebuilt; 1 when ready
 }
 
-// MetricDrillRequest names one simple metric and the group and business days to list records for.
-// Group maps a dimension to its value.
+// MetricDrillRequest names one simple metric, or one unsaved measure, and the group and business days to
+// list records for. Group maps a dimension to its value. Cursor is the next_cursor of the page before.
 //
 //contract:wire
 type MetricDrillRequest struct {
-	Metric string            `json:"metric"`
-	From   string            `json:"from"`
-	To     string            `json:"to"`
-	Group  map[string]string `json:"group,omitempty"`
+	Metric  string              `json:"metric,omitempty"`
+	Measure *MetricAdHocMeasure `json:"measure,omitempty"`
+	From    string              `json:"from"`
+	To      string              `json:"to"`
+	Group   map[string]string   `json:"group,omitempty"`
+	Cursor  string              `json:"cursor,omitempty"`
 }
 
-// MetricDrillResult is the record list behind a number: the record type and the filters that list
-// its records. The record list applies the caller's own record scope.
+// MetricDrillResult is the record list behind a number: the record type, the filters that list its records
+// in the record list, and one page of the records. Total is the number the records add up to. The
+// records apply the caller's own record scope. ListOpenable is false when the record list cannot show
+// the same records (a group through a path or a line, or a private module record type). NextCursor is
+// empty on the last page.
 //
 //contract:wire
 type MetricDrillResult struct {
-	Doctype string         `json:"doctype"`
-	Filters []MetricFilter `json:"filters"`
+	Doctype      string              `json:"doctype"`
+	Filters      []MetricFilter      `json:"filters"`
+	ListOpenable bool                `json:"list_openable"`
+	Total        string              `json:"total"`
+	Rows         []MetricDrillRecord `json:"rows"`
+	NextCursor   string              `json:"next_cursor,omitempty"`
+}
+
+// MetricDrillRecord is one record behind a drill number: its name, its title, its business time and its
+// value as an exact decimal string.
+//
+//contract:wire
+type MetricDrillRecord struct {
+	Name       string `json:"name"`
+	Title      string `json:"title"`
+	OccurredAt string `json:"occurred_at"`
+	Value      string `json:"value"`
 }
