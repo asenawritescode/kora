@@ -197,6 +197,30 @@ func stockQueries() []expectation {
 			"2026-11-15|P2|6.00", "2026-11-16|P2|6.00", "2026-11-17|P2|6.00",
 			"2026-11-15|P3|2.00", "2026-11-16|P3|2.00", "2026-11-17|P3|2.00",
 		}},
+		// A range is one bucket keyed by 18 Nov, holding the balance as of 20 Nov: P1 8, P2 7, P3 2, total 17.
+		{"range balance by product is the value at the range end", Query{Metrics: []string{"stock_on_hand"}, Dimensions: []string{"product"}, From: day(18), To: day(20), Grain: GrainRange}, []string{
+			"2026-11-18|P1|8.00",
+			"2026-11-18|P2|7.00",
+			"2026-11-18|P3|2.00",
+		}, nil},
+		{"range balance total", Query{Metrics: []string{"stock_on_hand"}, From: day(18), To: day(20), Grain: GrainRange}, []string{
+			"2026-11-18||17.00",
+		}, nil},
+		// The previous window is 15-17 Nov: balances as of 17 Nov, P1 6, P2 6, P3 2, keyed by 15 Nov.
+		{"range compare opens the previous window from before it", Query{Metrics: []string{"stock_on_hand"}, Dimensions: []string{"product"}, From: day(18), To: day(20), Grain: GrainRange, Compare: ComparePreviousPeriod}, []string{
+			"2026-11-18|P1|8.00",
+			"2026-11-18|P2|7.00",
+			"2026-11-18|P3|2.00",
+		}, []string{
+			"2026-11-15|P1|6.00",
+			"2026-11-15|P2|6.00",
+			"2026-11-15|P3|2.00",
+		}},
+		// Cumulative change over the range: P1 -3 then +5, P2 -2 then +3; P3 has no movement in range.
+		{"range cumulative change sums movements inside the range", Query{Metrics: []string{"stock_change_to_date"}, Dimensions: []string{"product"}, From: day(18), To: day(20), Grain: GrainRange}, []string{
+			"2026-11-18|P1|2.00",
+			"2026-11-18|P2|1.00",
+		}, nil},
 		// Last-bucket ranking keeps P1 (8) over P2 (7); summing buckets would keep P2 (17) over P1 (14).
 		{"top one ranks a balance by its last bucket and folds the rest", func() Query {
 			q := byProduct(18, 20)

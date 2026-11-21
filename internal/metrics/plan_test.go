@@ -127,6 +127,10 @@ func TestPlanQueryRoutesAndRefuses(t *testing.T) {
 		}), invalid: true},
 		{name: "grain is required", query: with(func(q *Query) { q.Grain = "" }), invalid: true},
 		{name: "range must not end before it starts", query: with(func(q *Query) { q.From, q.To = day(22), day(16) }), invalid: true},
+		{name: "range grain reads the summary", query: with(func(q *Query) { q.Grain = GrainRange }), summary: true, series: 1, table: "_kora_fact_summary_sale"},
+		{name: "range grain with a balance", query: with(func(q *Query) { q.Grain = GrainRange; q.Metrics = []string{"balance_sales"} }), summary: true, series: 1},
+		{name: "range grain with owner scope reads the facts", query: with(func(q *Query) { q.Grain = GrainRange; q.Scope.Owner = "u1" }), summary: false, series: 1, table: "_kora_fact_sale"},
+		{name: "unknown grain names range too", query: with(func(q *Query) { q.Grain = "year" }), invalid: true},
 		{name: "no metric", query: with(func(q *Query) { q.Metrics = nil }), invalid: true},
 	}
 	for _, tc := range tests {
@@ -159,5 +163,54 @@ func TestPlanQueryRoutesAndRefuses(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRangeGrainIsOneBucketWithoutCap(t *testing.T) {
+	tests := []struct {
+		name     string
+		from, to tenanttime.Date
+		grain    Grain
+		buckets  int
+		tooLarge bool
+	}{
+		{"range over two years is one bucket", day(2025, 1, 1), day(2026, 12, 31), GrainRange, 1, false},
+		{"range of one day is one bucket", day(2026, 11, 18), day(2026, 11, 18), GrainRange, 1, false},
+		{"day grain over the same two years is capped", day(2025, 1, 1), day(2026, 12, 31), GrainDay, 731, true},
+		{"month grain over the same two years fits", day(2025, 1, 1), day(2026, 12, 31), GrainMonth, 24, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			q := Query{Metrics: []string{"sales"}, From: tc.from, To: tc.to, Grain: tc.grain}
+			if got := rangeTooLarge(q); got != tc.tooLarge {
+				t.Fatalf("rangeTooLarge = %v, want %v", got, tc.tooLarge)
+			}
+			err := checkShape(q)
+			if errors.Is(err, ErrRangeTooLarge) != tc.tooLarge {
+				t.Fatalf("checkShape = %v, want too large %v", err, tc.tooLarge)
+			}
+			if tc.tooLarge {
+				return
+			}
+			if err != nil {
+				t.Fatalf("checkShape: %v", err)
+			}
+			starts := bucketStarts(tc.from, tc.to, tc.grain)
+			if len(starts) != tc.buckets {
+				t.Fatalf("buckets = %d, want %d", len(starts), tc.buckets)
+			}
+			if tc.grain == GrainRange && !starts[0].Equal(toTime(tc.from)) {
+				t.Fatalf("range bucket starts %s, want its first day %s", starts[0], toTime(tc.from))
+			}
+		})
+	}
+}
+
+func TestRangeGrainKeysEveryDayToItsFirstDay(t *testing.T) {
+	p := plan{grain: GrainRange, from: day(2026, 11, 18), to: day(2026, 11, 20)}
+	for _, d := range []tenanttime.Date{day(2026, 11, 18), day(2026, 11, 19), day(2026, 11, 20)} {
+		if got := p.bucketOf(toTime(d)); got != p.from {
+			t.Fatalf("bucketOf(%s) = %s, want %s", d, got, p.from)
+		}
 	}
 }

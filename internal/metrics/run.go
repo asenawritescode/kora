@@ -174,13 +174,22 @@ func (p plan) addRow(rows *sql.Rows, agg aggregate) error {
 	agg.groups[key] = group
 	period := openingPeriod
 	if !p.opening {
-		period = toDate(periodStart(t, p.grain))
+		period = p.bucketOf(t)
 	}
 	bk := bucketKey{period: period, group: key}
 	if agg.sums[bk] == nil {
 		agg.sums[bk] = make(bucketSums, len(p.series))
 	}
 	return p.accumulate(agg.sums[bk], vals)
+}
+
+// bucketOf is the key of the bucket that holds business day t. A range holds every day of the
+// range in the one bucket keyed by its first day.
+func (p plan) bucketOf(t time.Time) tenanttime.Date {
+	if p.grain == GrainRange {
+		return p.from
+	}
+	return toDate(periodStart(t, p.grain))
 }
 
 // accumulate adds each returned series value to the bucket. A NULL sum adds nothing.

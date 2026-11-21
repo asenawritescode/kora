@@ -26,6 +26,9 @@ func TestPreviousRange(t *testing.T) {
 		{"aligned month", day(2026, 11, 1), day(2026, 11, 30), GrainMonth, day(2026, 10, 1), day(2026, 10, 31)},
 		{"two months back across a year end", day(2026, 10, 15), day(2026, 11, 20), GrainMonth, day(2026, 8, 1), day(2026, 9, 30)},
 		{"crosses a year boundary", day(2027, 1, 2), day(2027, 1, 4), GrainDay, day(2026, 12, 30), day(2027, 1, 1)},
+		{"range: as many days as the range, ending the day before From", day(2026, 11, 18), day(2026, 11, 20), GrainRange, day(2026, 11, 15), day(2026, 11, 17)},
+		{"range of one day", day(2026, 11, 18), day(2026, 11, 18), GrainRange, day(2026, 11, 17), day(2026, 11, 17)},
+		{"range across a month end", day(2026, 10, 30), day(2026, 11, 2), GrainRange, day(2026, 10, 26), day(2026, 10, 29)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

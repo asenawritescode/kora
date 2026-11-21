@@ -55,7 +55,8 @@ type MetricFilter struct {
 	Value json.RawMessage `json:"value"`
 }
 
-// MetricQueryRequest asks for metrics over an inclusive range of business dates.
+// MetricQueryRequest asks for metrics over an inclusive range of business dates. Grain is day, week,
+// month or range; range returns one bucket for the whole range, keyed by From.
 //
 //contract:wire
 type MetricQueryRequest struct {
