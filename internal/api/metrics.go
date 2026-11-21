@@ -288,11 +288,10 @@ func (m metricsAPI) query(c *gin.Context) {
 		writeError(c, refusal.status, refusal.code, refusal.message, nil)
 		return
 	}
-	if database == nil {
-		writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Metrics not available for this site", nil)
+	engine, ready := m.readyEngine(c, database, cat, metrics.Models(ms), &period)
+	if !ready {
 		return
 	}
-	engine := metrics.Engine{DB: database, Dialect: siteDialectFromContext(c, m.dialect), Catalog: cat}
 	ctx := c.Request.Context()
 	res, err := engine.Query(ctx, q)
 	if err != nil {
@@ -309,6 +308,46 @@ func (m metricsAPI) query(c *gin.Context) {
 	out := resultOf(res)
 	out.Labels = adHocLabels(cat, adHoc)
 	c.JSON(http.StatusOK, metricsEnvelope{Data: out, Meta: meta})
+}
+
+// readyEngine is the engine a query runs on. It writes the refusal and reports false when the site has no
+// database, or answers building and reports false when a record type the query reads has no fact tables yet.
+func (m metricsAPI) readyEngine(c *gin.Context, database *sql.DB, cat metrics.Catalog, models []string, period *queryPeriod) (metrics.Engine, bool) {
+	if database == nil {
+		writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Metrics not available for this site", nil)
+		return metrics.Engine{}, false
+	}
+	engine := metrics.Engine{DB: database, Dialect: siteDialectFromContext(c, m.dialect), Catalog: cat}
+	empty := resultOf(metrics.Result{})
+	empty.Rows = []contract.MetricRow{}
+	return engine, !answerBuilding(c, engine, models, period, empty)
+}
+
+// answerBuilding answers a query or drill whose record types have no fact tables yet. The sync creates them when
+// the tenant starts, so until it has run the honest answer is data with history building, never a server error.
+// period is nil for a drill, which has none. It writes the answer and reports true when it answered.
+func answerBuilding(c *gin.Context, engine metrics.Engine, models []string, period *queryPeriod, data any) bool {
+	building, err := facts.Unsynced(c.Request.Context(), engine.DB, engine.Dialect, models)
+	if err != nil {
+		internalError(c, "reading fact model sync state", err)
+		return true
+	}
+	if len(building) == 0 {
+		return false
+	}
+	meta := contract.MetricsMeta{AsOf: time.Now().UTC().Format(time.RFC3339), Tier: "S",
+		History: &contract.MetricsHistory{State: "building", Progress: 0}}
+	if period != nil {
+		meta = periodMeta(meta, *period, metrics.Result{})
+	}
+	c.JSON(http.StatusOK, metricsEnvelope{Data: data, Meta: meta})
+	return true
+}
+
+// drillEmpty is the empty drill answered while fact tables are being built.
+func drillEmpty() contract.MetricDrillResult {
+	out, _ := drillOf(metrics.DrillPage{}, false) // an empty page has no filters to decode, so drillOf cannot fail
+	return out
 }
 
 // businessClock is the tenant's business clock. Without a database the default clock serves: the query
@@ -491,6 +530,9 @@ func (m metricsAPI) drill(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if answerBuilding(c, run.engine, run.models, nil, drillEmpty()) {
+		return
+	}
 	page, err := run.engine.DrillRecords(c.Request.Context(), metrics.DrillRequest{Metric: run.name, From: from, To: to, Group: req.Group},
 		run.scope, run.clock, req.Cursor)
 	if err != nil {
@@ -513,6 +555,7 @@ type drillRun struct {
 	scope    metrics.Scope
 	clock    tenanttime.Clock
 	registry *doctype.Registry
+	models   []string // the record types the drill reads
 }
 
 // resolveDrill resolves a drill's metric, the caller's scope on the record types it reads, and the clock. It writes
@@ -552,7 +595,7 @@ func (m metricsAPI) resolveDrill(c *gin.Context, req contract.MetricDrillRequest
 		return drillRun{}, false
 	}
 	engine := metrics.Engine{DB: database, Dialect: dialect, Catalog: cat}
-	return drillRun{engine: engine, name: name, scope: scope, clock: clock, registry: registry}, true
+	return drillRun{engine: engine, name: name, scope: scope, clock: clock, registry: registry, models: metrics.Models(ms)}, true
 }
 
 // drillMetric names the metric a drill reads: the saved metric the request names, or the unsaved measure

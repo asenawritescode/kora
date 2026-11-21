@@ -37,16 +37,16 @@ const erpsellPack = "../../config/_parked/erpsell"
 
 // stockMovement is one Stock Movement written as the event consumer receives it.
 type stockMovement struct {
-	record, product, created, change, reason, source string
+	record, product, created, change, reason, source, owner string
 }
 
 // stockSeed: a damage and a count correction (Stock Adjustment) and one sale movement, as the erpsell
 // stock_adjusted metric reads them.
 var stockSeed = []stockMovement{
-	{"ADJ-1", "P1", "2026-11-18 12:00:00", "-2", "Damaged", "Stock Adjustment"},
-	{"ADJ-2", "P2", "2026-11-19 12:00:00", "3", "Count correction", "Stock Adjustment"},
-	{"MOV-9", "P1", "2026-11-18 13:00:00", "-1", "Sale", "Sale"},
-	{"ADJ-3", "P3", "2026-11-18 14:00:00", "1", "", "Stock Adjustment"},
+	{"ADJ-1", "P1", "2026-11-18 12:00:00", "-2", "Damaged", "Stock Adjustment", "wh1"},
+	{"ADJ-2", "P2", "2026-11-19 12:00:00", "3", "Count correction", "Stock Adjustment", "wh2"},
+	{"MOV-9", "P1", "2026-11-18 13:00:00", "-1", "Sale", "Sale", "wh1"},
+	{"ADJ-3", "P3", "2026-11-18 14:00:00", "1", "", "Stock Adjustment", "wh2"},
 }
 
 // stockAdmission grants every maintenance lane at once; the refresher only needs one.
@@ -100,6 +100,9 @@ func assertStockDashboards(t *testing.T, router *gin.Engine) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &stock); err != nil {
 		t.Fatal("decode stock_insights:", err)
 	}
+	if stock.Data.Pack != "Selling" {
+		t.Fatalf("stock_insights pack = %q; want the selling pack's label", stock.Data.Pack)
+	}
 	if got := chartIDs(stock.Data); !slices.Equal(got, []string{"stock_adjustments"}) || stock.Data.DefaultRange != "today" {
 		t.Fatalf("stock_insights charts = %v range %q; want stock_adjustments and today", got, stock.Data.DefaultRange)
 	}
@@ -110,14 +113,26 @@ func assertStockDashboards(t *testing.T, router *gin.Engine) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &shop); err != nil {
 		t.Fatal("decode shop_insights:", err)
 	}
+	if shop.Data.Pack != "Selling" {
+		t.Fatalf("shop_insights pack = %q; want Selling", shop.Data.Pack)
+	}
 	if slices.Contains(chartIDs(shop.Data), "stock_adjustments") || shop.Data.Label != "Shop insights" {
 		t.Fatalf("shop_insights = %q charts %v; want Shop insights without stock_adjustments", shop.Data.Label, chartIDs(shop.Data))
 	}
 }
 
-// erpsellRouter opens a disposable database, creates the system tables, writes the selling pack's metrics and
-// dashboards as the active configuration, consumes the seeded stock movements and returns the real routes.
+// erpsellRouter opens a disposable database with the selling pack's configuration, consumes the seeded stock
+// movements and returns the real routes.
 func erpsellRouter(t *testing.T, dialect, dsn string) *gin.Engine {
+	t.Helper()
+	database, reg := openErpsell(t, dialect, dsn, nil, nil)
+	seedStockMovements(context.Background(), t, database, dialect, reg)
+	return stockRouter(t, reg, database, dialect)
+}
+
+// openErpsell opens a disposable database with the system tables and the selling pack's metrics and dashboards as the
+// active configuration. The fact tables do not exist yet: the sync has not run.
+func openErpsell(t *testing.T, dialect, dsn string, roles []*doctype.Role, perms []*doctype.Permission) (*sql.DB, *doctype.Registry) {
 	t.Helper()
 	ctx := context.Background()
 	database := disposabledb.Open(t, dialect, dsn).DB
@@ -132,19 +147,23 @@ func erpsellRouter(t *testing.T, dialect, dsn string) *gin.Engine {
 	if err != nil {
 		t.Fatalf("parse selling metrics: %v", err)
 	}
-	dashboards, err := metrics.ParseDashboardDirectory(erpsellPack + "/dashboards")
+	dashboards, err := metrics.ParsePackDashboards(erpsellPack)
 	if err != nil {
 		t.Fatalf("parse selling dashboards: %v", err)
 	}
 	writeActiveConfig(t, database, dialect, dts, defs, dashboards)
-
 	reg := doctype.NewRegistry()
-	reg.LoadFull(dts, []*doctype.Role{{Name: doctype.AdminRole}}, []*doctype.Permission{
-		{Doctype: "Stock Movement", Role: doctype.AdminRole, Read: true},
-		{Doctype: "Sale", Role: doctype.AdminRole, Read: true},
-	})
-	seedStockMovements(ctx, t, database, dialect, reg)
-	return stockRouter(t, reg, database, dialect)
+	shipped, err := doctype.ParsePermissionsFile(erpsellPack + "/permissions.yaml")
+	if err != nil {
+		t.Fatalf("parse selling pack permissions: %v", err)
+	}
+	perms = append(append(shipped, perms...), &doctype.Permission{Doctype: "Stock Movement", Role: doctype.AdminRole, Read: true})
+	roles = append(roles, &doctype.Role{Name: doctype.AdminRole})
+	perms = append(perms,
+		&doctype.Permission{Doctype: "Stock Movement", Role: doctype.AdminRole, Read: true},
+		&doctype.Permission{Doctype: "Sale", Role: doctype.AdminRole, Read: true})
+	reg.LoadFull(dts, roles, perms)
+	return database, reg
 }
 
 // writeActiveConfig stores the metrics and dashboards as one active configuration version of tenant-dashboards.
@@ -171,7 +190,7 @@ func seedStockMovements(ctx context.Context, t *testing.T, database *sql.DB, dia
 	t.Helper()
 	d := kdb.Resolve(dialect)
 	setup := []string{
-		fmt.Sprintf("CREATE TABLE %s (name VARCHAR(140) NOT NULL PRIMARY KEY, owner VARCHAR(140) NOT NULL, creation TIMESTAMP NOT NULL)", d.QuoteIdent("tabStock Movement")),
+		fmt.Sprintf("CREATE TABLE %s (name VARCHAR(140) NOT NULL PRIMARY KEY, owner VARCHAR(140) NOT NULL, creation TIMESTAMP NOT NULL, product VARCHAR(140) NULL)", d.QuoteIdent("tabStock Movement")),
 		"CREATE TABLE IF NOT EXISTS _kora_site_setting (site VARCHAR(140) NOT NULL, setting_key VARCHAR(140) NOT NULL, setting_value VARCHAR(140) NOT NULL, PRIMARY KEY (site, setting_key))",
 	}
 	for _, stmt := range setup {
@@ -187,8 +206,8 @@ func seedStockMovements(ctx context.Context, t *testing.T, database *sql.DB, dia
 	}
 	builder := &facts.Builder{DB: database, Dialect: d, Registry: reg}
 	for i, m := range stockSeed {
-		insert := kdb.Rebind(d, fmt.Sprintf("INSERT INTO %s (name, owner, creation) VALUES (?, ?, ?)", d.QuoteIdent("tabStock Movement")))
-		if _, err := database.ExecContext(ctx, insert, m.record, "wh1", m.created); err != nil {
+		insert := kdb.Rebind(d, fmt.Sprintf("INSERT INTO %s (name, owner, creation, product) VALUES (?, ?, ?, ?)", d.QuoteIdent("tabStock Movement")))
+		if _, err := database.ExecContext(ctx, insert, m.record, m.owner, m.created, m.product); err != nil {
 			t.Fatalf("insert %s: %v", m.record, err)
 		}
 		consumeStockMovement(ctx, t, database, builder, int64(i+1), m)
@@ -269,4 +288,61 @@ func numberOf(text string) float64 {
 		panic(err)
 	}
 	return v
+}
+
+// TestMetricsWhileFactTablesAreBuilding queries and drills a selling pack whose sync has not run: the answer is
+// empty with history building, never an error. Once the sync has run and the movements are consumed, the same
+// query answers with rows.
+func TestMetricsWhileFactTablesAreBuilding(t *testing.T) {
+	for _, tc := range []struct{ name, dialect, env string }{
+		{"mysql", "mysql", "KORA_DASHBOARD_OVERRIDE_DISPOSABLE_MYSQL_DSN"},
+		{"postgres", "postgres", "KORA_DASHBOARD_OVERRIDE_DISPOSABLE_POSTGRES_DSN"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dsn := os.Getenv(tc.env)
+			if dsn == "" {
+				t.Skipf("set %s", tc.env)
+			}
+			captureLogs(t)
+			database, reg := openErpsell(t, tc.dialect, dsn, nil, nil)
+			router := stockRouter(t, reg, database, tc.dialect)
+			query := `{"metrics":["stock_adjusted"],"dimensions":["reason"],"from":"2026-11-18","to":"2026-11-20","grain":"range"}`
+			drill := `{"metric":"stock_adjusted","from":"2026-11-18","to":"2026-11-20","group":{"reason":"Damaged"}}`
+			assertHistory(t, router, "/api/v1/metrics/query", query, "building")
+			assertHistory(t, router, "/api/v1/metrics/drill", drill, "building")
+
+			seedStockMovements(context.Background(), t, database, tc.dialect, reg)
+			recorder := do(t, router, doctype.AdminRole, http.MethodPost, "/api/v1/metrics/query", query, http.StatusOK)
+			var env metricsEnvelopeBody
+			if err := json.Unmarshal(recorder.Body.Bytes(), &env); err != nil {
+				t.Fatal("decode query:", err)
+			}
+			// The sync queues one rebuild of the new model; the query answers from the consumed rows meanwhile.
+			if !strings.Contains(string(env.Data), "Damaged") {
+				t.Fatalf("after sync: data %s; want the consumed rows", env.Data)
+			}
+		})
+	}
+}
+
+// metricsEnvelopeBody is a metrics response as a test reads it.
+type metricsEnvelopeBody struct {
+	Data json.RawMessage      `json:"data"`
+	Meta contract.MetricsMeta `json:"meta"`
+}
+
+// assertHistory posts body to path as the administrator and checks the answer is empty with the history state.
+func assertHistory(t *testing.T, router *gin.Engine, path, body, state string) {
+	t.Helper()
+	recorder := do(t, router, doctype.AdminRole, http.MethodPost, path, body, http.StatusOK)
+	var env metricsEnvelopeBody
+	if err := json.Unmarshal(recorder.Body.Bytes(), &env); err != nil {
+		t.Fatalf("%s: decode: %v", path, err)
+	}
+	if env.Meta.History == nil || env.Meta.History.State != state || env.Meta.History.Progress != 0 {
+		t.Fatalf("%s: history %+v; want %s at 0", path, env.Meta.History, state)
+	}
+	if !strings.Contains(string(env.Data), `"rows":[]`) {
+		t.Fatalf("%s: data while building = %s; want no rows", path, env.Data)
+	}
 }
