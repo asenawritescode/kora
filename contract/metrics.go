@@ -119,24 +119,30 @@ type ExploreMeasure struct {
 	Format string `json:"format,omitempty"`
 }
 
-// ExploreDimension is one category a question can group by.
+// ExploreDimension is one category a question can group by. A path through Link fields has Hops set to
+// the number of links it follows and Group naming them ("Supplier ›"); a field of the record type itself
+// has zero hops and no group.
 //
 //contract:wire
 type ExploreDimension struct {
 	Path  string `json:"path"`
 	Label string `json:"label"`
 	Kind  string `json:"kind"`
+	Hops  int    `json:"hops"`
+	Group string `json:"group,omitempty"`
 }
 
 // MetricRow is one bucket of one group. Values follow the result's metrics: each entry is a decimal
 // string, or null when the metric has no value for the bucket. Label is set only on the Other group,
-// whose Group is "__other__".
+// whose Group is "__other__". Labels follows Group when a dimension names a record type: each entry is that
+// record's title for the group value, empty when there is none.
 //
 //contract:wire
 type MetricRow struct {
 	Bucket string   `json:"bucket"`
 	Group  []string `json:"group"`
 	Label  string   `json:"label,omitempty"`
+	Labels []string `json:"labels,omitempty"`
 	//contract:json
 	Values []json.RawMessage `json:"values"`
 }

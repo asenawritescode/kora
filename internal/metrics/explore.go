@@ -20,23 +20,44 @@ type AdHoc struct {
 	Filters []Filter
 }
 
-// ExploreCatalog lists the record types that have a fact model, sorted by name. Each offers a count, a sum
-// for every header measure and a count_distinct for every header dimension. Child-table measures and
-// dimensions are left out.
-func ExploreCatalog(docs []*doctype.DocType) []contract.ExploreRecordType {
+// ExploreCatalog lists the record types that have a fact model and that read allows, sorted by name.
+// Each offers a count, a sum for every header measure and a count_distinct for every header dimension.
+// Child-table measures and dimensions are left out. A Link dimension also offers the fields of the record
+// type it names, and the fields of a record type linked from that one, up to maxHops links. Only record
+// types join allows are followed. docs holds every record type, so a Link can name any of them.
+func ExploreCatalog(docs []*doctype.DocType, read, join map[string]bool) []contract.ExploreRecordType {
+	links := exploreLinks{models: make(map[string]*doctype.DocType, len(docs)), join: join}
+	for _, dt := range docs {
+		links.models[dt.Name] = dt
+	}
 	var out []contract.ExploreRecordType
 	for _, dt := range docs {
-		if dt.Facts == nil || dt.IsChildTable {
+		if dt.Facts == nil || dt.IsChildTable || !read[dt.Name] {
 			continue
 		}
-		out = append(out, exploreRecord(dt))
+		out = append(out, exploreRecord(dt, links))
 	}
 	slices.SortFunc(out, func(a, b contract.ExploreRecordType) int { return strings.Compare(a.RecordType, b.RecordType) })
 	return out
 }
 
+// exploreLinks resolves the Link fields of the catalog's record types.
+type exploreLinks struct {
+	models map[string]*doctype.DocType
+	join   map[string]bool
+}
+
+// target is the record type a Link field names when joins to it are allowed, otherwise nil.
+func (l exploreLinks) target(fld *doctype.Field) *doctype.DocType {
+	dt := l.models[fld.Options]
+	if dt == nil || !l.join[dt.Name] {
+		return nil
+	}
+	return dt
+}
+
 // exploreRecord describes one record type with a fact model.
-func exploreRecord(dt *doctype.DocType) contract.ExploreRecordType {
+func exploreRecord(dt *doctype.DocType, links exploreLinks) contract.ExploreRecordType {
 	f := dt.Facts
 	rec := contract.ExploreRecordType{RecordType: dt.Name, Label: dt.Name, Description: dt.Description, TimeField: f.Time,
 		Measures: []contract.ExploreMeasure{{Key: "count", Agg: aggCount, Label: "Records", Format: "number"}}}
@@ -58,8 +79,50 @@ func exploreRecord(dt *doctype.DocType) contract.ExploreRecordType {
 		rec.Dimensions = append(rec.Dimensions, contract.ExploreDimension{Path: col, Label: fieldLabel(dt, col), Kind: kindOf(fld)})
 		rec.Measures = append(rec.Measures, contract.ExploreMeasure{Key: "distinct:" + col, Agg: aggCountDistinct, Field: col,
 			Label: "Distinct " + fieldLabel(dt, col), Format: "number"})
+		rec.Dimensions = append(rec.Dimensions, linkedDimensions(dt, col, links)...)
 	}
 	return rec
+}
+
+// linkedDimensions lists the paths a header Link dimension opens: each dimension field of the record type
+// it names (one hop), and each dimension field of a record type that one of its Link fields names (two
+// hops). Nothing is listed when joins to the record type are not allowed.
+func linkedDimensions(dt *doctype.DocType, col string, links exploreLinks) []contract.ExploreDimension {
+	fld := dt.GetField(col)
+	if fld == nil || fld.Fieldtype != "Link" {
+		return nil
+	}
+	first := links.target(fld)
+	if first == nil {
+		return nil
+	}
+	head := fieldLabel(dt, col) + " ›"
+	out := pathFields(col, first, head, 1)
+	for i := range first.Fields {
+		mid := &first.Fields[i]
+		if mid.Fieldtype != "Link" {
+			continue
+		}
+		second := links.target(mid)
+		if second == nil {
+			continue
+		}
+		out = append(out, pathFields(col+"."+mid.Fieldname, second, head+" "+fieldLabel(first, mid.Fieldname)+" ›", 2)...)
+	}
+	return out
+}
+
+// pathFields lists the dimension fields of rec, each as the path prefix followed by the field name.
+func pathFields(prefix string, rec *doctype.DocType, group string, hops int) []contract.ExploreDimension {
+	var out []contract.ExploreDimension
+	for _, f := range rec.Fields {
+		if !fieldKind(f.Fieldtype).groupable() {
+			continue
+		}
+		out = append(out, contract.ExploreDimension{Path: prefix + "." + f.Fieldname, Label: fieldLabel(rec, f.Fieldname),
+			Kind: f.Fieldtype, Hops: hops, Group: group})
+	}
+	return out
 }
 
 // fieldLabel is the field's label, or its column name when the record type does not declare the field.

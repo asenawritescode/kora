@@ -881,6 +881,12 @@
     "ExploreDimension": {
       "additionalProperties": false,
       "properties": {
+        "group": {
+          "type": "string"
+        },
+        "hops": {
+          "type": "integer"
+        },
         "kind": {
           "type": "string"
         },
@@ -892,6 +898,7 @@
         }
       },
       "required": [
+        "hops",
         "kind",
         "label",
         "path"
@@ -1421,6 +1428,12 @@
         },
         "label": {
           "type": "string"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "values": {
           "items": {
@@ -3410,6 +3423,12 @@
     "ExploreDimension": {
       "additionalProperties": false,
       "properties": {
+        "group": {
+          "type": "string"
+        },
+        "hops": {
+          "type": "integer"
+        },
         "kind": {
           "type": "string"
         },
@@ -3421,6 +3440,7 @@
         }
       },
       "required": [
+        "hops",
         "kind",
         "label",
         "path"
@@ -3926,6 +3946,12 @@
         },
         "label": {
           "type": "string"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "values": {
           "items": {

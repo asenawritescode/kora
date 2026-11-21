@@ -34,7 +34,7 @@ func (p plan) previousRange() (tenanttime.Date, tenanttime.Date) {
 // previousRows runs the previous-period window and returns its rows aligned with cur's rows. It
 // uses the current keys: with top-N, the previous Other group is every group outside the current
 // top N. A group that appears only in the previous period has no current row and is dropped.
-func (e Engine) previousRows(ctx context.Context, p plan, cur aggregate, keys []string) ([]Row, error) {
+func (e Engine) previousRows(ctx context.Context, p plan, cur aggregate, keys []string, labels []map[string]string) ([]Row, error) {
 	from, to := p.previousRange()
 	prevPlan := p
 	prevPlan.from, prevPlan.to = from, to
@@ -46,7 +46,7 @@ func (e Engine) previousRows(ctx context.Context, p plan, cur aggregate, keys []
 		prev = prev.fold(keptGroups(keys))
 	}
 	prev.groups = cur.groups
-	return p.rows(prev, keys, from, to), nil
+	return p.rows(prev, keys, from, to, labels), nil
 }
 
 // keptGroups is the set of keys that are real groups: every key except the Other group.

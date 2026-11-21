@@ -23,7 +23,7 @@ type plan struct {
 	grain     Grain
 	from      tenanttime.Date
 	to        tenanttime.Date
-	dims      []string    // dimension columns the result is grouped by
+	dims      []dimension // dimensions the result is grouped by, in request order
 	series    []series    // one aggregate per simple metric, shared by every metric that uses it
 	metrics   []output    // every metric the query computes; a metric follows the metrics it reads
 	requested []int       // index into metrics of each requested metric, in request order
@@ -93,7 +93,7 @@ func planQuery(cat Catalog, q Query) (plan, error) {
 		}
 		c.plan.requested = append(c.plan.requested, i)
 	}
-	if err := c.plan.addGrouping(q); err != nil {
+	if err := c.plan.addGrouping(cat, q); err != nil {
 		return plan{}, err
 	}
 	c.plan.summary = c.plan.fitsSummary()
@@ -268,16 +268,17 @@ func (c *planner) addSeries(m Metric) (int, error) {
 	return c.series[m.Name], nil
 }
 
-// addGrouping checks the dimensions and query filters against the model.
-func (p *plan) addGrouping(q Query) error {
+// addGrouping resolves the dimensions and checks the query filters against the model.
+func (p *plan) addGrouping(cat Catalog, q Query) error {
 	if p.model == nil {
 		return errors.New("no metric reads a record type")
 	}
 	for _, name := range q.Dimensions {
-		if !isDimension(p.model.Facts, name) {
-			return fmt.Errorf("dimension %q is not a facts dimension of %s", name, p.model.Name)
+		dim, err := p.dimensionOf(cat, name, len(p.dims))
+		if err != nil {
+			return err
 		}
-		p.dims = append(p.dims, name)
+		p.dims = append(p.dims, dim)
 	}
 	for _, f := range q.Filters {
 		if err := f.validate(p.model.Facts); err != nil {
@@ -289,13 +290,14 @@ func (p *plan) addGrouping(q Query) error {
 }
 
 // fitsSummary reports whether the summary table can answer the plan. Summaries are per day, per
-// status, and per one declared dimension, and they carry no owner. Distinct counts need the facts.
+// status, and per one declared dimension, and they carry no owner. Distinct counts and dimension paths
+// need the facts.
 func (p plan) fitsSummary() bool {
-	if p.scope.Owner != "" || len(p.dims) > 1 {
+	if p.scope.Owner != "" || len(p.dims) > 1 || p.hasJoins() {
 		return false
 	}
 	usable := func(field string) bool {
-		return field == p.model.Facts.StatusField || (len(p.dims) == 1 && field == p.dims[0])
+		return field == p.model.Facts.StatusField || (len(p.dims) == 1 && field == p.dims[0].name)
 	}
 	for _, s := range p.series {
 		if s.agg == aggCountDistinct {

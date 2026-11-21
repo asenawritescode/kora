@@ -13,6 +13,9 @@ import (
 // ErrNotSupported marks a query that names a metric or shape this compiler does not run yet.
 var ErrNotSupported = errors.New("metrics: not supported yet")
 
+// ErrForbidden marks a query that names a record type the caller may not join to through a dimension path.
+var ErrForbidden = errors.New("metrics: record type not readable for this dimension")
+
 // ErrRangeTooLarge marks a query whose range covers more buckets than the grain allows.
 var ErrRangeTooLarge = errors.New("metrics: range covers too many buckets")
 
@@ -28,10 +31,13 @@ const (
 	GrainRange Grain = "range"
 )
 
-// Scope narrows a query to what the caller may read. An empty field is not applied.
+// Scope narrows a query to what the caller may read. An empty field is not applied. Joinable names the
+// record types a dimension path or a label may read through a Link field; a path into any other
+// record type is refused with ErrForbidden, and a label for it is left out.
 type Scope struct {
 	LegalEntity string
 	Owner       string
+	Joinable    map[string]bool
 }
 
 // Compare names the window a result is compared with.
@@ -78,10 +84,14 @@ func NewCatalog(defs []Metric, doctypes []*doctype.DocType) Catalog {
 // Row is one bucket of one group. Values follow Result.Metrics; Group follows Result.Dimensions.
 // A value is null (Valid false) when a ratio's or derived metric's divisor is zero or an operand is
 // null; sums and counts are never null. Label is set only on the Other group, whose Group is "__other__".
+// Labels follows Group when a dimension names a record type: each entry is that record's title for the
+// group value, empty when the record has none or the caller may not read it. Labels is nil when no
+// dimension of the query is labelled.
 type Row struct {
 	Period tenanttime.Date
 	Group  []string
 	Label  string
+	Labels []string
 	Values []decimal.NullDecimal
 }
 

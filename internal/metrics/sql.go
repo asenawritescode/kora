@@ -31,7 +31,7 @@ func (p plan) summarySQL(d db.Dialect) (string, []any) {
 	group := []string{q("business_date")}
 	grain := ""
 	if len(p.dims) == 1 {
-		grain = p.dims[0]
+		grain = p.dims[0].name
 		sel = append(sel, q("grain_value"))
 		group = append(group, q("grain_value"))
 	}
@@ -60,8 +60,8 @@ func (p plan) factsSQL(d db.Dialect) (string, []any) {
 	sel := []string{f + q("business_date")}
 	group := []string{f + q("business_date")}
 	for _, dim := range p.dims {
-		sel = append(sel, f+q(dim))
-		group = append(group, f+q(dim))
+		sel = append(sel, f+q(dim.alias))
+		group = append(group, f+q(dim.alias))
 	}
 	for _, s := range p.series {
 		sel = append(sel, p.factsAggregate(d, f, s, &args))
@@ -90,9 +90,24 @@ func (p plan) factsAggregate(d db.Dialect, f string, s series, args *[]any) stri
 	return "COUNT(DISTINCT CASE WHEN " + p.condition(d, f, conds, args) + " THEN " + f + d.QuoteIdent(s.column) + " ELSE NULL END)"
 }
 
-// factsPart selects the rows of one fact table that fall in the query's scope and range.
+// factsPart selects the rows of one fact table that fall in the query's scope and range. Fact columns
+// are qualified with the fact alias, because the joins of a path dimension bring in other tables with
+// the same column names.
 func (p plan) factsPart(d db.Dialect, table string, args *[]any) string {
 	q := d.QuoteIdent
+	var selects []string
+	for _, c := range p.factsColumns() {
+		selects = append(selects, factAlias+"."+q(c))
+	}
+	selects = append(selects, p.pathSelects(d)...)
+	where := p.factsWhere(d, args)
+	from := q(table) + " AS " + factAlias + p.joinClauses(d)
+	return fmt.Sprintf("SELECT %s FROM %s WHERE %s", strings.Join(selects, ", "), from, strings.Join(where, " AND "))
+}
+
+// factsColumns lists the fact columns a fact part selects, each once: the fixed columns, the plain
+// dimensions, the measures and the columns the filters read.
+func (p plan) factsColumns() []string {
 	cols := []string{"business_date", "line_id", "status"}
 	add := func(name string) {
 		if !slices.Contains(cols, name) {
@@ -100,7 +115,9 @@ func (p plan) factsPart(d db.Dialect, table string, args *[]any) string {
 		}
 	}
 	for _, dim := range p.dims {
-		add(dim)
+		if dim.leaf == "" {
+			add(dim.alias)
+		}
 	}
 	for _, s := range p.series {
 		if s.column != "" && s.agg != aggCount {
@@ -113,15 +130,27 @@ func (p plan) factsPart(d db.Dialect, table string, args *[]any) string {
 	for _, c := range p.where {
 		add(p.columnName(c.field))
 	}
-	quoted := make([]string, len(cols))
-	for i, c := range cols {
-		quoted[i] = q(c)
+	return cols
+}
+
+// pathSelects selects the leaf of each path dimension's last join under the dimension's alias.
+func (p plan) pathSelects(d db.Dialect) []string {
+	var out []string
+	for _, dim := range p.dims {
+		if dim.leaf != "" {
+			out = append(out, dim.lastAlias()+"."+d.QuoteIdent(dim.leaf)+" AS "+d.QuoteIdent(dim.alias))
+		}
 	}
-	where := append(p.rangeConds(d, "", args), q("deleted")+" = ?")
+	return out
+}
+
+// factsWhere holds a fact part to its range, its live rows, the caller's scope and the query's filters.
+func (p plan) factsWhere(d db.Dialect, args *[]any) []string {
+	const t = factAlias + "."
+	where := append(p.rangeConds(d, t, args), t+d.QuoteIdent("deleted")+" = ?")
 	*args = append(*args, db.BoolParam(d, false))
-	where = append(where, p.scopeConds(d, "", true, args)...)
-	where = append(where, p.filterConds(d, "", args)...)
-	return fmt.Sprintf("SELECT %s FROM %s WHERE %s", strings.Join(quoted, ", "), q(table), strings.Join(where, " AND "))
+	where = append(where, p.scopeConds(d, t, true, args)...)
+	return append(where, p.filterConds(d, t, args)...)
 }
 
 // rangeConds bounds business_date to From through To, both inclusive. An opening reads every day

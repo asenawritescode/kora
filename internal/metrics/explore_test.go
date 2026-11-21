@@ -27,7 +27,7 @@ func exploreFixture(t *testing.T) (Catalog, []*doctype.DocType) {
 
 func TestExploreCatalogListsFactRecordTypes(t *testing.T) {
 	_, docs := exploreFixture(t)
-	got := ExploreCatalog(docs)
+	got := ExploreCatalog(docs, readAll(docs), nil)
 	if len(got) != 2 || got[0].RecordType != "Expense" || got[1].RecordType != "Sale" {
 		t.Fatalf("record types = %+v, want Expense and Sale", got)
 	}
@@ -121,4 +121,13 @@ func TestWithAdHocSuffixesANameTakenByADeclaredMetric(t *testing.T) {
 	if out.Metrics["adhoc_expense_count"].Label != "Pack" {
 		t.Fatal("the declared metric was replaced")
 	}
+}
+
+// readAll marks every record type as readable, for tests that do not exercise permissions.
+func readAll(docs []*doctype.DocType) map[string]bool {
+	out := make(map[string]bool, len(docs))
+	for _, dt := range docs {
+		out[dt.Name] = true
+	}
+	return out
 }

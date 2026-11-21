@@ -222,3 +222,28 @@ func TestMetricDefsCacheDoesNotKeepFailedParse(t *testing.T) {
 		t.Fatalf("after a failed parse the next load must parse again: parsed=%v err=%v", parsed, err)
 	}
 }
+
+// TestMetricsQueryJoinsNeedReadOfTheLinkedType checks that a dimension path into a linked record type the
+// caller may not read is refused, and that a readable one passes authorization.
+func TestMetricsQueryJoinsNeedReadOfTheLinkedType(t *testing.T) {
+	defs := []metrics.Metric{{Name: "expenses", Label: "Expenses", Type: metrics.KindSimple, Model: "Expense", Measure: &metrics.Measure{Agg: "count"}}}
+	tests := []struct {
+		name       string
+		perms      []*doctype.Permission
+		wantStatus int
+	}{
+		{"linked type not readable is refused", []*doctype.Permission{{Doctype: "Expense", Role: "Cashier", Read: true}}, http.StatusForbidden},
+		{"linked type readable reaches the database step", []*doctype.Permission{{Doctype: "Expense", Role: "Cashier", Read: true}, {Doctype: "Supplier", Role: "Cashier", Read: true}}, http.StatusServiceUnavailable},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := linkedRegistry(tc.perms)
+			api := metricsAPI{registry: registry, defs: func(*gin.Context) ([]metrics.Metric, error) { return defs, nil }}
+			body := `{"metrics":["expenses"],"dimensions":["supplier.town"],"from":"2026-11-18","to":"2026-11-20","grain":"day"}`
+			recorder := serveMetrics(t, registry, api, []string{"Cashier"}, "POST", "/api/v1/metrics/query", body)
+			if recorder.Code != tc.wantStatus {
+				t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body, tc.wantStatus)
+			}
+		})
+	}
+}

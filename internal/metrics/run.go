@@ -86,10 +86,20 @@ func (e Engine) Query(ctx context.Context, q Query) (Result, error) {
 	if p.top > 0 {
 		cur = cur.fold(p.topKeys(cur, p.top))
 	}
+	return e.result(ctx, p, cur)
+}
+
+// result labels an aggregate's groups and builds its rows, with the previous period when the query
+// compares.
+func (e Engine) result(ctx context.Context, p plan, cur aggregate) (Result, error) {
 	keys := p.keys(cur)
-	res := Result{Metrics: p.metricNames(), Dimensions: slices.Clone(p.dims), Rows: p.rows(cur, keys, p.from, p.to)}
+	labels, err := e.labelsOf(ctx, p, cur, keys)
+	if err != nil {
+		return Result{}, err
+	}
+	res := Result{Metrics: p.metricNames(), Dimensions: p.dimNames(), Rows: p.rows(cur, keys, p.from, p.to, labels)}
 	if p.compare == ComparePreviousPeriod {
-		res.Previous, err = e.previousRows(ctx, p, cur, keys)
+		res.Previous, err = e.previousRows(ctx, p, cur, keys, labels)
 		if err != nil {
 			return Result{}, err
 		}
@@ -232,8 +242,8 @@ func (p plan) keys(agg aggregate) []string {
 
 // rows gap-fills every key across [from, to] and computes each requested metric from its component
 // sums. Rows come out key by key, bucket by bucket, so two calls with equal keys and equal bucket
-// counts line up by position.
-func (p plan) rows(agg aggregate, keys []string, from, to tenanttime.Date) []Row {
+// counts line up by position. labels is nil or one map per dimension, from labelsOf.
+func (p plan) rows(agg aggregate, keys []string, from, to tenanttime.Date, labels []map[string]string) []Row {
 	starts := bucketStarts(from, to, p.grain)
 	out := make([]Row, 0, len(keys)*len(starts))
 	for _, key := range keys {
@@ -241,6 +251,9 @@ func (p plan) rows(agg aggregate, keys []string, from, to tenanttime.Date) []Row
 		for i, start := range starts {
 			period := toDate(start)
 			row := Row{Period: period, Group: agg.groups[key], Values: p.values(settled[i])}
+			if labels != nil {
+				row.Labels = groupLabels(labels, agg.groups[key])
+			}
 			if key == otherGroup {
 				row.Label = otherLabel
 			}

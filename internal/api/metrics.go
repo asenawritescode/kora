@@ -360,19 +360,39 @@ func (m metricsAPI) authorizeQuery(c *gin.Context, cat metrics.Catalog, q *metri
 	if err != nil {
 		return nil, &queryRefusal{http.StatusBadRequest, "metrics.query_invalid", err.Error()}
 	}
-	scope, denial := metricScope(c, analyticsRegistry(c, m.registry), metrics.Models(ms))
+	reg := analyticsRegistry(c, m.registry)
+	scope, denial := metricScope(c, reg, metrics.Models(ms))
 	if denial != nil {
 		return nil, &queryRefusal{denial.status, "metrics.forbidden", denial.message}
 	}
+	scope.Joinable = m.joinable(c, reg, cat, q.Dimensions)
 	q.Scope = scope
 	if err := cat.Check(*q); err != nil {
-		code := "metrics.query_invalid"
-		if errors.Is(err, metrics.ErrRangeTooLarge) {
+		code, status := "metrics.query_invalid", http.StatusBadRequest
+		switch {
+		case errors.Is(err, metrics.ErrRangeTooLarge):
 			code = "metrics.range_too_large"
+		case errors.Is(err, metrics.ErrForbidden):
+			code, status = "metrics.forbidden", http.StatusForbidden
 		}
-		return nil, &queryRefusal{http.StatusBadRequest, code, err.Error()}
+		return nil, &queryRefusal{status, code, err.Error()}
 	}
 	return ms, nil
+}
+
+// joinable names the record types a query's dimension paths and labels may join to. It asks only when a
+// query groups by something, and reads every record type once.
+func (m metricsAPI) joinable(c *gin.Context, reg *doctype.Registry, cat metrics.Catalog, dims []string) map[string]bool {
+	if len(dims) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(cat.Models))
+	for name := range cat.Models {
+		if joinableRecordType(c, reg, name) {
+			out[name] = true
+		}
+	}
+	return out
 }
 
 // drill answers POST /metrics/drill with the record list behind one number. The list endpoint

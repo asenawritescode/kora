@@ -66,3 +66,51 @@ func TestExploreCatalogOffersOnlyReadableFactRecordTypes(t *testing.T) {
 		t.Fatalf("measures = %v, want count and sum:amount", keys)
 	}
 }
+
+// linkedRegistry is an Expense whose supplier is a Link to Supplier, with the grants the caller holds.
+func linkedRegistry(perms []*doctype.Permission) *doctype.Registry {
+	registry := doctype.NewRegistry()
+	registry.LoadFull([]*doctype.DocType{
+		{Name: "Expense", Fields: []doctype.Field{
+			{Fieldname: "amount", Fieldtype: "Currency"},
+			{Fieldname: "supplier", Label: "Supplier", Fieldtype: "Link", Options: "Supplier"},
+		}, Facts: &doctype.FactModel{Time: "creation", Measures: []doctype.FactMeasure{{Field: "amount"}}, Dimensions: []doctype.FactDimension{{Field: "supplier"}}}},
+		{Name: "Supplier", Fields: []doctype.Field{{Fieldname: "town", Label: "Town", Fieldtype: "Data"}}},
+	}, []*doctype.Role{{Name: "Cashier"}}, perms)
+	return registry
+}
+
+// TestExploreCatalogLinkedDimensionsNeedReadOfTheLinkedType checks that a Link dimension opens its linked
+// record's fields only when the caller may read that record type.
+func TestExploreCatalogLinkedDimensionsNeedReadOfTheLinkedType(t *testing.T) {
+	tests := []struct {
+		name     string
+		perms    []*doctype.Permission
+		wantPath bool
+	}{
+		{"linked type readable", []*doctype.Permission{{Doctype: "Expense", Role: "Cashier", Read: true}, {Doctype: "Supplier", Role: "Cashier", Read: true}}, true},
+		{"linked type not readable", []*doctype.Permission{{Doctype: "Expense", Role: "Cashier", Read: true}}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := linkedRegistry(tc.perms)
+			gin.SetMode(gin.TestMode)
+			execution := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-explore", []string{"Cashier"}, nil)
+			ex, _ := execution.Get("policy_execution")
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Set("site_name", "tenant-explore")
+				c.Set("site_id", "stable-tenant")
+				c.Set("site_registry", registry)
+				c.Set("policy_execution", ex.(policy.Execution))
+				c.Next()
+			})
+			registerExploreRoutes(router.Group("/api/v1"), registry)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/explore/catalog", nil))
+			if got := strings.Contains(recorder.Body.String(), `"path":"supplier.town"`); got != tc.wantPath {
+				t.Fatalf("supplier.town offered = %v, want %v: %s", got, tc.wantPath, recorder.Body)
+			}
+		})
+	}
+}
