@@ -32,6 +32,7 @@ type packageActivationWrite struct {
 	site     string
 	target   *doctype.ConfigSnapshot
 	commit   configstore.ManagementActivationCommit
+	replaced map[contract.ModuleID]bool
 }
 
 // commitPackageActivation commits config, modules, the journal and the target's
@@ -52,6 +53,9 @@ func commitPackageActivationTx(ctx context.Context, write packageActivationWrite
 		return "", fmt.Errorf("begin package activation: %w", err)
 	}
 	defer tx.Rollback()
+	if inFlightErr := refuseReplacedModulesInFlight(ctx, tx, write.dialect, write.tenant, write.replaced); inFlightErr != nil {
+		return "", inFlightErr
+	}
 	versionID, _, err := configstore.NewStore(write.database, write.dialect).CommitManagementActivation(ctx, tx, write.target, write.site, write.dialect, write.commit)
 	if err != nil {
 		return "", err
@@ -89,6 +93,9 @@ func publishPackageWorkflows(ctx context.Context, tx *sql.Tx, write packageActiv
 // packageActivationFailure classifies a failed activation transaction. Only a
 // known refusal is final; any other error may leave the commit outcome unknown.
 func packageActivationFailure(err error) management.FinishResult {
+	if refusal, ok := inFlightFailure(err); ok {
+		return refusal
+	}
 	switch {
 	case errors.Is(err, configstore.ErrConfigRevisionConflict):
 		return failed(contract.CodeConflict, "tenant configuration changed during package activation")

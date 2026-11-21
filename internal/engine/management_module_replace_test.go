@@ -169,3 +169,34 @@ func TestMergeManagementPackageSnapshotReplacementDropsRemovedOwnedDocTypes(t *t
 		t.Fatalf("doctypes after replacement = %v; want the removed owned Legacy gone and tenant Customer kept", names)
 	}
 }
+
+func TestCheckReplacedModulesQuiet(t *testing.T) {
+	replaced := map[contract.ModuleID]bool{"pos.core": true, "pos.app": true}
+	tests := []struct {
+		name     string
+		inFlight map[contract.ModuleID]int
+		wantErr  string
+	}{
+		{name: "no operations", inFlight: map[contract.ModuleID]int{}},
+		{name: "operations on an unchanged module are fine", inFlight: map[contract.ModuleID]int{"finance.ar": 3}},
+		{name: "operation on a replaced module blocks", inFlight: map[contract.ModuleID]int{"pos.core": 1}, wantErr: `module "pos.core" has operations in progress; retry the upgrade when they finish`},
+		{name: "first replaced module in ID order is named", inFlight: map[contract.ModuleID]int{"pos.core": 1, "pos.app": 2}, wantErr: `module "pos.app" has operations in progress; retry the upgrade when they finish`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkReplacedModulesQuiet(replaced, tt.inFlight)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("error = %v; want nil", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.wantErr {
+				t.Fatalf("error = %v; want %q", err, tt.wantErr)
+			}
+			if _, ok := inFlightFailure(err); !ok {
+				t.Fatalf("in-flight error is not classified as a refusal: %v", err)
+			}
+		})
+	}
+}

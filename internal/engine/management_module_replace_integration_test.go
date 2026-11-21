@@ -5,6 +5,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -79,6 +80,17 @@ func TestPackageActivationReplacesInstalledModuleAcrossDialects(t *testing.T) {
 				t.Fatalf("after failed v2 adjust_stock title = %q; v1 must stay active", got)
 			}
 
+			// An operation of v1 still in progress blocks the upgrade, and a blocked
+			// upgrade leaves v1 untouched. Only a terminal receipt releases it.
+			receipt := h.insertReceipt("inventory.core", contract.ReceiptRunning)
+			h.expectInFlightRefusal(v2, "inventory.core")
+			h.setReceiptState(receipt, contract.ReceiptOutcomeUnknown)
+			h.expectInFlightRefusal(v2, "inventory.core")
+			if got, rev := h.moduleVersion("inventory.core"), h.moduleRevision("inventory.core"); got != "1.0.0" || rev != v1Revision {
+				t.Fatalf("blocked upgrade changed v1: module %q revision %d; want 1.0.0 revision %d", got, rev, v1Revision)
+			}
+			h.setReceiptState(receipt, contract.ReceiptCompleted)
+
 			if op := h.apply(v2); op.State != contract.OperationSucceeded {
 				t.Fatalf("upgrade to v2 = %s %+v; want succeeded", op.State, op.Error)
 			}
@@ -104,6 +116,36 @@ func TestPackageActivationReplacesInstalledModuleAcrossDialects(t *testing.T) {
 			}
 		})
 	}
+}
+
+// expectInFlightRefusal applies a package and requires the in-progress refusal naming module.
+func (h *addModuleHarness) expectInFlightRefusal(a addModuleArtifact, module contract.ModuleID) {
+	h.t.Helper()
+	op := h.apply(a)
+	want := fmt.Sprintf("module %q has operations in progress", module)
+	if op.State != contract.OperationFailed || op.Error == nil || op.Error.Type != contract.CodeConflict || !strings.Contains(op.Error.Message, want) {
+		h.t.Fatalf("apply during in-flight operation = %s %+v; want failed CONFLICT naming %q", op.State, op.Error, module)
+	}
+}
+
+// insertReceipt writes a published operation receipt row for an operation that
+// module provides. The row is written directly, so the test controls its state
+// without running the operation.
+func (h *addModuleHarness) insertReceipt(module contract.ModuleID, state contract.OperationReceiptStatus) string {
+	h.t.Helper()
+	h.check(configstore.NewModuleStore(h.database, h.dialect).EnsurePublishedOperationReceiptSchema(h.ctx))
+	seq := fmt.Sprintf("%064x", time.Now().UnixNano())
+	id := "inflight-" + seq[len(seq)-24:]
+	_, err := h.database.ExecContext(h.ctx, db.Rebind(h.dialect, `INSERT INTO _kora_published_operation_receipt (tenant_id, execution_id, actor_type, actor_id, intent_hash, input_hash, state, dispatch_state, operation_ref, scope_json, dispatch_json, lease_json, receipt_json) VALUES (?, ?, 'human', 'tester', ?, ?, ?, 'dispatched', ?, '{}', '{}', '{}', '{}')`),
+		string(h.tenant), id, seq, strings.Repeat("b", 64), string(state), contract.PublishedOperationRef(module, "inventory.movements", "adjust_stock"))
+	h.check(err)
+	return id
+}
+
+func (h *addModuleHarness) setReceiptState(id string, state contract.OperationReceiptStatus) {
+	h.t.Helper()
+	_, err := h.database.ExecContext(h.ctx, db.Rebind(h.dialect, `UPDATE _kora_published_operation_receipt SET state = ? WHERE tenant_id = ? AND execution_id = ?`), string(state), string(h.tenant), id)
+	h.check(err)
 }
 
 // moduleReleaseFiles reads the inventory pack with its pack version and the

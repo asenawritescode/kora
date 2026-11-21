@@ -171,7 +171,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 			handle.Release()
 			return packageRecoveryRequired("tenant configuration snapshot read needs recovery"), nil
 		}
-		target, refusal := prepareManagementPackageTarget(ctx, packageTenantDB{conn: runtime.DB, name: info.DBName, dialect: dialect}, currentSnapshot, incoming, newPackageAuthority(packageConstraint, moduleSnapshot))
+		target, refusal := prepareManagementPackageTarget(ctx, packageTenantDB{conn: runtime.DB, name: info.DBName, dialect: dialect, tenant: operation.Tenant}, currentSnapshot, incoming, newPackageAuthority(packageConstraint, moduleSnapshot))
 		if refusal != nil {
 			releaseTenantWork()
 			handle.Release()
@@ -301,6 +301,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 	}
 	versionID, err := commitPackageActivation(ctx, packageActivationWrite{
 		database: runtime.DB, dialect: dialect, tenant: operation.Tenant, site: info.Name, target: target,
+		replaced: replacedModuleIDs(moduleSnapshot.Modules, target.Modules),
 		commit: configstore.ManagementActivationCommit{
 			OperationID: string(operation.ID), JournalKind: "management_package", FromPhase: configstore.ActivationValidated,
 			RecoveryPlan: "replace-runtime-from-tenant-db", CreatedBy: string(operation.Caller),
