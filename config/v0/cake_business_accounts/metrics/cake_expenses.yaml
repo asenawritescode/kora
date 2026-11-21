@@ -1,0 +1,11 @@
+name: cake_expenses
+label: Expenses
+type: simple
+model: Cake Expense
+measure:
+  agg: sum
+  field: total_cost
+time: business_date
+good: down
+format: currency
+description: Total cost of the cake expenses by expense date (sum).

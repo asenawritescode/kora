@@ -1,0 +1,8 @@
+name: cake_profit_margin
+label: Profit margin
+type: derived
+formula: cake_net_profit / cake_sales * 100
+time: business_date
+good: up
+format: percent
+description: Net profit as a percent of sales; empty when there are no sales.

@@ -95,3 +95,8 @@ fields:
     in_list_view: true
   - fieldname: notes
     fieldtype: Text
+facts:
+  time: order_date
+  measures:
+    - field: total_sales
+    - field: estimated_gross_profit
