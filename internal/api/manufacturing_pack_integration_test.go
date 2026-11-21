@@ -20,7 +20,7 @@ func manufacturingStock(t *testing.T, c *packClient, product string) float64 {
 // materials issued (stock down), a production run (finished stock up), and the
 // refusals around them.
 func TestManufacturingRecipeWorkOrderIssueAndRunWorkflowOnMySQL(t *testing.T) {
-	handler, db, reg, site := newPackLayersHandler(t, "pos-base", "manufacturing")
+	handler, db, reg, site := newPackLayersHandler(t, "erpsell", "manufacturing")
 	c := newPackClient(t, handler, db, reg, site)
 
 	flour := c.create("Product", `{"reference":"M-FLOUR","product_name":"Flour","selling_price":0,"stock_qty":50,"unit":"kg"}`)

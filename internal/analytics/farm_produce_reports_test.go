@@ -17,9 +17,9 @@ func TestProduceReportsOnlyUseWhatTheEngineOffers(t *testing.T) {
 		t.Fatalf("parse farm-produce: %v", err)
 	}
 	// Product is the selling pack's record type, which deliveries link to.
-	selling, err := doctype.ParseConfigTree(filepath.Join(root, "pos-base"))
+	selling, err := doctype.ParseConfigTree(filepath.Join(root, "erpsell"))
 	if err != nil {
-		t.Fatalf("parse pos-base: %v", err)
+		t.Fatalf("parse erpsell: %v", err)
 	}
 	catalog := BuildSemanticCatalog(append(docTypes, selling...))
 	reports, err := ParseReportsDirectory(filepath.Join(root, "farm-produce", "reports"))

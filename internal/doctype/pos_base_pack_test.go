@@ -10,19 +10,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The pos-base pack keeps books in one base currency and lets every money
+// The erpsell pack keeps books in one base currency and lets every money
 // record carry its own currency. These tests pin that convention so a later
 // change cannot quietly drop it, and they catch the dangling-link mistake that
 // once stopped a workspace from being set up.
 
-const posBasePath = "../../config/pos-base"
+const posBasePath = "../../config/erpsell"
 
 func loadPOSBase(t *testing.T) map[string]*DocType {
 	skipParkedPacks(t)
 	t.Helper()
 	doctypes, err := ParseConfigTree(posBasePath)
 	if err != nil {
-		t.Fatalf("parse pos-base: %v", err)
+		t.Fatalf("parse erpsell: %v", err)
 	}
 	byName := make(map[string]*DocType, len(doctypes))
 	for _, dt := range doctypes {
@@ -35,7 +35,7 @@ func TestPOSBaseHasNoDanglingLinks(t *testing.T) {
 	skipParkedPacks(t)
 	doctypes, err := ParseConfigTree(posBasePath)
 	if err != nil {
-		t.Fatalf("parse pos-base: %v", err)
+		t.Fatalf("parse erpsell: %v", err)
 	}
 	for _, problem := range ValidateAll(doctypes) {
 		t.Errorf("%s", problem.Error())
@@ -57,7 +57,7 @@ func TestPOSBaseMoneyRecordsCarryCurrencyAndFrozenRate(t *testing.T) {
 	for name, amountField := range posBaseMoneyRecords {
 		dt := dts[name]
 		if dt == nil {
-			t.Errorf("%s is missing from pos-base", name)
+			t.Errorf("%s is missing from erpsell", name)
 			continue
 		}
 		currency := dt.GetField("currency")

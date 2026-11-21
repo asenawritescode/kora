@@ -1,0 +1,44 @@
+name: Stock Movement
+module: Products
+append_only: true
+title_field: product
+search_fields: product, source_name, reason
+sort_field: creation
+sort_order: DESC
+description: >-
+  One change to a product's stock: how much went in or out, the stock after it,
+  and the record that caused it (sale, receipt, adjustment or count). Written by
+  the system; it cannot be edited.
+fields:
+  - fieldname: product
+    fieldtype: Link
+    options: Product
+    label: Product
+    read_only: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: quantity_change
+    fieldtype: Float
+    label: Change
+    read_only: true
+    in_list_view: true
+  - fieldname: balance_after
+    fieldtype: Float
+    label: Stock after
+    read_only: true
+    in_list_view: true
+  - fieldname: source_doctype
+    fieldtype: Data
+    label: Caused by
+    read_only: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: source_name
+    fieldtype: Data
+    label: Record
+    read_only: true
+    in_list_view: true
+  - fieldname: reason
+    fieldtype: Data
+    label: Reason
+    read_only: true

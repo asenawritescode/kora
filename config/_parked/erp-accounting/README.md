@@ -1,6 +1,6 @@
 # erp-accounting
 
-Layer on top of `pos-base` (needs its `Currency`; install both). The books:
+Layer on top of `erpsell` (needs its `Currency`; install both). The books:
 Account, Accounting Period, Journal Entry (+ Journal Line). Role: Accountant
 (the workspace administrator can do all of it).
 

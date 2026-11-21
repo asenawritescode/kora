@@ -1,0 +1,14 @@
+name: expected_cash
+module_owner_id: erpsell.core
+capability: pos.till
+operation: expected_cash
+source: Till Session
+permission: read
+scope: tenant
+owner_field: opened_by
+input:
+  till_session: {type: string, max_length: 140}
+filters:
+  - {field: name, op: eq, value: $input.till_session}
+fields: [name, opened_by, opening_float, cash_sale_count, cash_sale_total, cash_refund_count, cash_refund_total, payout_count, payout_total, payin_count, payin_total, expected_cash]
+limit: 1

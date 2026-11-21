@@ -19,12 +19,12 @@ import (
 	"github.com/asenawritescode/kora/internal/schema"
 )
 
-// newPOSBaseHandler loads the real config/pos-base pack (record types and the
+// newPOSBaseHandler loads the real config/erpsell pack (record types and the
 // register view) into a throwaway MySQL database, so the tests below exercise
 // the pack as shipped and not a copy of it.
 func newPOSBaseHandler(t *testing.T) (*Handler, *sql.DB, *doctype.Registry, string) {
 	t.Helper()
-	return newPackLayersHandler(t, "pos-base")
+	return newPackLayersHandler(t, "erpsell")
 }
 
 // newPackLayersHandler loads several packs together, the way a workspace gets
@@ -98,7 +98,7 @@ func newPackLayersHandlerWithRoles(t *testing.T, extraRoles []*doctype.Role, ext
 		reg.Views.Register(view)
 	}
 	if err := schema.MigrateSiteFromRegistry(database, site, reg, dialect); err != nil {
-		t.Fatalf("migrate pos-base schema: %v", err)
+		t.Fatalf("migrate erpsell schema: %v", err)
 	}
 	writer := outbox.NewSQLWriter(dialect)
 	handler := NewHandler(reg, &orm.TxManager{DB: database, Registry: reg, Dialect: dialect, Outbox: writer, SiteName: site})
@@ -259,7 +259,7 @@ func TestPOSBaseRejectsASaleWithAnImpossibleRate(t *testing.T) {
 // total times the rate frozen on the order. Also proves the whole layer stack
 // creates its tables on MySQL.
 func TestERPPurchasingOrderInAnotherCurrencyAddsUpInBaseCurrency(t *testing.T) {
-	_, db, reg, site := newPackLayersHandler(t, "pos-base", "erp-purchasing")
+	_, db, reg, site := newPackLayersHandler(t, "erpsell", "erp-purchasing")
 	tm := &orm.TxManager{DB: db, Registry: reg, Dialect: kdb.Resolve("mysql"), Outbox: outbox.NewSQLWriter(kdb.Resolve("mysql")), SiteName: site}
 
 	if _, err := db.Exec("INSERT INTO `tabSupplier` (name, supplier_name, status) VALUES ('SUP-1','Dar Traders','Active')"); err != nil {
@@ -317,7 +317,7 @@ func TestERPPurchasingOrderInAnotherCurrencyAddsUpInBaseCurrency(t *testing.T) {
 
 // Every ERP layer together must create its tables on MySQL.
 func TestERPAllLayersCreateTablesOnMySQL(t *testing.T) {
-	_, db, _, _ := newPackLayersHandler(t, "pos-base", "erp-purchasing", "erp-accounting")
+	_, db, _, _ := newPackLayersHandler(t, "erpsell", "erp-purchasing", "erp-accounting")
 	for _, table := range []string{"tabAccount", "tabAccounting Period", "tabJournal Entry", "tabJournal Entry__lines", "tabSupplier Bill", "tabSale", "tabCurrency"} {
 		var count int
 		if err := db.QueryRow("SELECT COUNT(*) FROM `" + table + "`").Scan(&count); err != nil {

@@ -1,6 +1,6 @@
 # erp-inventory
 
-Layer on top of `pos-base` (needs its `Product`; install both). Stock changes you
+Layer on top of `erpsell` (needs its `Product`; install both). Stock changes you
 can trust.
 
 - **Stock Adjustment**: a signed change with a reason (opening balance, count

@@ -1,0 +1,41 @@
+name: Shift
+module: Cash control
+title_field: cashier
+search_fields: cashier, register, status
+sort_field: modified
+sort_order: DESC
+description: >-
+  One cashier's shift on a register, from opening the till to closing it. A shift
+  holds one open till session at a time.
+
+fields:
+  - fieldname: register
+    fieldtype: Link
+    options: Register
+    label: Register
+    reqd: true
+    search_index: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: cashier
+    fieldtype: Data
+    label: Cashier
+    reqd: true
+    search_index: true
+    in_list_view: true
+  - fieldname: started_at
+    fieldtype: Datetime
+    label: Started at
+    in_list_view: true
+  - fieldname: ended_at
+    fieldtype: Datetime
+    label: Ended at
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Open
+      Closed
+    default: Open
+    in_list_view: true
+    in_standard_filter: true

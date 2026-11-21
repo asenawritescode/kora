@@ -1,0 +1,9 @@
+- name: Manager
+  workspace_access: true
+  description: Runs the shop. Sets prices, currencies and rates, and approves cash movements.
+- name: Cashier
+  workspace_access: true
+  description: Rings up sales, takes payments and works a till.
+- name: Owner
+  workspace_access: true
+  description: "Owns the selling setup: registers, payment accounts and every record the register writes."

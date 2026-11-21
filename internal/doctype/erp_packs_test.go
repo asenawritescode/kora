@@ -7,11 +7,11 @@ import (
 	"testing"
 )
 
-// The ERP packs are built in layers on top of pos-base. Each layer is checked
+// The ERP packs are built in layers on top of erpsell. Each layer is checked
 // alone (the repo-wide pack audit) and here together, the way a workspace gets
 // them, so a link to a record in another layer cannot dangle.
 
-var erpPackLayers = []string{"pos-base", "erp-purchasing", "erp-accounting", "erp-inventory"}
+var erpPackLayers = []string{"erpsell", "erp-purchasing", "erp-accounting", "erp-inventory"}
 
 func loadERPLayers(t *testing.T) []*DocType {
 	skipParkedPacks(t)

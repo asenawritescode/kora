@@ -11,7 +11,7 @@ import (
 // the Selling pack: batches need an expiry date, a prescription keeps its
 // medicine lines, and a dispensed prescription is frozen.
 func TestDispensaryPrescriptionAndBatchWorkflowOnMySQL(t *testing.T) {
-	handler, db, reg, site := newPackLayersHandler(t, "pos-base", "batch-expiry")
+	handler, db, reg, site := newPackLayersHandler(t, "erpsell", "batch-expiry")
 	if _, err := db.Exec("INSERT INTO `tabProduct` (name, reference, product_name, selling_price, stock_qty, status) VALUES ('PROD-001','P-1','Amoxicillin 500mg',300,0,'Active')"); err != nil {
 		t.Fatal(err)
 	}

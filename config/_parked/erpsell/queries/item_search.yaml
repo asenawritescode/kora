@@ -1,0 +1,23 @@
+name: item_search
+module_owner_id: erpsell.core
+capability: inventory.items
+operation: item_search
+source: Product
+permission: read
+scope: tenant
+input:
+  term: {type: string, max_length: 80}
+  category: {type: string, max_length: 140}
+# The query DSL has no joins, and stock is Product.stock_qty, so the row carries
+# its own quantity. Barcode matches exactly: the DSL has no ends-with operator.
+filters:
+  - any:
+      - {field: product_name, op: contains, value: $input.term, optional: true}
+      - {field: local_name, op: contains, value: $input.term, optional: true}
+      - {field: shelf_code, op: contains, value: $input.term, optional: true}
+      - {field: barcode, op: eq, value: $input.term, optional: true}
+    optional: true
+  - {field: category, op: eq, value: $input.category, optional: true}
+fields: [name, product_name, local_name, shelf_code, barcode, unit, selling_price, category, image, favourite_position, stock_qty]
+sort: [{field: product_name, dir: asc}]
+offline_eligible: true

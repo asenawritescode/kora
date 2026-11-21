@@ -11,7 +11,7 @@ import (
 // refused, unique numbers hold, a cancellation needs a reason, and a served
 // order's table is frozen.
 func TestMenuKitchenOrderWorkflowOnMySQL(t *testing.T) {
-	handler, db, reg, site := newPackLayersHandler(t, "pos-base", "menu-tables")
+	handler, db, reg, site := newPackLayersHandler(t, "erpsell", "menu-tables")
 	c := newPackClient(t, handler, db, reg, site)
 
 	stew := c.create("Menu Item", `{"item_name":"Beef stew","category":"Main","price":650}`)

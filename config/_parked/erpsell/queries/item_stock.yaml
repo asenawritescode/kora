@@ -1,0 +1,14 @@
+name: item_stock
+module_owner_id: erpsell.core
+capability: inventory.stock
+operation: item_stock
+source: Product
+permission: read
+scope: tenant
+input:
+  product: {type: string, max_length: 140}
+filters:
+  - {field: name, op: eq, value: $input.product, optional: true}
+fields: [name, product_name, stock_qty, location]
+sort: [{field: product_name, dir: asc}]
+offline_eligible: true

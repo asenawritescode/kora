@@ -1,0 +1,57 @@
+name: sales_overview
+label: Sales
+route: /reports/sales
+queries:
+  - id: sales_by_day
+    model: sale
+    measures: [count, base_total_sum]
+    dimensions: [sale_date]
+  - id: sales_by_currency
+    model: sale
+    measures: [count, total_sum, base_total_sum]
+    dimensions: [currency]
+  - id: sales_by_status
+    model: sale
+    measures: [count, base_total_sum]
+    dimensions: [status]
+  - id: profit_by_day
+    model: sale
+    measures: [cost_total_sum, profit_sum]
+    dimensions: [sale_date]
+    # Returns carry negative cost and profit, so a refund takes its profit back.
+    filters:
+      - field: status
+        operator: in
+        values: [Awaiting Payment, Partially Paid, Paid, Return]
+visuals:
+  - id: profit_trend
+    type: bar
+    source: profit_by_day
+    x_field: sale_date
+    series:
+      - field: profit_sum
+        label: Profit
+        type: bar
+        format: currency
+      - field: cost_total_sum
+        label: Cost of goods
+        type: bar
+        format: currency
+  - id: sales_trend
+    type: line
+    source: sales_by_day
+    x_field: sale_date
+    series:
+      - field: base_total_sum
+        label: Sales in base currency
+        type: line
+        format: currency
+  - id: sales_by_currency
+    type: bar
+    source: sales_by_currency
+    x_field: currency
+    series:
+      - field: base_total_sum
+        label: Sales in base currency
+        type: bar
+        format: currency

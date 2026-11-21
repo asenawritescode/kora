@@ -5,7 +5,7 @@ Roles: **Cooperative Manager** (manages farmers and deliveries) and **Produce Cl
 farmers, enters deliveries). One view, **Produce Deliveries** at `/produce`, and a produce
 overview report (kilograms by grade and by farmer, at `/reports/produce`).
 
-Depends on the Selling pack (`pos-base`): a delivery links to `Product`.
+Depends on the Selling pack (`erpsell`): a delivery links to `Product`.
 
 - Farmer member numbers are unique; farmers are found by name, member number, phone, village or group.
 - Saving a Produce Delivery raises the product's `stock_qty` by `quantity_kg` in the same

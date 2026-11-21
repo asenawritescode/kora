@@ -11,7 +11,7 @@ import (
 func skipParkedPacks(t *testing.T, packs ...string) {
 	t.Helper()
 	if len(packs) == 0 {
-		packs = []string{"batch-expiry", "erp-accounting", "erp-inventory", "erp-purchasing", "farm-produce", "job-cards", "manufacturing", "menu-tables", "pos-base"}
+		packs = []string{"batch-expiry", "erp-accounting", "erp-inventory", "erp-purchasing", "farm-produce", "job-cards", "manufacturing", "menu-tables", "erpsell"}
 	}
 	for _, pack := range packs {
 		if _, err := os.Stat(filepath.Join("..", "..", "config", pack)); err != nil {

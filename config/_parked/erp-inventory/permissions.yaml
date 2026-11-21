@@ -5,3 +5,10 @@
   write: false
   delete: false
   report: true
+- doctype: Stock Count
+  role: Stock Manager
+  read: true
+  create: true
+  write: true
+  delete: false
+  report: true

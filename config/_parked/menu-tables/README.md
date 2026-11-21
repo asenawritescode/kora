@@ -11,7 +11,7 @@ orders by status, menu items by category).
 - "Items ordered" on an order adds up its line quantities.
 - Cancelling an order requires a reason in the notes.
 - Once an order is Served or Cancelled, its reference and table are frozen.
-- A menu item can optionally point to a Product from the Selling pack (`pos-base`), which
+- A menu item can optionally point to a Product from the Selling pack (`erpsell`), which
   must be installed with this pack.
 
 Limits: menu, tables and kitchen orders. No table-bill splitting, no kitchen display, no
