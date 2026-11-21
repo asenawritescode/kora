@@ -1,0 +1,15 @@
+name: items_sold
+label: Items sold
+type: simple
+model: Sale
+measure:
+  agg: sum
+  field: quantity
+filters:
+  - field: status
+    op: "="
+    value: Paid
+time: business_date
+good: up
+format: number
+description: Quantity of items on paid sales.

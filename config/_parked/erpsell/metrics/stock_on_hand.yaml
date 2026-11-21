@@ -1,0 +1,10 @@
+name: stock_on_hand
+label: Stock on hand
+type: balance
+model: Stock Movement
+measure:
+  agg: sum
+  field: quantity_change
+time: business_date
+format: number
+description: Stock of each product after all movements up to the end of the period.

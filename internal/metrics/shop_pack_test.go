@@ -1,0 +1,54 @@
+package metrics
+
+import (
+	"testing"
+
+	"github.com/asenawritescode/kora/internal/doctype"
+)
+
+const (
+	erpsellPackDir = "../../config/_parked/erpsell"
+	posPackDir     = "../../config/pos"
+)
+
+func erpsellDoctypes(t *testing.T) []*doctype.DocType {
+	t.Helper()
+	dts, err := doctype.ParseConfigTree(erpsellPackDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dts
+}
+
+// The selling pack ships its metrics and the shop_insights dashboard; both load and validate together.
+func TestErpsellPackMetricsAndDashboardsValidate(t *testing.T) {
+	dts := erpsellDoctypes(t)
+	raw, dashRaw, err := LoadPack(erpsellPackDir, dts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 10 || len(dashRaw) != 1 {
+		t.Fatalf("selling pack carries %d metrics and %d dashboards; want 10 and 1", len(raw), len(dashRaw))
+	}
+	dashboards, err := ParseDashboardDirectory(erpsellPackDir + "/dashboards")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dashboards) != 1 || dashboards[0].Name != "shop_insights" {
+		t.Fatalf("dashboards = %+v; want shop_insights", dashboards)
+	}
+}
+
+// The POS pack's insights dashboard names only its own metrics and dimensions.
+func TestPOSInsightsDashboardValidates(t *testing.T) {
+	dashboards, err := ParseDashboardDirectory(posPackDir + "/dashboards")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dashboards) != 1 || dashboards[0].Name != "pos_insights" {
+		t.Fatalf("dashboards = %+v; want pos_insights", dashboards)
+	}
+	if err := ValidateDashboards(dashboards, posMetricDefs(t), posDoctypes(t)); err != nil {
+		t.Fatal(err)
+	}
+}

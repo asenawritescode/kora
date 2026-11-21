@@ -11,7 +11,7 @@ import (
 	"github.com/asenawritescode/kora/internal/metrics"
 )
 
-const posMetricCount = 4
+const posMetricCount = 5
 
 // Directory import: parsePackSnapshot reads metrics/ next to reports.
 func TestDirectoryImportCarriesPOSMetrics(t *testing.T) {

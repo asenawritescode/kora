@@ -1,0 +1,44 @@
+name: shop_insights
+label: Insights
+description: Sales, profit and stock for the shop.
+default_range: last_30_days
+tiles:
+  - metric: net_sales
+    compare: previous_period
+  - metric: receipts
+    compare: previous_period
+  - metric: average_sale
+    compare: previous_period
+  - metric: profit
+    compare: previous_period
+charts:
+  - id: profit_by_day
+    title: Profit by day
+    kind: bar
+    metrics: [profit, cost_of_goods]
+    by: time
+    grain: day
+    compare: none
+    drill: true
+  - id: sales_by_day
+    title: Sales by day
+    kind: line
+    metrics: [net_sales]
+    by: time
+    grain: day
+    compare: none
+    drill: true
+  - id: best_sellers
+    title: Best sellers
+    kind: bar
+    metrics: [items_sold]
+    by: product
+    top: 10
+    compare: none
+    drill: true
+  - id: stock_adjustments
+    title: Stock adjustments
+    kind: table
+    metrics: [stock_adjusted]
+    by: reason
+    compare: none

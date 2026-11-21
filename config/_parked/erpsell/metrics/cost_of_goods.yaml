@@ -1,0 +1,15 @@
+name: cost_of_goods
+label: Cost of goods
+type: simple
+model: Sale
+measure:
+  agg: sum
+  field: cost_total
+filters:
+  - field: status
+    op: in
+    value: [Awaiting Payment, Partially Paid, Paid, Return]
+time: business_date
+good: down
+format: currency
+description: Cost of the goods on sales. Returns carry negative cost.

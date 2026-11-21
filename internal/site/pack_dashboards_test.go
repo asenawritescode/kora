@@ -18,7 +18,13 @@ const testDashboardYAML = "name: till_insights\nlabel: Till insights\ndefault_ra
 // posPackWithDashboard is the POS pack plus one test-only dashboard file.
 func posPackWithDashboard(t *testing.T) []PackFile {
 	t.Helper()
-	files := readPackFiles(t, filepath.Join("..", "..", "config", "pos"), "")
+	// The shipped pos_insights dashboard is left out: this fixture pins exactly one dashboard.
+	var files []PackFile
+	for _, f := range readPackFiles(t, filepath.Join("..", "..", "config", "pos"), "") {
+		if !strings.HasPrefix(f.Path, "dashboards/") {
+			files = append(files, f)
+		}
+	}
 	return append(files, PackFile{Path: "dashboards/till_insights.yaml", ContentType: "dashboard", Content: testDashboardYAML})
 }
 

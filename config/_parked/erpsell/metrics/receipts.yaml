@@ -1,0 +1,14 @@
+name: receipts
+label: Receipts
+type: simple
+model: Sale
+measure:
+  agg: count
+filters:
+  - field: status
+    op: in
+    value: [Awaiting Payment, Partially Paid, Paid]
+time: business_date
+good: up
+format: number
+description: Number of sales that are awaiting payment, part paid or paid.

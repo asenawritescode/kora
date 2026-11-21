@@ -1,0 +1,8 @@
+name: net_sales
+label: Net sales
+type: derived
+formula: sales - refunds
+time: business_date
+good: up
+format: currency
+description: Sales minus refunds.

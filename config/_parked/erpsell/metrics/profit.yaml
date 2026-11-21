@@ -1,0 +1,15 @@
+name: profit
+label: Profit
+type: simple
+model: Sale
+measure:
+  agg: sum
+  field: profit
+filters:
+  - field: status
+    op: in
+    value: [Awaiting Payment, Partially Paid, Paid, Return]
+time: business_date
+good: up
+format: currency
+description: Profit on sales. Returns carry negative profit, so they reduce it.

@@ -1,0 +1,14 @@
+name: stock_adjusted
+label: Stock adjusted
+type: simple
+model: Stock Movement
+measure:
+  agg: sum
+  field: quantity_change
+filters:
+  - field: source_doctype
+    op: "="
+    value: Stock Adjustment
+time: business_date
+format: number
+description: Net change in stock from stock adjustments, by reason.

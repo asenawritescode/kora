@@ -13,8 +13,8 @@ func TestPOSMetricPackLoadsAndValidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 4 {
-		t.Fatalf("got %d metrics; want 4", len(defs))
+	if len(defs) != 5 {
+		t.Fatalf("got %d metrics; want 5", len(defs))
 	}
 	raw, _, err := LoadPack("../../config/pos", posDoctypes(t))
 	if err != nil {
