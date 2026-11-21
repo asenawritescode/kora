@@ -77,3 +77,12 @@ fields:
   - fieldname: exception_reason
     fieldtype: Text
     label: Blocked or exception reason
+facts:
+  time: planting_date
+  status_field: status
+  measures:
+    - field: target_quantity
+  dimensions:
+    - field: crop
+    - field: field
+    - field: season

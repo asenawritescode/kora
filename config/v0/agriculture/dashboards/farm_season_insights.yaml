@@ -1,0 +1,35 @@
+name: farm_season_insights
+label: "Farm and season insights"
+description: "Figures and charts that reproduce the farm and season performance report."
+default_range: last_30_days
+tiles:
+  - metric: crop_plans_count
+  - metric: harvest_quantity
+charts:
+  - id: plans_by_crop
+    title: "Target quantity by crop"
+    kind: bar
+    metrics: [crop_plans_target_quantity]
+    by: crop
+  - id: harvest_by_crop
+    title: "Harvest by crop"
+    kind: bar
+    metrics: [harvest_quantity]
+    by: crop
+  - id: harvest_over_time
+    title: "Harvest over time"
+    kind: line
+    metrics: [harvest_quantity]
+    by: time
+    grain: day
+    compare: none
+  - id: field_work_by_status
+    title: "Field tasks by status"
+    kind: bar
+    metrics: [farm_tasks_count]
+    by: status
+  - id: input_use_by_name
+    title: "Input quantity used"
+    kind: bar
+    metrics: [input_quantity]
+    by: input_name

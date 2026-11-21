@@ -1,0 +1,11 @@
+name: input_quantity
+label: Input quantity used
+type: simple
+model: Input Application
+measure:
+  agg: sum
+  field: quantity
+time: business_date
+good: up
+format: number
+description: Quantity of inputs applied by applied date (sum).

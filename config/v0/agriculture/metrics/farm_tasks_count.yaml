@@ -1,0 +1,9 @@
+name: farm_tasks_count
+label: Field tasks
+type: balance
+model: Farm Task
+measure:
+  agg: count
+time: business_date
+format: number
+description: Field tasks in each status as of the end of the period (count).

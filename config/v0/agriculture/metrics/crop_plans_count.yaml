@@ -1,0 +1,9 @@
+name: crop_plans_count
+label: Crop plans
+type: simple
+model: Crop Plan
+measure:
+  agg: count
+time: business_date
+format: number
+description: Crop plans by planting date (count).

@@ -61,3 +61,11 @@ fields:
     default: Recorded
     read_only: true
     in_list_view: true
+facts:
+  time: applied_on
+  status_field: status
+  measures:
+    - field: quantity
+  dimensions:
+    - field: input_name
+    - field: crop_plan
