@@ -1,0 +1,13 @@
+name: documents_count_draft
+label: "Documents: Draft"
+type: simple
+model: "Document"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Draft"
+time: business_date
+format: number
+description: "Documents: Draft from the Document records (count)."

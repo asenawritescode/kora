@@ -1,0 +1,9 @@
+name: documents_count
+label: "Documents"
+type: simple
+model: "Document"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Documents from the Document records (count)."

@@ -1,0 +1,13 @@
+name: documents_count_active
+label: "Documents: Active"
+type: simple
+model: "Document"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Active"
+time: business_date
+format: number
+description: "Documents: Active from the Document records (count)."
