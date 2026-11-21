@@ -3,10 +3,14 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/configstore"
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/management"
@@ -22,6 +26,7 @@ type packageTenantDB struct {
 	conn    *sql.DB
 	name    string
 	dialect db.Dialect
+	tenant  contract.TenantID
 }
 
 // prepareManagementPackageTarget merges a package into the tenant's configuration and checks it is
@@ -53,7 +58,73 @@ func prepareManagementPackageTarget(ctx context.Context, tenant packageTenantDB,
 		refusal := failed(contract.CodeConflict, truncateUTF8("package would invalidate existing records: "+strings.Join(blockers, "; ")+". Publish those fields as optional or with a default.", 480))
 		return nil, &refusal
 	}
+	if refusal, ok := refuseInFlightReplacement(ctx, tenant, replacedModuleIDs(current.Modules, target.Modules)); !ok {
+		return nil, refusal
+	}
 	return target, nil
+}
+
+// moduleInFlightError refuses a replacement while the replaced module still has
+// published operations in progress. Its receipts are pinned to the old binding.
+type moduleInFlightError struct{ module contract.ModuleID }
+
+func (e moduleInFlightError) Error() string {
+	return fmt.Sprintf("module %q has operations in progress; retry the upgrade when they finish", e.module)
+}
+
+// checkReplacedModulesQuiet returns moduleInFlightError for the first replaced
+// module, in ID order, that has an operation in progress.
+func checkReplacedModulesQuiet(replaced map[contract.ModuleID]bool, inFlight map[contract.ModuleID]int) error {
+	for _, id := range slices.Sorted(maps.Keys(replaced)) {
+		if inFlight[id] > 0 {
+			return moduleInFlightError{module: id}
+		}
+	}
+	return nil
+}
+
+// refuseReplacedModulesInFlight reads the tenant's in-flight operations and checks
+// them against the modules the activation replaces. It runs in the activation
+// transaction as well, so a refusal there is final and nothing is applied.
+func refuseReplacedModulesInFlight(ctx context.Context, q configstore.ReceiptQuerier, dialect db.QueryDialect, tenant contract.TenantID, replaced map[contract.ModuleID]bool) error {
+	if len(replaced) == 0 {
+		return nil
+	}
+	inFlight, err := configstore.OperationOwnersInFlight(ctx, q, dialect, tenant)
+	if err != nil {
+		return err
+	}
+	return checkReplacedModulesQuiet(replaced, inFlight)
+}
+
+// refuseInFlightReplacement is the pre-journal check. It creates the receipt
+// table first, outside any transaction, because DDL inside one may commit early.
+func refuseInFlightReplacement(ctx context.Context, tenant packageTenantDB, replaced map[contract.ModuleID]bool) (*management.FinishResult, bool) {
+	if len(replaced) == 0 {
+		return nil, true
+	}
+	if err := configstore.NewModuleStore(tenant.conn, tenant.dialect).EnsurePublishedOperationReceiptSchema(ctx); err != nil {
+		refusal := packageRecoveryRequired("package safety check could not prepare the operation receipt store")
+		return &refusal, false
+	}
+	err := refuseReplacedModulesInFlight(ctx, tenant.conn, tenant.dialect, tenant.tenant, replaced)
+	if err == nil {
+		return nil, true
+	}
+	if refusal, ok := inFlightFailure(err); ok {
+		return &refusal, false
+	}
+	refusal := packageRecoveryRequired("package safety check could not read operations in progress")
+	return &refusal, false
+}
+
+// inFlightFailure classifies moduleInFlightError as a final refusal.
+func inFlightFailure(err error) (management.FinishResult, bool) {
+	var inFlight moduleInFlightError
+	if !errors.As(err, &inFlight) {
+		return management.FinishResult{}, false
+	}
+	return failed(contract.CodeConflict, truncateUTF8(inFlight.Error(), 480)), true
 }
 
 // packageUpgradeBlockers names what a package would break in tables that already hold records: a
