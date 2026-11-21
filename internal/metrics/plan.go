@@ -115,8 +115,26 @@ func checkShape(q Query) error {
 		return fmt.Errorf("top %d must not be negative", q.Top)
 	case q.Top > 0 && len(q.Dimensions) != 1:
 		return errors.New("top needs exactly one dimension")
+	case rangeTooLarge(q):
+		return fmt.Errorf("%w: a %s query covers at most %d buckets", ErrRangeTooLarge, q.Grain, maxBuckets[q.Grain])
 	}
 	return nil
+}
+
+// maxBuckets caps the buckets one query may return, per grain.
+var maxBuckets = map[Grain]int{GrainDay: 366, GrainWeek: 157, GrainMonth: 120}
+
+// rangeTooLarge reports whether q covers more buckets than maxBuckets allows. It stops counting
+// one bucket past the cap, so a huge range costs no more than the cap.
+func rangeTooLarge(q Query) bool {
+	limit := maxBuckets[q.Grain]
+	n := 0
+	for b := periodStart(toTime(q.From), q.Grain); !b.After(toTime(q.To)); b = stepPeriod(b, q.Grain, 1) {
+		if n++; n > limit {
+			return true
+		}
+	}
+	return false
 }
 
 // compile returns the index in plan.metrics of the named metric, compiling it and the metrics it

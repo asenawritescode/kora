@@ -13,6 +13,9 @@ import (
 // ErrNotSupported marks a query that names a metric or shape this compiler does not run yet.
 var ErrNotSupported = errors.New("metrics: not supported yet")
 
+// ErrRangeTooLarge marks a query whose range covers more buckets than the grain allows.
+var ErrRangeTooLarge = errors.New("metrics: range covers too many buckets")
+
 // Grain is the width of one result bucket. Weeks start on Monday.
 type Grain string
 

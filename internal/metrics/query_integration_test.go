@@ -92,7 +92,7 @@ func seed(t *testing.T, conn *sql.DB, dialect db.Dialect) Engine {
 	ctx := context.Background()
 	q := dialect.QuoteIdent
 	setup := []string{
-		fmt.Sprintf("CREATE TABLE %s (name VARCHAR(140) NOT NULL PRIMARY KEY, owner VARCHAR(140) NOT NULL, creation TIMESTAMP NOT NULL)", q("tabSale")),
+		fmt.Sprintf("CREATE TABLE %s (name VARCHAR(140) NOT NULL PRIMARY KEY, owner VARCHAR(140) NOT NULL, creation TIMESTAMP NOT NULL, status VARCHAR(40) NOT NULL, total DECIMAL(18,2) NOT NULL, register VARCHAR(40) NOT NULL)", q("tabSale")),
 		"CREATE TABLE _kora_site_setting (site VARCHAR(140) NOT NULL, setting_key VARCHAR(140) NOT NULL, setting_value VARCHAR(140) NOT NULL, PRIMARY KEY (site, setting_key))",
 		db.Rebind(dialect, "INSERT INTO _kora_site_setting (site, setting_key, setting_value) VALUES (?, ?, ?)"),
 	}
@@ -128,8 +128,8 @@ func seed(t *testing.T, conn *sql.DB, dialect db.Dialect) Engine {
 	reg.Register(dt)
 	builder := &facts.Builder{DB: conn, Dialect: dialect, Registry: reg}
 	for i, s := range seedSales {
-		insert := db.Rebind(dialect, fmt.Sprintf("INSERT INTO %s (name, owner, creation) VALUES (?, ?, ?)", q("tabSale")))
-		if _, err := conn.ExecContext(ctx, insert, s.record, s.owner, s.created); err != nil {
+		insert := db.Rebind(dialect, fmt.Sprintf("INSERT INTO %s (name, owner, creation, status, total, register) VALUES (?, ?, ?, ?, ?, ?)", q("tabSale")))
+		if _, err := conn.ExecContext(ctx, insert, s.record, s.owner, s.created, s.status, s.total, s.register); err != nil {
 			t.Fatalf("insert %s: %v", s.record, err)
 		}
 		consume(ctx, t, conn, builder, int64(i+1), s)
