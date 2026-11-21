@@ -184,3 +184,27 @@ fields:
   - fieldname: notes
     fieldtype: Text
     label: Notes
+facts:
+  time: sale_date
+  lines: items
+  measures:
+    - field: total
+    - field: base_total
+    - field: cost_total
+    - field: profit
+    - field: discount_amount
+    - field: tax_amount
+    - field: items.quantity
+    - field: items.line_total
+    - field: items.line_cost
+    - field: items.line_profit
+  dimensions:
+    - field: register
+    - field: till_session
+    - field: customer
+    - field: location
+    - field: items.product
+  status_field: status
+  exclude_status:
+    - Held
+    - Draft

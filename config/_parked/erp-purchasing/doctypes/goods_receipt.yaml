@@ -91,3 +91,14 @@ fields:
   - fieldname: notes
     fieldtype: Text
     label: Notes
+facts:
+  time: received_on
+  lines: items
+  measures:
+    - field: total
+    - field: base_total
+    - field: items.quantity
+    - field: items.line_total
+  dimensions:
+    - field: supplier
+    - field: items.product
