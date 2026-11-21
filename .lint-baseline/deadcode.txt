@@ -161,6 +161,7 @@ internal/doctype/parser.go::ValidateAll
 internal/doctype/parser.go::isNumberField
 internal/doctype/parser.go::isTextField
 internal/doctype/parser.go::quantityEffectSource
+internal/doctype/parser.go::validateAverageCost
 internal/doctype/parser.go::validateFacts
 internal/doctype/parser.go::validateQuantityEffect
 internal/doctype/parser.go::validateQuantityEffects

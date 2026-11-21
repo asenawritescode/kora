@@ -71,6 +71,7 @@ func prepareQuantityEffect(reg *doctype.Registry, op *Operation) *contract.Error
 	if len(targetNames)+1 > MaxMutationBundleRecords {
 		return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("%s affects too many different records in one save (limit %d)", dt.Name, MaxMutationBundleRecords-1))
 	}
+	op.Context.effectAverages = createEffectAverages(reg, dt, create.Data)
 	return rewriteToEffectBundle(op, dt, create.Data, totals, targetNames)
 }
 

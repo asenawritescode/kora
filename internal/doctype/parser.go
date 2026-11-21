@@ -1255,6 +1255,23 @@ func validateQuantityTargets(dt *DocType, dtMap map[string]*DocType, q *Quantity
 	if f := source.GetField(q.DeltaField); f == nil || !(f.Fieldtype == "Int" || f.Fieldtype == "Float" || f.Fieldtype == "Currency") {
 		bad(dt, "delta_field", fmt.Sprintf("quantity_effect delta_field %q must be a number field on %s", q.DeltaField, source.Name))
 	}
+	validateAverageCost(dt, q, target, source, bad)
+}
+
+// validateAverageCost checks the moving average of an effect: target_field is a
+// number on the target, other than its quantity, and cost_field is a number on
+// the source row (the line when lines_field is set, else the record).
+func validateAverageCost(dt *DocType, q *QuantityEffect, target, source *DocType, bad func(*DocType, string, string)) {
+	a := q.AverageCost
+	if a == nil {
+		return
+	}
+	if f := target.GetField(a.TargetField); a.TargetField == "" || a.TargetField == q.TargetQuantityField || f == nil || !isNumberField(f) {
+		bad(dt, "average_cost", fmt.Sprintf("quantity_effect average_cost target_field %q must be a number field on %s other than target_quantity_field", a.TargetField, target.Name))
+	}
+	if f := source.GetField(a.CostField); a.CostField == "" || f == nil || !isNumberField(f) {
+		bad(dt, "average_cost", fmt.Sprintf("quantity_effect average_cost cost_field %q must be a number field on %s", a.CostField, source.Name))
+	}
 }
 
 // quantityEffectSource returns the record type that carries the source and delta
