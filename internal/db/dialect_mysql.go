@@ -618,7 +618,7 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		"ALTER TABLE _kora_view ADD COLUMN idx INT NOT NULL DEFAULT 0",
 		"ALTER TABLE _kora_view DROP PRIMARY KEY",
 		"ALTER TABLE _kora_view ADD PRIMARY KEY (name)",
-	}...), append(mysqlFieldTableSQL(), PaymentTablesMySQL()...)...)
+	}...), append(append(mysqlFieldTableSQL(), PaymentTablesMySQL()...), DashboardOverrideTablesMySQL()...)...)
 }
 
 // parseMySQLKeyField returns the field a duplicate-entry message names. MySQL 8

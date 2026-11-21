@@ -33,57 +33,69 @@ type metricsAPI struct {
 	defs func(*gin.Context) ([]metrics.Metric, error)
 }
 
-// registerMetricsRoutes mounts GET /metrics, GET /metrics/:name, POST /metrics/query and POST /metrics/drill.
+// registerMetricsRoutes mounts GET /metrics, GET /metrics/:name, POST /metrics/query, POST /metrics/drill
+// and the dashboard routes, which read the same catalog.
 func registerMetricsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, dialect db.Dialect) {
-	cache := &metricDefsCache{entries: map[string]metricDefsEntry{}}
+	defs := newVersionCache[[]metrics.Metric]()
+	dashboardDefs := newVersionCache[[]metrics.Dashboard]()
 	api := metricsAPI{registry: registry, siteDB: siteDB, dialect: dialect, defs: func(c *gin.Context) ([]metrics.Metric, error) {
-		return cachedMetricDefs(c, cache, getSiteDB(c, siteDB), siteDialectFromContext(c, dialect))
+		return cachedConfigValue(c, defs, getSiteDB(c, siteDB), siteDialectFromContext(c, dialect), readMetricDefs)
 	}}
 	api.mount(apiGroup.Group("/metrics"))
+	dashboardsAPI{metricsAPI: api, loadDefs: func(c *gin.Context) ([]metrics.Dashboard, error) {
+		return cachedConfigValue(c, dashboardDefs, getSiteDB(c, siteDB), siteDialectFromContext(c, dialect), readDashboardDefs)
+	}}.mount(apiGroup.Group("/dashboards"))
 }
 
-// metricDefsCache keeps each site's parsed metric definitions, with the configuration version they came
-// from. A request reads only the active version number; the definitions are reparsed when it changes.
-type metricDefsCache struct {
+// versionCache keeps each site's parsed configuration with the version it came from. A request reads only
+// the active version number; the value is reparsed when that number changes.
+type versionCache[T any] struct {
 	mu      sync.Mutex
-	entries map[string]metricDefsEntry
+	entries map[string]versionEntry[T]
 }
 
-// metricDefsEntry is one site's parsed definitions and the active version they were parsed from.
-type metricDefsEntry struct {
+// versionEntry is one site's parsed value and the active version it was parsed from.
+type versionEntry[T any] struct {
 	version int64
-	defs    []metrics.Metric
+	value   T
 }
 
-// load returns site's definitions for version, parsing them with parse only when the cache does not
-// hold that version. A failed parse is not cached.
-func (c *metricDefsCache) load(site string, version int64, parse func() ([]metrics.Metric, error)) ([]metrics.Metric, error) {
+// newVersionCache returns an empty cache.
+func newVersionCache[T any]() *versionCache[T] {
+	return &versionCache[T]{entries: map[string]versionEntry[T]{}}
+}
+
+// load returns site's value for version, parsing it with parse only when the cache does not hold that
+// version. A failed parse is not cached.
+func (c *versionCache[T]) load(site string, version int64, parse func() (T, error)) (T, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if e, ok := c.entries[site]; ok && e.version == version {
-		return e.defs, nil
+		return e.value, nil
 	}
-	defs, err := parse()
+	value, err := parse()
 	if err != nil {
-		return nil, err
+		var zero T
+		return zero, err
 	}
-	c.entries[site] = metricDefsEntry{version: version, defs: defs}
-	return defs, nil
+	c.entries[site] = versionEntry[T]{version: version, value: value}
+	return value, nil
 }
 
-// cachedMetricDefs returns the site's metric definitions of its active configuration version, parsed
-// once per version.
-func cachedMetricDefs(c *gin.Context, cache *metricDefsCache, database *sql.DB, dialect db.Dialect) ([]metrics.Metric, error) {
+// cachedConfigValue returns the value read from the site's active configuration version by read, parsed
+// once per version through cache.
+func cachedConfigValue[T any](c *gin.Context, cache *versionCache[T], database *sql.DB, dialect db.Dialect, read func(*sql.DB, db.Dialect, string, int64) (T, error)) (T, error) {
+	var zero T
 	if database == nil {
-		return nil, nil
+		return zero, nil
 	}
 	site := c.GetString("site_name")
 	version, err := activeConfigVersion(database, dialect, site)
 	if err != nil {
-		return nil, err
+		return zero, err
 	}
-	return cache.load(site, version, func() ([]metrics.Metric, error) {
-		return readMetricDefs(database, dialect, site, version)
+	return cache.load(site, version, func() (T, error) {
+		return read(database, dialect, site, version)
 	})
 }
 
@@ -129,6 +141,25 @@ func (m metricsAPI) catalog(c *gin.Context) (metrics.Catalog, error) {
 // readMetricDefs parses the metric definitions of one configuration version of a site. Version zero
 // has none.
 func readMetricDefs(database *sql.DB, dialect db.Dialect, site string, version int64) ([]metrics.Metric, error) {
+	snapshot, err := readConfigSnapshot(database, dialect, site, version)
+	if err != nil || snapshot == nil {
+		return nil, err
+	}
+	return decodeConfigItems[metrics.Metric](snapshot.Metrics, "metric")
+}
+
+// readDashboardDefs parses the dashboard definitions of one configuration version of a site. Version zero
+// has none.
+func readDashboardDefs(database *sql.DB, dialect db.Dialect, site string, version int64) ([]metrics.Dashboard, error) {
+	snapshot, err := readConfigSnapshot(database, dialect, site, version)
+	if err != nil || snapshot == nil {
+		return nil, err
+	}
+	return decodeConfigItems[metrics.Dashboard](snapshot.Dashboards, "dashboard")
+}
+
+// readConfigSnapshot loads and parses one configuration version of a site. Version zero has no snapshot.
+func readConfigSnapshot(database *sql.DB, dialect db.Dialect, site string, version int64) (*doctype.ConfigSnapshot, error) {
 	if version == 0 {
 		return nil, nil
 	}
@@ -136,19 +167,20 @@ func readMetricDefs(database *sql.DB, dialect db.Dialect, site string, version i
 	if err := database.QueryRow(db.Rebind(dialect, `SELECT config FROM _kora_config_version WHERE site = ? AND version = ?`), site, version).Scan(&configJSON); err != nil {
 		return nil, err
 	}
-	snapshot, err := doctype.ParseConfig(configJSON)
-	if err != nil {
-		return nil, err
-	}
-	defs := make([]metrics.Metric, 0, len(snapshot.Metrics))
-	for _, raw := range snapshot.Metrics {
-		var def metrics.Metric
-		if err := json.Unmarshal(raw, &def); err != nil {
-			return nil, fmt.Errorf("decode metric definition: %w", err)
+	return doctype.ParseConfig(configJSON)
+}
+
+// decodeConfigItems decodes the stored JSON documents of one kind from a configuration snapshot.
+func decodeConfigItems[T any](raws []json.RawMessage, kind string) ([]T, error) {
+	items := make([]T, 0, len(raws))
+	for _, raw := range raws {
+		var item T
+		if err := json.Unmarshal(raw, &item); err != nil {
+			return nil, fmt.Errorf("decode %s definition: %w", kind, err)
 		}
-		defs = append(defs, def)
+		items = append(items, item)
 	}
-	return defs, nil
+	return items, nil
 }
 
 // metricScope is the record scope a metric reads under: the caller's read grant on every record type

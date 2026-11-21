@@ -194,7 +194,7 @@ func TestMetricDefsCacheParsesOncePerVersion(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			cache := &metricDefsCache{entries: map[string]metricDefsEntry{}}
+			cache := newVersionCache[[]metrics.Metric]()
 			for i, s := range tc.steps {
 				parses := 0
 				_, err := cache.load(s.site, s.version, func() ([]metrics.Metric, error) {
@@ -213,7 +213,7 @@ func TestMetricDefsCacheParsesOncePerVersion(t *testing.T) {
 }
 
 func TestMetricDefsCacheDoesNotKeepFailedParse(t *testing.T) {
-	cache := &metricDefsCache{entries: map[string]metricDefsEntry{}}
+	cache := newVersionCache[[]metrics.Metric]()
 	if _, err := cache.load("a", 1, func() ([]metrics.Metric, error) { return nil, errors.New("bad config") }); err == nil {
 		t.Fatal("failed parse returned no error")
 	}

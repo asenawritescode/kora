@@ -813,7 +813,7 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 
 		// Backward compat: existing _kora_view tables may lack idx column.
 		`ALTER TABLE "_kora_view" ADD COLUMN IF NOT EXISTS "idx" INTEGER NOT NULL DEFAULT 0`,
-	}...), append(postgresFieldTableSQL(), PaymentTablesPostgres()...)...)
+	}...), append(append(postgresFieldTableSQL(), PaymentTablesPostgres()...), DashboardOverrideTablesPostgres()...)...)
 }
 
 // postgresFieldTableSQL creates _kora_field, the stored fields of each record
