@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/metrics"
 )
 
@@ -28,6 +30,68 @@ func checkSavedQuestion(cat metrics.Catalog, join map[string]bool, q contract.Sa
 		return checkMetricQuestion(cat, join, q, filters)
 	}
 	return checkRecordQuestion(cat, join, q, filters)
+}
+
+// questionPaths is every dimension path and filter field a question names.
+func questionPaths(q contract.SavedQuestion) []string {
+	paths := append([]string{}, q.By...)
+	for _, f := range q.Filters {
+		paths = append(paths, f.Field)
+	}
+	return paths
+}
+
+// withHops adds to types every record type the paths of a question read through, and returns the result
+// sorted and without repeats, so the caller can check read access to all of it.
+func withHops(cat metrics.Catalog, model string, paths []string, types []string) []string {
+	for _, path := range paths {
+		types = append(types, linkHops(cat, model, path)...)
+	}
+	slices.Sort(types)
+	return slices.Compact(types)
+}
+
+// linkHops returns the record types one path reads through: the target of each Link it follows, short of its
+// last field.
+func linkHops(cat metrics.Catalog, model, path string) []string {
+	src, segments := pathStart(cat, cat.Models[model], strings.Split(path, "."))
+	var hops []string
+	for _, seg := range segments[:max(len(segments)-1, 0)] {
+		fld := linkField(src, seg)
+		if fld == nil {
+			break
+		}
+		src = cat.Models[fld.Options]
+		if src == nil {
+			break
+		}
+		hops = append(hops, src.Name)
+	}
+	return hops
+}
+
+// pathStart returns the record type a path's fields are read from. A path that starts with the lines field
+// reads from the child table it names.
+func pathStart(cat metrics.Catalog, src *doctype.DocType, segments []string) (*doctype.DocType, []string) {
+	if src == nil || src.Facts == nil || len(segments) < 2 || segments[0] != src.Facts.Lines {
+		return src, segments
+	}
+	if lf := src.GetField(src.Facts.Lines); lf != nil {
+		src = cat.Models[lf.Options]
+	}
+	return src, segments[1:]
+}
+
+// linkField returns the Link field seg of src, or nil when src has no such Link.
+func linkField(src *doctype.DocType, seg string) *doctype.Field {
+	if src == nil {
+		return nil
+	}
+	fld := src.GetField(seg)
+	if fld == nil || fld.Fieldtype != "Link" {
+		return nil
+	}
+	return fld
 }
 
 // checkQuestionSettings checks the grain, comparison and period a question carries.
@@ -70,7 +134,7 @@ func checkRecordQuestion(cat metrics.Catalog, join map[string]bool, q contract.S
 	if _, _, err := cat.WithAdHoc([]metrics.AdHoc{{Model: q.RecordType, Agg: measure.Agg, Field: measure.Field, Filters: filters}}); err != nil {
 		return nil, err
 	}
-	return []string{q.RecordType}, nil
+	return withHops(cat, q.RecordType, questionPaths(q), []string{q.RecordType}), nil
 }
 
 // checkMetricQuestion checks a question of a defined metric: its record types must offer the "by"
@@ -87,6 +151,7 @@ func checkMetricQuestion(cat metrics.Catalog, join map[string]bool, q contract.S
 		return nil, err
 	}
 	models := metrics.Models(ms)
+	types := slices.Clone(models)
 	for _, model := range models {
 		rec, ok := cat.ExploreRecord(model, join)
 		if !ok {
@@ -100,8 +165,10 @@ func checkMetricQuestion(cat metrics.Catalog, join map[string]bool, q contract.S
 				return nil, fmt.Errorf("%q is not a dimension of %q", f.Field, model)
 			}
 		}
+		types = withHops(cat, model, questionPaths(q), types)
 	}
-	return models, nil
+	slices.Sort(types)
+	return slices.Compact(types), nil
 }
 
 // exploreMeasure returns the measure of rec with the catalog key.

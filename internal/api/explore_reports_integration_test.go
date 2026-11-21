@@ -61,13 +61,16 @@ func reportRegistry(withAmount bool) *doctype.Registry {
 		measures = nil
 	}
 	expense := &doctype.DocType{Name: "Expense", Facts: &doctype.FactModel{Time: "creation", Measures: measures,
-		Dimensions: []doctype.FactDimension{{Field: "category"}}}}
+		Dimensions: []doctype.FactDimension{{Field: "category"}, {Field: "supplier"}}},
+		Fields: []doctype.Field{{Fieldname: "supplier", Fieldtype: "Link", Options: "Supplier"}}}
 	payroll := &doctype.DocType{Name: "Payroll", Facts: &doctype.FactModel{Time: "creation", Measures: []doctype.FactMeasure{{Field: "net"}}}}
+	supplier := &doctype.DocType{Name: "Supplier", Fields: []doctype.Field{{Fieldname: "town", Fieldtype: "Data"}}}
 	registry := doctype.NewRegistry()
-	registry.LoadFull([]*doctype.DocType{expense, payroll}, []*doctype.Role{{Name: "Cashier"}}, []*doctype.Permission{
+	registry.LoadFull([]*doctype.DocType{expense, payroll, supplier}, []*doctype.Role{{Name: "Cashier"}}, []*doctype.Permission{
 		{Doctype: "Expense", Role: "Cashier", Read: true},
 		{Doctype: "Expense", Role: doctype.AdminRole, Read: true},
 		{Doctype: "Payroll", Role: doctype.AdminRole, Read: true},
+		{Doctype: "Supplier", Role: doctype.AdminRole, Read: true},
 	})
 	return registry
 }
@@ -164,6 +167,18 @@ func exerciseReports(t *testing.T, router *gin.Engine, database *sql.DB, dialect
 	reportCall(t, router, "Cashier", "cashier-1", http.MethodPost, base, savedReportBody(t, "Payroll peek", "private", payroll), http.StatusForbidden)
 	reportCall(t, router, doctype.AdminRole, "admin-1", http.MethodPost, base, savedReportBody(t, "Payroll net", "shop", payroll), http.StatusCreated)
 	reportCall(t, router, doctype.AdminRole, "admin-1", http.MethodPost, base, savedReportBody(t, "Fuel by month", "shop", count), http.StatusCreated)
+
+	// A question through a Link lists the linked record type too: a cashier who cannot read Supplier can neither
+	// save the path nor see the shop report that uses it.
+	towns := contract.SavedQuestion{RecordType: "Expense", By: []string{"supplier.town"}}
+	reportCall(t, router, "Cashier", "cashier-1", http.MethodPost, base, savedReportBody(t, "Towns", "private", towns), http.StatusUnprocessableEntity)
+	reportCall(t, router, doctype.AdminRole, "admin-1", http.MethodPost, base, savedReportBody(t, "Towns", "shop", towns), http.StatusCreated)
+	if _, ok := reportNames(t, router, "Cashier", "cashier-1")["Towns"]; ok {
+		t.Fatal("cashier sees a report that reads Supplier")
+	}
+	if _, ok := reportNames(t, router, doctype.AdminRole, "admin-1")["Towns"]; !ok {
+		t.Fatal("admin does not see the Supplier report")
+	}
 
 	mine := reportID(t, router, "Cashier", "cashier-1", "My fuel")
 	if got := reportNames(t, router, "Cashier", "cashier-1"); got["Payroll net"].Name != "" || got["Fuel by month"].Visibility != "shop" {

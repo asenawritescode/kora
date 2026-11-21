@@ -103,3 +103,39 @@ func allJoin(cat metrics.Catalog) map[string]bool {
 	}
 	return join
 }
+
+// TestCheckSavedQuestionHopTypes checks that a question reading through a Link lists the linked record type
+// with the record types it uses, and that a join the caller may not make refuses the path.
+func TestCheckSavedQuestionHopTypes(t *testing.T) {
+	supplier := &doctype.DocType{Name: "Supplier", Fields: []doctype.Field{{Fieldname: "town", Fieldtype: "Data"}}}
+	expense := &doctype.DocType{Name: "Expense", Facts: &doctype.FactModel{Time: "creation",
+		Measures:   []doctype.FactMeasure{{Field: "amount"}},
+		Dimensions: []doctype.FactDimension{{Field: "category"}, {Field: "supplier"}}},
+		Fields: []doctype.Field{{Fieldname: "supplier", Fieldtype: "Link", Options: "Supplier"}, {Fieldname: "category", Fieldtype: "Select"}}}
+	defs := []metrics.Metric{{Name: "spend", Label: "Spend", Type: metrics.KindSimple, Model: "Expense",
+		Measure: &metrics.Measure{Agg: "sum", Field: "amount"}}}
+	cat := metrics.NewCatalog(defs, []*doctype.DocType{expense, supplier})
+	tests := []struct {
+		name   string
+		q      contract.SavedQuestion
+		join   map[string]bool
+		want   []string
+		wantOK bool
+	}{
+		{name: "no link", q: contract.SavedQuestion{RecordType: "Expense", By: []string{"category"}}, join: map[string]bool{"Supplier": true}, want: []string{"Expense"}, wantOK: true},
+		{name: "by a linked field lists the target", q: contract.SavedQuestion{RecordType: "Expense", By: []string{"supplier.town"}}, join: map[string]bool{"Supplier": true}, want: []string{"Expense", "Supplier"}, wantOK: true},
+		{name: "metric by a linked field", q: contract.SavedQuestion{Metric: "spend", By: []string{"supplier.town"}}, join: map[string]bool{"Supplier": true}, want: []string{"Expense", "Supplier"}, wantOK: true},
+		{name: "join not allowed refuses the path", q: contract.SavedQuestion{RecordType: "Expense", By: []string{"supplier.town"}}, join: map[string]bool{}, wantOK: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := checkSavedQuestion(cat, tc.join, tc.q)
+			if (err == nil) != tc.wantOK {
+				t.Fatalf("error = %v, want ok %v", err, tc.wantOK)
+			}
+			if tc.wantOK && !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("record types = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
