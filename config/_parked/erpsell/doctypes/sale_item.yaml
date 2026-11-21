@@ -37,3 +37,18 @@ fields:
     label: Line total
     computed: "(round (+ (- (* (round quantity 9) (round unit_price 9)) (round discount_amount 9)) (round tax_amount 9)) 2)"
     read_only: true
+  - fieldname: unit_cost
+    fieldtype: Currency
+    label: Unit cost
+    linked_field: "product.cost_price"
+    read_only: true
+  - fieldname: line_cost
+    fieldtype: Currency
+    label: Line cost
+    computed: "(round (* (round quantity 9) (round unit_cost 9)) 2)"
+    read_only: true
+  - fieldname: line_profit
+    fieldtype: Currency
+    label: Line profit
+    computed: "(round (- (- (* (round quantity 9) (round unit_price 9)) (round discount_amount 9)) (* (round quantity 9) (round unit_cost 9))) 2)"
+    read_only: true

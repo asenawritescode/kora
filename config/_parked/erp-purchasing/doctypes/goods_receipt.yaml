@@ -8,6 +8,9 @@ quantity_effect:
   source_record_field: product
   delta_field: quantity
   direction: increase
+  average_cost:
+    target_field: cost_price
+    cost_field: unit_cost
   ledger:
     doctype: Stock Movement
     target_field: product
