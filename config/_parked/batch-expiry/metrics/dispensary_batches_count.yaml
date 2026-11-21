@@ -1,0 +1,9 @@
+name: dispensary_batches_count
+label: "Batches"
+type: simple
+model: "Medicine Batch"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Batches from the Medicine Batch records (count)."

@@ -1,0 +1,13 @@
+name: dispensary_prescriptions_count_dispensed
+label: "Prescriptions: Dispensed"
+type: simple
+model: "Prescription"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Dispensed"
+time: business_date
+format: number
+description: "Prescriptions: Dispensed from the Prescription records (count)."

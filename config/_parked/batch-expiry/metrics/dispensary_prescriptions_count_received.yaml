@@ -1,0 +1,13 @@
+name: dispensary_prescriptions_count_received
+label: "Prescriptions: Received"
+type: simple
+model: "Prescription"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Received"
+time: business_date
+format: number
+description: "Prescriptions: Received from the Prescription records (count)."
