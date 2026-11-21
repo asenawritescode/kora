@@ -161,16 +161,16 @@ func (p plan) result(sums map[bucketKey][]decimal.Decimal, groups map[string][]s
 }
 
 // values computes each output of one bucket. A ratio divides its summed components; a zero
-// denominator gives zero.
-func (p plan) values(bucket []decimal.Decimal) []decimal.Decimal {
-	vals := make([]decimal.Decimal, len(p.outputs))
+// denominator gives null. Simple outputs are the summed value, zero when the bucket is empty.
+func (p plan) values(bucket []decimal.Decimal) []decimal.NullDecimal {
+	vals := make([]decimal.NullDecimal, len(p.outputs))
 	for i, o := range p.outputs {
-		vals[i] = bucket[o.num]
-		if o.kind == KindRatio {
-			vals[i] = decimal.Zero
-			if den := bucket[o.den]; !den.IsZero() {
-				vals[i] = bucket[o.num].Div(den)
-			}
+		if o.kind != KindRatio {
+			vals[i] = decimal.NullDecimal{Decimal: bucket[o.num], Valid: true}
+			continue
+		}
+		if den := bucket[o.den]; !den.IsZero() {
+			vals[i] = decimal.NullDecimal{Decimal: bucket[o.num].Div(den), Valid: true}
 		}
 	}
 	return vals

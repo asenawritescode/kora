@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/tenanttime"
@@ -31,6 +33,37 @@ func posCatalog(t *testing.T) Catalog {
 	)
 	return NewCatalog(defs, []*doctype.DocType{sale, other})
 }
+
+func TestRatioValuesNullOnZeroDenominator(t *testing.T) {
+	p := plan{series: make([]series, 2), outputs: []output{
+		{metric: "sales", kind: KindSimple, num: 0, den: -1},
+		{metric: "average_sale", kind: KindRatio, num: 0, den: 1},
+	}}
+	tests := []struct {
+		name   string
+		bucket []decimal.Decimal
+		want   []decimal.NullDecimal
+	}{
+		{"ratio divides its components", []decimal.Decimal{dec("100"), dec("4")}, []decimal.NullDecimal{{Decimal: dec("100"), Valid: true}, {Decimal: dec("25"), Valid: true}}},
+		{"zero denominator is null, sum stays", []decimal.Decimal{dec("100"), dec("0")}, []decimal.NullDecimal{{Decimal: dec("100"), Valid: true}, {}}},
+		{"empty bucket: sum is zero, ratio is null", []decimal.Decimal{dec("0"), dec("0")}, []decimal.NullDecimal{{Decimal: dec("0"), Valid: true}, {}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := p.values(tc.bucket)
+			if len(got) != len(tc.want) {
+				t.Fatalf("values = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i].Valid != tc.want[i].Valid || (got[i].Valid && !got[i].Decimal.Equal(tc.want[i].Decimal)) {
+					t.Errorf("value %d = %+v, want %+v", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+func dec(s string) decimal.Decimal { return decimal.RequireFromString(s) }
 
 func TestPlanQueryRoutesAndRefuses(t *testing.T) {
 	cat := posCatalog(t)
