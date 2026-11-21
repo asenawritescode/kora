@@ -454,10 +454,10 @@ func fieldText(value any) string {
 // values before computed fields run. Link inputs may use either the document
 // name or its title field, which keeps API payloads human-friendly.
 //
-// stored is the row as it is saved, nil for a new row. An update copies a value
-// only when the target is blank or the source link changed: an unchanged link
-// keeps the value already on the row, so a later change to the source record
-// does not rewrite a saved document.
+// stored is the row as it is saved, nil for a new row. An update takes the
+// stored value when the source link is unchanged and the stored value is set,
+// whatever the client sent; otherwise it copies from the source. A later change
+// to the source record does not rewrite a saved document.
 func (tx *TxManager) populateLinkedFields(ex db.Queryer, dt *doctype.DocType, doc, stored *doctype.Document) error {
 	if dt == nil || doc == nil {
 		return nil
@@ -481,7 +481,7 @@ func (tx *TxManager) populateLinkedField(ex db.Queryer, dt *doctype.DocType, fie
 		return nil
 	}
 	linkValue := fieldText(doc.Get(sourceField))
-	if linkValue == "" || keepsStoredValue(doc, stored, field.Fieldname, sourceField, linkValue) {
+	if linkValue == "" || restoreStoredValue(doc, stored, field.Fieldname, sourceField, linkValue) {
 		return nil
 	}
 	source := dt.GetField(sourceField)
@@ -554,13 +554,15 @@ func linkedRowValue(value any, targetMeta *doctype.Field) any {
 	return textValue
 }
 
-// keepsStoredValue reports whether a saved row keeps its linked value: the row
-// is stored, the target has a value and the source link is the one stored.
-func keepsStoredValue(doc, stored *doctype.Document, target, source, linkValue string) bool {
-	if stored == nil || fieldText(doc.Get(target)) == "" {
+// restoreStoredValue sets the target of a saved row back to its stored value
+// when the row has one and its source link is unchanged. It reports whether it
+// did, so the caller skips the lookup.
+func restoreStoredValue(doc, stored *doctype.Document, target, source, linkValue string) bool {
+	if stored == nil || fieldText(stored.Get(target)) == "" || fieldText(stored.Get(source)) != linkValue {
 		return false
 	}
-	return fieldText(stored.Get(source)) == linkValue
+	doc.Set(target, stored.Get(target))
+	return true
 }
 
 // updateDerivedFieldsExec persists both linked and computed values produced by
