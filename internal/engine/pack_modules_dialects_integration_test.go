@@ -447,7 +447,7 @@ func installPOSPackage(t *testing.T, database *sql.DB, dbName, siteName string, 
 		if err != nil {
 			t.Fatal(err)
 		}
-		merged, err := mergeManagementPackageSnapshot(current, incoming)
+		merged, err := mergeManagementPackageSnapshot(current, incoming, packageAuthority{})
 		if err != nil {
 			t.Fatalf("merge composed package: %v", err)
 		}

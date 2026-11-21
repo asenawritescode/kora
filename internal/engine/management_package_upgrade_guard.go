@@ -27,10 +27,10 @@ type packageTenantDB struct {
 // prepareManagementPackageTarget merges a package into the tenant's configuration and checks it is
 // safe for the records the tenant already has. A non-nil result refuses the operation. It runs
 // before the activation journal exists, so a retry of a half-applied package never meets it.
-func prepareManagementPackageTarget(ctx context.Context, tenant packageTenantDB, current, incoming *doctype.ConfigSnapshot) (*doctype.ConfigSnapshot, *management.FinishResult) {
-	target, err := mergeManagementPackageSnapshot(current, incoming)
+func prepareManagementPackageTarget(ctx context.Context, tenant packageTenantDB, current, incoming *doctype.ConfigSnapshot, authority packageAuthority) (*doctype.ConfigSnapshot, *management.FinishResult) {
+	target, err := mergeManagementPackageSnapshot(current, incoming, authority)
 	if err != nil {
-		refusal := failed(contract.CodeConflict, "package configuration conflicts with existing tenant configuration")
+		refusal := failed(contract.CodeConflict, truncateUTF8("package configuration conflicts with existing tenant configuration: "+err.Error(), 480))
 		return nil, &refusal
 	}
 	registry := doctype.NewRegistry()

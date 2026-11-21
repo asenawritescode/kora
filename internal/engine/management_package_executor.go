@@ -171,7 +171,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 			handle.Release()
 			return packageRecoveryRequired("tenant configuration snapshot read needs recovery"), nil
 		}
-		target, refusal := prepareManagementPackageTarget(ctx, packageTenantDB{conn: runtime.DB, name: info.DBName, dialect: dialect}, currentSnapshot, incoming)
+		target, refusal := prepareManagementPackageTarget(ctx, packageTenantDB{conn: runtime.DB, name: info.DBName, dialect: dialect}, currentSnapshot, incoming, newPackageAuthority(packageConstraint, moduleSnapshot))
 		if refusal != nil {
 			releaseTenantWork()
 			handle.Release()

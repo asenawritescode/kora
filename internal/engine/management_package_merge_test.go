@@ -47,7 +47,7 @@ func TestMergeManagementPackageSnapshotPreservesAndUpsertsTenantConfig(t *testin
 		Scripts:       []*doctype.ScriptSnapshot{{Name: "new_script", ScriptHash: "new-hash", Source: "return true;"}},
 		ScheduledJobs: []contract.ScheduledJobDefinition{{Name: "invoice_job", Type: "invoice", Schedule: "0 0 * * *"}},
 	}
-	merged, err := mergeManagementPackageSnapshot(current, incoming)
+	merged, err := mergeManagementPackageSnapshot(current, incoming, packageAuthority{})
 	if err != nil {
 		t.Fatalf("mergeManagementPackageSnapshot() error = %v", err)
 	}
@@ -92,7 +92,7 @@ func TestMergeManagementPackageSnapshotPreservesExplicitAssignmentScope(t *testi
 		}},
 	}
 
-	merged, err := mergeManagementPackageSnapshot(current, incoming)
+	merged, err := mergeManagementPackageSnapshot(current, incoming, packageAuthority{})
 	if err != nil {
 		t.Fatalf("merge package assignment policy: %v", err)
 	}
@@ -122,6 +122,7 @@ func TestMergeManagementPackageSnapshotRejectsViewRouteCollision(t *testing.T) {
 	_, err := mergeManagementPackageSnapshot(
 		&doctype.ConfigSnapshot{Views: []*doctype.View{{Name: "Existing", Route: "/shared"}}},
 		&doctype.ConfigSnapshot{Views: []*doctype.View{{Name: "Incoming", Route: "/shared"}}},
+		packageAuthority{},
 	)
 	if err == nil {
 		t.Fatal("accepted a package route that collides with a different tenant view")
@@ -140,6 +141,7 @@ func TestMergeManagementPackageSnapshotRejectsUnownedReplacementOfOwnedResource(
 	_, err := mergeManagementPackageSnapshot(
 		&doctype.ConfigSnapshot{Modules: []contract.ModuleDescriptor{owned}, DocTypes: []*doctype.DocType{{Name: "Invoice", ModuleOwnerID: "finance.ar"}}},
 		&doctype.ConfigSnapshot{DocTypes: []*doctype.DocType{{Name: "Invoice", Module: "Other package"}}},
+		packageAuthority{},
 	)
 	if err == nil || !strings.Contains(err.Error(), `owned by module "finance.ar"`) {
 		t.Fatalf("unowned package replacement error = %v; want owner conflict", err)
@@ -159,6 +161,7 @@ func TestMergeManagementPackageSnapshotRequiresVersionChangeForModuleDefinitionU
 	_, err := mergeManagementPackageSnapshot(
 		&doctype.ConfigSnapshot{Modules: []contract.ModuleDescriptor{current}},
 		&doctype.ConfigSnapshot{Modules: []contract.ModuleDescriptor{changed}},
+		packageAuthority{},
 	)
 	if err == nil || !strings.Contains(err.Error(), "cannot change without an authorized version update") {
 		t.Fatalf("same-version module update error = %v; want immutable version rejection", err)
@@ -177,7 +180,7 @@ func TestModuleOwnerUpdateRejectsIncompatibleActiveExtensionAndDisableRemovesIt(
 		ArtifactDigest: strings.Repeat("a", 64), HandlerRef: handler, Order: 10,
 	}}}
 	current := []contract.ModuleDescriptor{owner, extender}
-	if _, err := mergeModuleDescriptors(current, nil); err != nil {
+	if _, err := mergeModuleDescriptors(current, nil, packageAuthority{}); err != nil {
 		t.Fatal("valid initial extension composition rejected:", err)
 	}
 	updatedOwner := owner
@@ -187,7 +190,7 @@ func TestModuleOwnerUpdateRejectsIncompatibleActiveExtensionAndDisableRemovesIt(
 	if err := contract.ValidateModuleSet([]contract.ModuleDescriptor{updatedOwner, extender}, nil); err == nil || !strings.Contains(err.Error(), "point version") {
 		t.Fatalf("owner update incompatible with active extension = %v, want extension compatibility rejection", err)
 	}
-	if _, err := mergeModuleDescriptors(current, []contract.ModuleDescriptor{updatedOwner}); err == nil {
+	if _, err := mergeModuleDescriptors(current, []contract.ModuleDescriptor{updatedOwner}, packageAuthority{}); err == nil {
 		t.Fatal("unplanned owner replacement with an active extension was accepted")
 	}
 	disabledExtender := extender

@@ -122,7 +122,7 @@ func TestComposedPackageCandidateBindingsOnFreshTenant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, err := mergeManagementPackageSnapshot(current, incoming)
+	target, err := mergeManagementPackageSnapshot(current, incoming, packageAuthority{})
 	if err != nil {
 		t.Fatalf("merge composed package: %v", err)
 	}

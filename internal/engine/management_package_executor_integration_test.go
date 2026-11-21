@@ -180,7 +180,7 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 			if err != nil {
 				t.Fatal("collect current config before interruption:", err)
 			}
-			targetSnapshot, err := mergeManagementPackageSnapshot(currentSnapshot, incoming)
+			targetSnapshot, err := mergeManagementPackageSnapshot(currentSnapshot, incoming, packageAuthority{})
 			if err != nil {
 				t.Fatal("merge package before interruption:", err)
 			}
