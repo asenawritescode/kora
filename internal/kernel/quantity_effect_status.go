@@ -3,7 +3,6 @@ package kernel
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -118,9 +117,19 @@ func refuseLineChange(dt *doctype.DocType, oldDoc, doc *doctype.Document, effect
 // moveQuantity applies the stored change of source, scaled by dir (+1 applies it,
 // -1 reverses it), to every target record it touches, in target name order.
 func moveQuantity(ctx context.Context, w effectWriter, cause moveCause, source *doctype.Document, dir float64) *contract.Error {
-	totals := effectTotalsOf(cause.dt.QuantityEffect, source)
+	effect := cause.dt.QuantityEffect
+	totals := effectTotalsOf(effect, source)
+	// Only a move that adds stock (dir > 0) folds its cost into the average.
+	var costs map[string]costMove
+	if dir > 0 {
+		costs = costMoveOf(effect, source)
+	}
 	for _, targetName := range nonzeroEffectTargets(totals) {
-		if cerr := moveTarget(ctx, w, cause, targetName, dir*totals[targetName]); cerr != nil {
+		move := targetMove{name: targetName, change: dir * totals[targetName]}
+		if cost, ok := costs[targetName]; ok {
+			move.cost = &cost
+		}
+		if cerr := moveTarget(ctx, w, cause, move); cerr != nil {
 			return cerr
 		}
 	}
@@ -167,7 +176,7 @@ func sameEffectTotals(a, b map[string]float64) bool {
 // of the write that caused it. It is checked and written like a bundle adjust
 // item, and it is authorized by the write of the source record, as a create is.
 // It then appends the ledger row of the move, if the effect has a ledger.
-func moveTarget(ctx context.Context, w effectWriter, cause moveCause, targetName string, change float64) *contract.Error {
+func moveTarget(ctx context.Context, w effectWriter, cause moveCause, move targetMove) *contract.Error {
 	effect := cause.dt.QuantityEffect
 	reg, txMgr := w.run.Reg, w.run.Mgr
 	target := reg.Get(effect.TargetDocType)
@@ -176,21 +185,17 @@ func moveTarget(ctx context.Context, w effectWriter, cause moveCause, targetName
 	}
 	// Lock the target row before reading it, so two writes moving the same target
 	// take turns instead of both writing from the same stale quantity.
-	if lockErr := lockRecordRow(w.run.Tx, w.k.dialect(), target, targetName); lockErr != nil && !errors.Is(lockErr, sql.ErrNoRows) {
+	if lockErr := lockRecordRow(w.run.Tx, w.k.dialect(), target, move.name); lockErr != nil && !errors.Is(lockErr, sql.ErrNoRows) {
 		return contract.NewError(contract.CodeDependencyUnavailable, "lock target record failed")
 	}
-	oldDoc, loadErr := txMgr.GetDocWithScope(target, targetName, scopeForOperation(reg, w.op, target.Name, "write")) //nolint:contextcheck // the context travels in txMgr.Context
+	oldDoc, loadErr := txMgr.GetDocWithScope(target, move.name, scopeForOperation(reg, w.op, target.Name, "write")) //nolint:contextcheck // the context travels in txMgr.Context
 	if loadErr != nil {
 		if errors.Is(loadErr, orm.ErrNotFound) {
 			return contract.NewError(contract.CodeNotFound, "document not found")
 		}
 		return contract.NewError(contract.CodeDependencyUnavailable, "load target record failed")
 	}
-	data, err := json.Marshal(map[string]float64{effect.TargetQuantityField: change})
-	if err != nil {
-		return contract.NewError(contract.CodeInternal, "encoding quantity effect failed")
-	}
-	adjusted, adjustErr := adjustQuantity(target, oldDoc, "adjust", data)
+	adjusted, adjustErr := targetAdjust(target, oldDoc, effect, move)
 	if adjustErr != nil {
 		return contract.NewError(contract.CodeValidationFailed, adjustErr.Error())
 	}
@@ -214,5 +219,5 @@ func moveTarget(ctx context.Context, w effectWriter, cause moveCause, targetName
 	if cerr := w.writeTarget(ctx, target, doc, oldDoc); cerr != nil {
 		return cerr
 	}
-	return w.appendLedger(cause, targetName, change, quantityAfter(doc, effect.TargetQuantityField)) //nolint:contextcheck // the context travels in txMgr.Context
+	return w.appendLedger(cause, move.name, move.change, quantityAfter(doc, effect.TargetQuantityField)) //nolint:contextcheck // the context travels in txMgr.Context
 }

@@ -261,7 +261,7 @@ func (m *mutation) buildItem(ctx context.Context, b *bundle, i int) *contract.Er
 		}
 		doc = cloneDoc(oldDoc)
 	}
-	if data, cerr = m.itemData(recordDT, oldDoc, operation, data); cerr != nil {
+	if data, cerr = m.itemData(item, recordDT, oldDoc, operation, data); cerr != nil {
 		return cerr
 	}
 	if cerr := m.fillItem(recordDT, operation, doc, oldDoc, data); cerr != nil {
@@ -285,13 +285,18 @@ func (m *mutation) buildItem(ctx context.Context, b *bundle, i int) *contract.Er
 
 // itemData turns the data of a decrement or adjust item into the absolute
 // values to write; other operations keep their data as it is.
-func (m *mutation) itemData(recordDT *doctype.DocType, oldDoc *doctype.Document, operation string, data json.RawMessage) (json.RawMessage, *contract.Error) {
+func (m *mutation) itemData(item RecordMutationBundleItem, recordDT *doctype.DocType, oldDoc *doctype.Document, operation string, data json.RawMessage) (json.RawMessage, *contract.Error) {
 	if operation != "decrement" && operation != "adjust" {
 		return data, nil
 	}
 	adjusted, err := adjustQuantity(recordDT, oldDoc, operation, data)
 	if err != nil {
 		return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+	}
+	if average, ok := m.op.Context.averageOf(item); ok && operation == "adjust" {
+		if adjusted, err = averageAdjust(recordDT, oldDoc, average.effect, adjusted, average.cost); err != nil {
+			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
+		}
 	}
 	return adjusted, nil
 }

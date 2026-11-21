@@ -174,6 +174,9 @@ type OperationContext struct {
 	// the source record, not by write permission on the target. Only
 	// prepareQuantityEffect sets this; adapters and payloads cannot.
 	effectItems map[string]struct{}
+	// effectAverages holds the moving average move of each effect target, keyed
+	// by target name. Only prepareQuantityEffect sets this.
+	effectAverages map[string]averageMove
 }
 
 func (c OperationContext) isEffectItem(key string) bool {

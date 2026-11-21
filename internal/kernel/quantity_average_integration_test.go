@@ -92,23 +92,18 @@ func forEachAverageDialect(t *testing.T, check func(t *testing.T, s *siteFixture
 	}
 }
 
-// productQtyAndCost reads a product's stock and moving average; cost is nil until a move sets it.
-func productQtyAndCost(t *testing.T, s *siteFixture, name string) (float64, sql.NullFloat64) {
+// expectAverage checks the one product of the test: its stock and its moving
+// average. The average is NULL until a move sets it.
+func expectAverage(t *testing.T, s *siteFixture, wantQty, wantCost float64) {
 	t.Helper()
 	table := s.Dialect.QuoteIdent(s.Registry.Get("Product").RawTableName())
 	var qty float64
 	var cost sql.NullFloat64
-	if err := s.DB.QueryRow("SELECT stock_qty, cost_price FROM "+table+" WHERE name = ?", name).Scan(&qty, &cost); err != nil {
-		t.Fatalf("read product %s: %v", name, err)
+	if err := s.DB.QueryRow("SELECT stock_qty, cost_price FROM "+table+" ORDER BY name LIMIT 1").Scan(&qty, &cost); err != nil {
+		t.Fatalf("read product: %v", err)
 	}
-	return qty, cost
-}
-
-func expectAverage(t *testing.T, s *siteFixture, product string, wantQty, wantCost float64) {
-	t.Helper()
-	qty, cost := productQtyAndCost(t, s, product)
 	if qty != wantQty || !cost.Valid || cost.Float64 != wantCost {
-		t.Fatalf("%s stock = %v, cost = %+v; want stock %v, cost %v", product, qty, cost, wantQty, wantCost)
+		t.Fatalf("stock = %v, cost = %+v; want stock %v, cost %v", qty, cost, wantQty, wantCost)
 	}
 }
 
@@ -123,9 +118,9 @@ func TestReceiptLinesUpdateTheMovingAverageOnBothDialects(t *testing.T) {
 			mustComplete(t, exec(t, s, k, kernel.Operation{Command: "record.create", Payload: payload, Context: opCtx(s.Name, "Administrator")}))
 		}
 		receipt(50, 10)
-		expectAverage(t, s, p, 10, 50)
+		expectAverage(t, s, 10, 50)
 		receipt(70, 10)
-		expectAverage(t, s, p, 20, 60)
+		expectAverage(t, s, 20, 60)
 	})
 }
 
@@ -136,20 +131,20 @@ func TestGatedReturnAndSaleLeaveTheAverageRightOnBothDialects(t *testing.T) {
 		p := seedLedgerProducts(t, s, k, 0)[0]
 		payload, _ := json.Marshal(map[string]any{"doctype": "Goods Receipt", "data": map[string]any{"items": []map[string]any{{"product": p, "quantity": 10, "unit_cost": 50}, {"product": p, "quantity": 10, "unit_cost": 70}}}})
 		mustComplete(t, exec(t, s, k, kernel.Operation{Command: "record.create", Payload: payload, Context: opCtx(s.Name, "Administrator")}))
-		expectAverage(t, s, p, 20, 60)
+		expectAverage(t, s, 20, 60)
 
 		sale, _ := json.Marshal(map[string]any{"doctype": "Sale", "data": map[string]any{"product": p, "quantity": 5, "unit_cost": 999}})
 		mustComplete(t, exec(t, s, k, kernel.Operation{Command: "record.create", Payload: sale, Context: opCtx(s.Name, "Administrator")}))
-		expectAverage(t, s, p, 15, 60)
+		expectAverage(t, s, 15, 60)
 
 		ret, _ := json.Marshal(map[string]any{"doctype": "Stock Return", "data": map[string]any{"items": []map[string]any{{"product": p, "quantity": 5, "unit_cost": 100}}}})
 		mustComplete(t, exec(t, s, k, kernel.Operation{Command: "record.create", Payload: ret, Context: opCtx(s.Name, "Administrator")}))
-		expectAverage(t, s, p, 15, 60)
+		expectAverage(t, s, 15, 60)
 
 		name := latestName(t, s, "Stock Return")
 		update, _ := json.Marshal(map[string]any{"doctype": "Stock Return", "name": name, "data": map[string]any{"status": "Received"}})
 		mustComplete(t, exec(t, s, k, kernel.Operation{Command: "record.update", Payload: update, Context: opCtx(s.Name, "Administrator")}))
 		// (15 at 60 + 5 at 100) / 20 = 70
-		expectAverage(t, s, p, 20, 70)
+		expectAverage(t, s, 20, 70)
 	})
 }
