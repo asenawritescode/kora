@@ -65,6 +65,7 @@ func TestReportMetricPacksValidate(t *testing.T) {
 			}
 			// erpsell keeps its two selling dashboards, so a pack may ship more than one.
 			// erpsell keeps its two selling dashboards, so a pack may ship more than one.
+			// erpsell keeps its two selling dashboards, so a pack may ship more than one.
 			if metricCount == 0 || dashboardCount == 0 {
 				t.Fatalf("%s: got %d metrics and %d dashboards, want at least one metric and one dashboard", pack, metricCount, dashboardCount)
 			}
