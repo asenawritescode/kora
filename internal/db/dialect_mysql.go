@@ -412,6 +412,9 @@ func (d *MySQLDialect) InsertOrIgnorePrefix() string { return "INSERT IGNORE" }
 // SharedRowLock is MySQL's locking read: FOR SHARE.
 func (d *MySQLDialect) SharedRowLock() string { return " FOR SHARE" }
 
+// ExclusiveRowLock is MySQL's locking read: FOR UPDATE.
+func (d *MySQLDialect) ExclusiveRowLock() string { return " FOR UPDATE" }
+
 // AllocateNameNumber issues the next PREFIX-NNNN number. The prefix is its own
 // counter key, so it shares the series path.
 func (d *MySQLDialect) AllocateNameNumber(tx *sql.Tx, doctypeName, prefix, tableName string) (int64, error) {

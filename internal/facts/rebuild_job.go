@@ -16,7 +16,10 @@ import (
 	"github.com/asenawritescode/kora/internal/tenanttime"
 )
 
-const jobTable = "_kora_fact_rebuild_job"
+const (
+	jobTable   = "_kora_fact_rebuild_job"
+	guardTable = "_kora_fact_rebuild_guard"
+)
 
 // sequenceTable is the outbox sequence row. The outbox takes FOR UPDATE on it in the
 // transaction that writes an event, so a locking read here waits for in-flight events.
@@ -112,20 +115,29 @@ func (s *JobStore) Enqueue(ctx context.Context, model string, window Window) (*J
 		return nil, fmt.Errorf("facts: begin rebuild enqueue: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	start, err := readSequence(ctx, tx)
+	job, err := s.insertQueued(ctx, tx, contract.NewEventID(), model, window)
 	if err != nil {
 		return nil, err
 	}
-	job := &Job{ID: contract.NewEventID(), Model: model, Status: JobQueued, StartSequence: start, Window: window}
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("facts: commit rebuild enqueue: %w", err)
+	}
+	return job, nil
+}
+
+// insertQueued inserts the queued job id inside tx, capturing the outbox sequence under its lock.
+func (s *JobStore) insertQueued(ctx context.Context, tx *sql.Tx, id, model string, window Window) (*Job, error) {
+	start, err := readSequence(ctx, tx, s.Dialect)
+	if err != nil {
+		return nil, err
+	}
+	job := &Job{ID: id, Model: model, Status: JobQueued, StartSequence: start, Window: window}
 	now := time.Now().UTC()
 	insert := fmt.Sprintf(`INSERT INTO %s (id, model, status, start_sequence, checkpoint, processed, error, lease_owner, fencing_token, lease_until, created_at, updated_at, scope_from, scope_to)
 		VALUES (?, ?, ?, ?, '', 0, '', '', 0, %s, ?, ?, ?, ?)`, s.table(), s.Dialect.NowTimestamp())
 	args := []any{job.ID, model, string(job.Status), start, now, now, scopeValue(window, window.From), scopeValue(window, window.To)}
 	if _, err = tx.ExecContext(ctx, db.Rebind(s.Dialect, insert), args...); err != nil {
 		return nil, fmt.Errorf("facts: insert rebuild job: %w", err)
-	}
-	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("facts: commit rebuild enqueue: %w", err)
 	}
 	return job, nil
 }
@@ -210,6 +222,45 @@ func (s *JobStore) covers(ctx context.Context, model string, day tenanttime.Date
 	return n > 0, nil
 }
 
+// EnqueueOnce queues a whole-model rebuild of model unless one is already queued or running, or has
+// finished. A failed or cancelled backfill is queued again. It returns nil when it queued nothing.
+//
+// The guard row of model is claimed by one conditional UPDATE inside the transaction that inserts the job,
+// so two concurrent callers, on this or another replica, queue at most one job.
+func (s *JobStore) EnqueueOnce(ctx context.Context, model string) (*Job, error) {
+	if err := s.ensure(ctx); err != nil {
+		return nil, err
+	}
+	// A concurrent caller may insert the guard row first; the claim below needs it to exist either way,
+	// so the insert's own error is not used. A real database fault fails the claim instead.
+	_, _ = s.DB.ExecContext(ctx, db.Rebind(s.Dialect, "INSERT INTO "+s.guardTable()+" (model, job_id) VALUES (?, '')"), model)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("facts: begin backfill enqueue: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	id := contract.NewEventID()
+	marks, statuses := inList([]JobStatus{JobFailed, JobCancelled})
+	claim := fmt.Sprintf(`UPDATE %s SET job_id = ? WHERE model = ? AND (job_id = '' OR job_id IN (SELECT id FROM %s WHERE model = ? AND status IN (%s)))`,
+		s.guardTable(), s.table(), marks)
+	args := append([]any{id, model, model}, statuses...)
+	changed, err := execRowsTx(ctx, tx, db.Rebind(s.Dialect, claim), args)
+	if err != nil {
+		return nil, fmt.Errorf("facts: claim backfill of %s: %w", model, err)
+	}
+	if changed != 1 {
+		return nil, nil
+	}
+	job, err := s.insertQueued(ctx, tx, id, model, Window{})
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("facts: commit backfill enqueue: %w", err)
+	}
+	return job, nil
+}
+
 // Cancel moves a queued or running job to cancelled; a running worker stops on its next write.
 func (s *JobStore) Cancel(ctx context.Context, id string) error {
 	if err := s.ensure(ctx); err != nil {
@@ -269,6 +320,19 @@ func (s *JobStore) table() string {
 	return s.Dialect.QuoteIdent(jobTable)
 }
 
+func (s *JobStore) guardTable() string {
+	return s.Dialect.QuoteIdent(guardTable)
+}
+
+// execRowsTx runs a write inside tx and returns the rows it changed.
+func execRowsTx(ctx context.Context, tx *sql.Tx, query string, args []any) (int64, error) {
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // ensure creates the job table once per store. DDL runs outside any transaction.
 func (s *JobStore) ensure(ctx context.Context) error {
 	s.mu.Lock()
@@ -278,6 +342,9 @@ func (s *JobStore) ensure(ctx context.Context) error {
 	}
 	if _, err := s.DB.ExecContext(ctx, jobDDL(s.Dialect)); err != nil {
 		return fmt.Errorf("facts: create rebuild job table: %w", err)
+	}
+	if _, err := s.DB.ExecContext(ctx, guardDDL(s.Dialect)); err != nil {
+		return fmt.Errorf("facts: create rebuild guard table: %w", err)
 	}
 	for _, col := range []string{"scope_from", "scope_to"} {
 		probe := fmt.Sprintf("SELECT %s FROM %s WHERE 1 = 0", s.Dialect.QuoteIdent(col), s.table()) //nolint:gosec // identifiers only, quoted by the dialect
@@ -306,6 +373,18 @@ func jobDDL(dialect db.Dialect) string {
 		fmt.Sprintf("PRIMARY KEY (%s)", dialect.QuoteIdent("id")),
 	}
 	ddl := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n  %s\n)", dialect.QuoteIdent(jobTable), strings.Join(cols, ",\n  "))
+	if suffix := dialect.TableSuffix(); suffix != "" {
+		ddl += " " + suffix
+	}
+	return ddl
+}
+
+// guardDDL creates the backfill guard: one row per model, holding the id of the job that claimed it ("" when
+// none has). Its primary key makes a second row for a model impossible.
+func guardDDL(dialect db.Dialect) string {
+	cols := []string{columnDef(dialect, "model", "Data"), columnDef(dialect, "job_id", "Data"),
+		fmt.Sprintf("PRIMARY KEY (%s)", dialect.QuoteIdent("model"))}
+	ddl := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n  %s\n)", dialect.QuoteIdent(guardTable), strings.Join(cols, ",\n  "))
 	if suffix := dialect.TableSuffix(); suffix != "" {
 		ddl += " " + suffix
 	}
@@ -342,9 +421,11 @@ func parseWindowDate(s string) (tenanttime.Date, error) {
 	return tenanttime.Date{Year: t.Year(), Month: t.Month(), Day: t.Day()}, nil
 }
 
-func readSequence(ctx context.Context, tx *sql.Tx) (int64, error) {
+// readSequence reads the outbox sequence under the dialect's exclusive row lock, so in-flight events finish first.
+func readSequence(ctx context.Context, tx *sql.Tx, dialect db.Dialect) (int64, error) {
 	var seq int64
-	err := tx.QueryRowContext(ctx, "SELECT last_sequence FROM "+sequenceTable+" WHERE id = 1 FOR UPDATE").Scan(&seq)
+	query := "SELECT last_sequence FROM " + sequenceTable + " WHERE id = 1" + dialect.ExclusiveRowLock()
+	err := tx.QueryRowContext(ctx, query).Scan(&seq)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}

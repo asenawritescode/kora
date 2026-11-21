@@ -445,6 +445,9 @@ func (d *LibSQLDialect) InsertOrIgnorePrefix() string { return "INSERT OR IGNORE
 // SharedRowLock is empty: SQLite has no row locks and no FOR SHARE.
 func (d *LibSQLDialect) SharedRowLock() string { return "" }
 
+// ExclusiveRowLock is empty: SQLite has no row locks and no FOR UPDATE.
+func (d *LibSQLDialect) ExclusiveRowLock() string { return "" }
+
 // ReserveSeriesRange is not supported on LibSQL, which is being removed.
 func (d *LibSQLDialect) ReserveSeriesRange(_ *sql.Tx, _, _ string, _ int64, _ func() (int64, error)) (int64, int64, error) {
 	return 0, 0, errors.New("number blocks need MySQL or Postgres")

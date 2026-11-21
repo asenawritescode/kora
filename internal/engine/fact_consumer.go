@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/internal/db"
@@ -36,6 +37,10 @@ func registerFactConsumer(config TenantServiceConfig, loaded *knet.LoadedSite, s
 		return fmt.Errorf("register fact events: %w", err)
 	}
 	return registerTenantWorkerStart(config, func() error {
+		// A failed backfill queue does not stop the tenant: the next start, or the drift check, retries it.
+		if _, err := facts.EnqueueGenerated(config.ProcessContext, loaded.DB, dialect, loaded.Registry); err != nil {
+			slog.Warn("queue generated fact rebuilds", "site", loaded.Name, "error", err)
+		}
 		if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
 			RunWorkflowTriggerDispatcher(ctx, dispatcher)
 		}) {

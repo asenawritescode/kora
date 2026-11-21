@@ -70,6 +70,9 @@ type QueryDialect interface {
 	// It is "" where the engine has no row locks (LibSQL); callers then take a
 	// write lock another way.
 	SharedRowLock() string
+	// ExclusiveRowLock is the suffix that makes a read take a row lock for update, held to the end of the
+	// transaction. It is "" where the engine serializes write transactions (LibSQL).
+	ExclusiveRowLock() string
 	AllocateNameNumber(tx *sql.Tx, doctypeName, prefix, tableName string) (int64, error)
 	// AllocateSeriesNumber atomically increments the counter for one naming
 	// series key. seed is called only when the counter row does not exist yet;

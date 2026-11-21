@@ -103,3 +103,32 @@ func TestFactConsumerStartsDriftCheck(t *testing.T) {
 	}
 }
 
+// TestFactConsumerStartsWhenBackfillQueueFails checks that a failed backfill queue is logged and the fact
+// workers still start: the tenant comes up and a later start retries the queue.
+func TestFactConsumerStartsWhenBackfillQueueFails(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("create tenant DB:", err)
+	}
+	defer database.Close()
+	mock.ExpectExec(".*_kora_fact_rebuild_job").WillReturnError(errors.New("backfill probe"))
+	admission, err := dbaccess.NewAdmissionWithMaintenance(2, 1, time.Second, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := doctype.NewRegistry()
+	reg.Register(&doctype.DocType{Name: "Expense", Fields: []doctype.Field{{Fieldname: "amount", Fieldtype: "Currency"}}})
+	loaded := &knet.LoadedSite{SiteID: "tenant-backfill", Name: "backfill.example.test", DBType: "mysql", DB: database, Registry: reg}
+	starts := 0
+	config := TenantServiceConfig{
+		ProcessContext:      context.Background(),
+		RegisterWorkerStart: func(start func() error) error { starts++; return start() },
+	}
+	services := &tenantruntime.Services{WorkAdmission: admission}
+	if err := registerRecordConsumers(config, loaded, services, nil, kdb.Resolve("mysql")); err != nil {
+		t.Fatalf("registerRecordConsumers: %v; a failed backfill queue must not fail the start", err)
+	}
+	if starts != 1 {
+		t.Fatalf("worker starts = %d, want 1", starts)
+	}
+}
