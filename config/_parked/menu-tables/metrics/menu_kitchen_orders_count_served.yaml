@@ -1,0 +1,13 @@
+name: menu_kitchen_orders_count_served
+label: "Kitchen orders: Served"
+type: simple
+model: "Kitchen Order"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Served"
+time: business_date
+format: number
+description: "Kitchen orders: Served from the Kitchen Order records (count)."

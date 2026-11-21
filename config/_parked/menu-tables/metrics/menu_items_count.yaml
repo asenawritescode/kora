@@ -1,0 +1,9 @@
+name: menu_items_count
+label: "Menu items"
+type: simple
+model: "Menu Item"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Menu items from the Menu Item records (count)."

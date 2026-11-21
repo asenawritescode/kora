@@ -1,0 +1,13 @@
+name: menu_kitchen_orders_count_new
+label: "Kitchen orders: New"
+type: simple
+model: "Kitchen Order"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "New"
+time: business_date
+format: number
+description: "Kitchen orders: New from the Kitchen Order records (count)."
