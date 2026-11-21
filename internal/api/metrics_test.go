@@ -78,7 +78,7 @@ func TestMetricsListAndDescribeHideUnreadableMetrics(t *testing.T) {
 	for _, m := range envelope.Data {
 		names = append(names, m.Name)
 	}
-	if want := []string{"average_sale", "receipts", "refunds", "sales"}; !slices.Equal(names, want) {
+	if want := []string{"average_sale", "items_sold", "receipts", "refunds", "sales"}; !slices.Equal(names, want) {
 		t.Fatalf("listed %v, want %v: the stock metric and the mixed derived metric are unreadable", names, want)
 	}
 	if got := serveMetrics(t, registry, api, []string{"Cashier"}, "GET", "/api/v1/metrics/sales", "").Code; got != http.StatusOK {
