@@ -2,6 +2,7 @@ package contract
 
 // SavedQuestion is the Explore question a saved report stores: the record type or metric, the measure,
 // the "by" dimensions, the grain, the period, the filters, the comparison, the top count and the view.
+// A period preset (today, last_week, ...) reruns relative to today; a custom period keeps From and To.
 // It never holds numbers; a report reruns its question when it is opened.
 //
 //contract:wire
@@ -11,6 +12,7 @@ type SavedQuestion struct {
 	Measure    string         `json:"measure,omitempty"`
 	By         []string       `json:"by,omitempty"`
 	Grain      string         `json:"grain,omitempty"`
+	Period     string         `json:"period,omitempty"`
 	From       string         `json:"from,omitempty"`
 	To         string         `json:"to,omitempty"`
 	Filters    []MetricFilter `json:"filters,omitempty"`

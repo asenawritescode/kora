@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/metrics"
 	"github.com/asenawritescode/kora/internal/policy"
@@ -109,6 +110,9 @@ func TestMetricsQueryChecksAuthorizationThenShape(t *testing.T) {
 		{"range over the month cap is refused", `{"metrics":["sales"],"from":"2016-01-01","to":"2026-01-01","grain":"month"}`, http.StatusBadRequest, "metrics.range_too_large"},
 		{"unparseable date is a bad query", `{"metrics":["sales"],"from":"18/11/2026","to":"2026-11-20","grain":"day"}`, http.StatusBadRequest, "metrics.query_invalid"},
 		{"readable and valid reaches the database step", `{"metrics":["sales"],"from":"2026-11-18","to":"2026-11-20","grain":"day"}`, http.StatusServiceUnavailable, "server.store_unavailable"},
+		{"preset period reaches the database step", `{"metrics":["sales"],"period":{"preset":"last_week"},"grain":"day"}`, http.StatusServiceUnavailable, "server.store_unavailable"},
+		{"preset period with dates is a bad query", `{"metrics":["sales"],"period":{"preset":"last_week"},"from":"2026-11-18","to":"2026-11-20","grain":"day"}`, http.StatusBadRequest, "metrics.query_invalid"},
+		{"unknown preset is a bad query", `{"metrics":["sales"],"period":{"preset":"fortnight"},"grain":"day"}`, http.StatusBadRequest, "metrics.query_invalid"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -243,6 +247,43 @@ func TestMetricsQueryJoinsNeedReadOfTheLinkedType(t *testing.T) {
 			recorder := serveMetrics(t, registry, api, []string{"Cashier"}, "POST", "/api/v1/metrics/query", body)
 			if recorder.Code != tc.wantStatus {
 				t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body, tc.wantStatus)
+			}
+		})
+	}
+}
+
+func TestQueryPeriodOfResolvesPresetsAndCustomDates(t *testing.T) {
+	loc, err := time.LoadLocation("Africa/Nairobi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := tenanttime.Clock{Location: loc, Cutoff: 4 * time.Hour}
+	now := time.Date(2026, 11, 21, 12, 0, 0, 0, loc).UTC()
+	tests := []struct {
+		name     string
+		req      contract.MetricQueryRequest
+		preset   metrics.Preset
+		from, to string
+		wantErr  bool
+	}{
+		{name: "no period reads from and to", req: contract.MetricQueryRequest{From: "2026-11-18", To: "2026-11-20"}, preset: metrics.PresetCustom, from: "2026-11-18", to: "2026-11-20"},
+		{name: "custom reads from and to", req: contract.MetricQueryRequest{Period: &contract.MetricPeriod{Preset: "custom"}, From: "2026-11-01", To: "2026-11-05"}, preset: metrics.PresetCustom, from: "2026-11-01", to: "2026-11-05"},
+		{name: "last week resolves on the clock", req: contract.MetricQueryRequest{Period: &contract.MetricPeriod{Preset: "last_week"}}, preset: metrics.PresetLastWeek, from: "2026-11-09", to: "2026-11-15"},
+		{name: "last week with dates is refused", req: contract.MetricQueryRequest{Period: &contract.MetricPeriod{Preset: "last_week"}, From: "2026-11-01"}, wantErr: true},
+		{name: "custom without dates is refused", req: contract.MetricQueryRequest{Period: &contract.MetricPeriod{Preset: "custom"}}, wantErr: true},
+		{name: "unknown preset is refused", req: contract.MetricQueryRequest{Period: &contract.MetricPeriod{Preset: "fortnight"}}, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := queryPeriodOf(tc.req, clock, now)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error %v", err, tc.wantErr)
+			}
+			if tc.wantErr {
+				return
+			}
+			if got.preset != tc.preset || got.span.From.String() != tc.from || got.span.To.String() != tc.to {
+				t.Fatalf("period = %s %s..%s, want %s %s..%s", got.preset, got.span.From, got.span.To, tc.preset, tc.from, tc.to)
 			}
 		})
 	}

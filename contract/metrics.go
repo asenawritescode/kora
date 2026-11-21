@@ -55,9 +55,11 @@ type MetricFilter struct {
 	Value json.RawMessage `json:"value"`
 }
 
-// MetricQueryRequest asks for metrics over an inclusive range of business dates. Grain is day, week,
-// month or range; range returns one bucket for the whole range, keyed by From. Measures ask for
-// unsaved, unverified measures of a record type, beside the named metrics.
+// MetricQueryRequest asks for metrics over an inclusive range of business dates. Period, when set, names
+// a preset the server resolves from the tenant's clock instead of From and To; custom takes From and To.
+// Grain is day, week, month or range; range returns one bucket for the whole range, keyed by its first
+// day. Measures ask for unsaved, unverified measures of a record type, beside the named metrics.
+// Compare is none, previous_period or week_before.
 //
 //contract:wire
 type MetricQueryRequest struct {
@@ -65,11 +67,20 @@ type MetricQueryRequest struct {
 	Measures   []MetricAdHocMeasure `json:"measures,omitempty"`
 	Dimensions []string             `json:"dimensions,omitempty"`
 	Filters    []MetricFilter       `json:"filters,omitempty"`
-	From       string               `json:"from"`
-	To         string               `json:"to"`
+	Period     *MetricPeriod        `json:"period,omitempty"`
+	From       string               `json:"from,omitempty"`
+	To         string               `json:"to,omitempty"`
 	Grain      string               `json:"grain"`
 	Compare    string               `json:"compare,omitempty"`
 	Top        int                  `json:"top,omitempty"`
+}
+
+// MetricPeriod names a period preset: today, yesterday, this_week, last_week, this_month, last_month,
+// last_7_days, last_30_days, last_3_months, or custom.
+//
+//contract:wire
+type MetricPeriod struct {
+	Preset string `json:"preset"`
 }
 
 // MetricAdHocMeasure is one measure of a record type asked for without a saved metric: a count, a sum
@@ -147,7 +158,8 @@ type MetricRow struct {
 	Values []json.RawMessage `json:"values"`
 }
 
-// MetricsMeta states how fresh a metric result is.
+// MetricsMeta states how fresh a metric result is, and the business period it covers. Previous is the
+// comparison window when the query compares. TimeZone and DayEnds (HH:MM) are the tenant's business clock.
 //
 //contract:wire
 type MetricsMeta struct {
@@ -155,6 +167,27 @@ type MetricsMeta struct {
 	Tier           string          `json:"tier"`
 	SourceSequence int64           `json:"source_sequence"`
 	History        *MetricsHistory `json:"history,omitempty"`
+	Period         MetricsPeriod   `json:"period"`
+	Previous       *MetricsSpan    `json:"previous,omitempty"`
+	TimeZone       string          `json:"time_zone"`
+	DayEnds        string          `json:"day_ends"`
+}
+
+// MetricsPeriod is the period a result covers: its preset and its exact business dates, YYYY-MM-DD.
+//
+//contract:wire
+type MetricsPeriod struct {
+	Preset string `json:"preset"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+}
+
+// MetricsSpan is an inclusive range of business dates, YYYY-MM-DD.
+//
+//contract:wire
+type MetricsSpan struct {
+	From string `json:"from"`
+	To   string `json:"to"`
 }
 
 // MetricsHistory says whether the history a query reads is still being rebuilt from source records.

@@ -267,9 +267,9 @@ func (m metricsAPI) query(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid metrics query", nil)
 		return
 	}
-	q, err := queryFromContract(req)
-	if err != nil {
-		writeError(c, http.StatusBadRequest, "metrics.query_invalid", err.Error(), nil)
+	database := getSiteDB(c, m.siteDB)
+	period, q, ok := m.resolveQuery(c, req, database)
+	if !ok {
 		return
 	}
 	cat, err := m.catalog(c)
@@ -288,7 +288,6 @@ func (m metricsAPI) query(c *gin.Context) {
 		writeError(c, refusal.status, refusal.code, refusal.message, nil)
 		return
 	}
-	database := getSiteDB(c, m.siteDB)
 	if database == nil {
 		writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Metrics not available for this site", nil)
 		return
@@ -306,9 +305,84 @@ func (m metricsAPI) query(c *gin.Context) {
 		metricsRunError(c, "reading query metadata", err)
 		return
 	}
+	meta = periodMeta(meta, period, res)
 	out := resultOf(res)
 	out.Labels = adHocLabels(cat, adHoc)
 	c.JSON(http.StatusOK, metricsEnvelope{Data: out, Meta: meta})
+}
+
+// businessClock is the tenant's business clock. Without a database the default clock serves: the query
+// then fails with store unavailable, after its shape and authorization are checked.
+func (m metricsAPI) businessClock(c *gin.Context, database *sql.DB) (tenanttime.Clock, error) {
+	if database == nil {
+		return tenanttime.Default(), nil
+	}
+	return tenanttime.Load(c.Request.Context(), database, siteDialectFromContext(c, m.dialect), c.GetString("site_name"))
+}
+
+// resolveQuery turns a query request into a query over its period, on the tenant's business clock. It
+// writes the refusal and reports false when the request is malformed.
+func (m metricsAPI) resolveQuery(c *gin.Context, req contract.MetricQueryRequest, database *sql.DB) (queryPeriod, metrics.Query, bool) {
+	clock, err := m.businessClock(c, database)
+	if err != nil {
+		internalError(c, "loading tenant business clock", err)
+		return queryPeriod{}, metrics.Query{}, false
+	}
+	period, err := queryPeriodOf(req, clock, time.Now().UTC())
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "metrics.query_invalid", err.Error(), nil)
+		return queryPeriod{}, metrics.Query{}, false
+	}
+	q, err := queryFromContract(req, period.span)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "metrics.query_invalid", err.Error(), nil)
+		return queryPeriod{}, metrics.Query{}, false
+	}
+	return period, q, true
+}
+
+// queryPeriod is the business period a query reads: its preset, custom when the request named From and To,
+// the inclusive dates it covers, and the tenant clock that resolved them.
+type queryPeriod struct {
+	preset metrics.Preset
+	span   metrics.Span
+	clock  tenanttime.Clock
+}
+
+// queryPeriodOf resolves the period of a query request. A preset resolves on the tenant clock at now and
+// takes no From or To; custom, or a request with no period, reads From and To.
+func queryPeriodOf(req contract.MetricQueryRequest, clock tenanttime.Clock, now time.Time) (queryPeriod, error) {
+	preset := metrics.PresetCustom
+	if req.Period != nil {
+		parsed, err := metrics.ParsePreset(req.Period.Preset)
+		if err != nil {
+			return queryPeriod{}, err
+		}
+		preset = parsed
+	}
+	if preset != metrics.PresetCustom {
+		if req.From != "" || req.To != "" {
+			return queryPeriod{}, fmt.Errorf("period %q takes no from or to", preset)
+		}
+		span, err := metrics.ResolvePeriod(clock, now, preset, metrics.Span{})
+		return queryPeriod{preset: preset, span: span, clock: clock}, err
+	}
+	from, to, err := parseMetricRange(req.From, req.To)
+	if err != nil {
+		return queryPeriod{}, err
+	}
+	return queryPeriod{preset: preset, span: metrics.Span{From: from, To: to}, clock: clock}, nil
+}
+
+// periodMeta adds the period, the comparison window, and the tenant's zone and day cutoff to a result's meta.
+func periodMeta(meta contract.MetricsMeta, period queryPeriod, res metrics.Result) contract.MetricsMeta {
+	meta.Period = contract.MetricsPeriod{Preset: string(period.preset), From: period.span.From.String(), To: period.span.To.String()}
+	if res.PreviousSpan != (metrics.Span{}) {
+		meta.Previous = &contract.MetricsSpan{From: res.PreviousSpan.From.String(), To: res.PreviousSpan.To.String()}
+	}
+	meta.TimeZone = period.clock.ZoneName()
+	meta.DayEnds = tenanttime.FormatCutoff(period.clock.Cutoff)
+	return meta
 }
 
 // queryMeta is the freshness and rebuild state a query result carries.
@@ -556,18 +630,14 @@ func filtersOf(in []metrics.Filter) ([]contract.MetricFilter, error) {
 	return out, nil
 }
 
-// queryFromContract validates the wire request's shape and converts it to a query. Scope is set by the caller.
-func queryFromContract(req contract.MetricQueryRequest) (metrics.Query, error) {
-	from, to, err := parseMetricRange(req.From, req.To)
-	if err != nil {
-		return metrics.Query{}, err
-	}
+// queryFromContract converts the wire request to a query over span. Scope is set by the caller.
+func queryFromContract(req contract.MetricQueryRequest, span metrics.Span) (metrics.Query, error) {
 	filters, err := filtersFromContract(req.Filters)
 	if err != nil {
 		return metrics.Query{}, err
 	}
 	return metrics.Query{
-		Metrics: req.Metrics, Dimensions: req.Dimensions, Filters: filters, From: from, To: to,
+		Metrics: req.Metrics, Dimensions: req.Dimensions, Filters: filters, From: span.From, To: span.To,
 		Grain: metrics.Grain(req.Grain), Compare: metrics.Compare(req.Compare), Top: req.Top,
 	}, nil
 }

@@ -32,6 +32,21 @@ func checkSavedQuestion(cat metrics.Catalog, join map[string]bool, q contract.Sa
 	return checkRecordQuestion(cat, join, q, filters)
 }
 
+// checkPresetPeriod checks the named period of a question: a preset takes no From or To; custom keeps them.
+func checkPresetPeriod(q contract.SavedQuestion) error {
+	if q.Period == "" {
+		return nil
+	}
+	preset, err := metrics.ParsePreset(q.Period)
+	if err != nil {
+		return err
+	}
+	if preset != metrics.PresetCustom && (q.From != "" || q.To != "") {
+		return fmt.Errorf("period %q takes no from or to", preset)
+	}
+	return nil
+}
+
 // questionPaths is every dimension path and filter field a question names.
 func questionPaths(q contract.SavedQuestion) []string {
 	paths := append([]string{}, q.By...)
@@ -99,11 +114,14 @@ func checkQuestionSettings(q contract.SavedQuestion) error {
 	if q.Grain != "" && !slices.Contains([]string{string(metrics.GrainDay), string(metrics.GrainWeek), string(metrics.GrainMonth), string(metrics.GrainRange)}, q.Grain) {
 		return fmt.Errorf("grain %q is not day, week, month or range", q.Grain)
 	}
-	if q.Compare != "" && q.Compare != "none" && q.Compare != string(metrics.ComparePreviousPeriod) {
-		return fmt.Errorf("compare %q must be none or previous_period", q.Compare)
+	if q.Compare != "" && q.Compare != "none" && q.Compare != string(metrics.ComparePreviousPeriod) && q.Compare != string(metrics.CompareWeekBefore) {
+		return fmt.Errorf("compare %q must be none, previous_period or week_before", q.Compare)
 	}
 	if q.Top < 0 {
 		return errors.New("top cannot be negative")
+	}
+	if err := checkPresetPeriod(q); err != nil {
+		return err
 	}
 	if q.From != "" || q.To != "" {
 		if _, _, err := parseMetricRange(q.From, q.To); err != nil {

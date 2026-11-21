@@ -1413,6 +1413,18 @@
       ],
       "type": "object"
     },
+    "MetricPeriod": {
+      "additionalProperties": false,
+      "properties": {
+        "preset": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "preset"
+      ],
+      "type": "object"
+    },
     "MetricQueryRequest": {
       "additionalProperties": false,
       "properties": {
@@ -1449,6 +1461,10 @@
           },
           "type": "array"
         },
+        "period": {
+          "$ref": "#/$defs/MetricPeriod",
+          "x-optional-pointer": true
+        },
         "to": {
           "type": "string"
         },
@@ -1457,10 +1473,8 @@
         }
       },
       "required": [
-        "from",
         "grain",
-        "metrics",
-        "to"
+        "metrics"
       ],
       "type": "object"
     },
@@ -1598,8 +1612,18 @@
         "as_of": {
           "type": "string"
         },
+        "day_ends": {
+          "type": "string"
+        },
         "history": {
           "$ref": "#/$defs/MetricsHistory",
+          "x-optional-pointer": true
+        },
+        "period": {
+          "$ref": "#/$defs/MetricsPeriod"
+        },
+        "previous": {
+          "$ref": "#/$defs/MetricsSpan",
           "x-optional-pointer": true
         },
         "source_sequence": {
@@ -1607,12 +1631,54 @@
         },
         "tier": {
           "type": "string"
+        },
+        "time_zone": {
+          "type": "string"
         }
       },
       "required": [
         "as_of",
+        "day_ends",
+        "period",
         "source_sequence",
-        "tier"
+        "tier",
+        "time_zone"
+      ],
+      "type": "object"
+    },
+    "MetricsPeriod": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "preset": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "preset",
+        "to"
+      ],
+      "type": "object"
+    },
+    "MetricsSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
       ],
       "type": "object"
     },
@@ -2401,6 +2467,9 @@
           "type": "string"
         },
         "metric": {
+          "type": "string"
+        },
+        "period": {
           "type": "string"
         },
         "record_type": {
@@ -4148,6 +4217,18 @@
       ],
       "type": "object"
     },
+    "MetricPeriod": {
+      "additionalProperties": false,
+      "properties": {
+        "preset": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "preset"
+      ],
+      "type": "object"
+    },
     "MetricQueryRequest": {
       "additionalProperties": false,
       "properties": {
@@ -4184,6 +4265,10 @@
           },
           "type": "array"
         },
+        "period": {
+          "$ref": "#/$defs/MetricPeriod",
+          "x-optional-pointer": true
+        },
         "to": {
           "type": "string"
         },
@@ -4192,10 +4277,8 @@
         }
       },
       "required": [
-        "from",
         "grain",
-        "metrics",
-        "to"
+        "metrics"
       ],
       "type": "object"
     },
@@ -4333,8 +4416,18 @@
         "as_of": {
           "type": "string"
         },
+        "day_ends": {
+          "type": "string"
+        },
         "history": {
           "$ref": "#/$defs/MetricsHistory",
+          "x-optional-pointer": true
+        },
+        "period": {
+          "$ref": "#/$defs/MetricsPeriod"
+        },
+        "previous": {
+          "$ref": "#/$defs/MetricsSpan",
           "x-optional-pointer": true
         },
         "source_sequence": {
@@ -4342,12 +4435,54 @@
         },
         "tier": {
           "type": "string"
+        },
+        "time_zone": {
+          "type": "string"
         }
       },
       "required": [
         "as_of",
+        "day_ends",
+        "period",
         "source_sequence",
-        "tier"
+        "tier",
+        "time_zone"
+      ],
+      "type": "object"
+    },
+    "MetricsPeriod": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "preset": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "preset",
+        "to"
+      ],
+      "type": "object"
+    },
+    "MetricsSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
       ],
       "type": "object"
     },
@@ -5136,6 +5271,9 @@
           "type": "string"
         },
         "metric": {
+          "type": "string"
+        },
+        "period": {
           "type": "string"
         },
         "record_type": {
