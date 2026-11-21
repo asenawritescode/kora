@@ -42,3 +42,11 @@ fields:
     fieldtype: Data
     label: Reason
     read_only: true
+facts:
+  time: creation
+  measures:
+    - field: quantity_change
+  dimensions:
+    - field: product
+    - field: reason
+    - field: source_doctype

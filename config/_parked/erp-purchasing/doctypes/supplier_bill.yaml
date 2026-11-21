@@ -90,3 +90,11 @@ fields:
   - fieldname: notes
     fieldtype: Text
     label: Notes
+facts:
+  time: bill_date
+  measures:
+    - field: amount
+    - field: base_amount
+  dimensions:
+    - field: supplier
+  status_field: status
