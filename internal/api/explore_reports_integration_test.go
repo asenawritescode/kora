@@ -180,6 +180,11 @@ func exerciseReports(t *testing.T, router *gin.Engine, database *sql.DB, dialect
 		t.Fatal("admin does not see the Supplier report")
 	}
 
+	// The owner has a full name on the user row; the report lists it, and a user without one shows the id.
+	if _, err := database.Exec(kdb.Rebind(kdb.Resolve(dialect), `INSERT INTO _kora_user (name, site, email, password_hash, full_name, enabled) VALUES (?, ?, ?, ?, ?, ?)`),
+		"cashier-1", "tenant-reports", "cashier-1@reports.test", "x", "Wanjiru K.", kdb.BoolParam(kdb.Resolve(dialect), true)); err != nil {
+		t.Fatal("insert owner:", err)
+	}
 	mine := reportID(t, router, "Cashier", "cashier-1", "My fuel")
 	if got := reportNames(t, router, "Cashier", "cashier-1"); got["Payroll net"].Name != "" || got["Fuel by month"].Visibility != "shop" {
 		t.Fatalf("cashier sees %v, want shop Fuel by month and no Payroll report", got)
@@ -196,7 +201,7 @@ func exerciseReports(t *testing.T, router *gin.Engine, database *sql.DB, dialect
 		t.Fatal(err)
 	}
 	stored := envelope.Data
-	if stored.Owner != "cashier-1" || stored.Question.Measure != "sum:amount" || len(stored.Question.By) != 1 || stored.Question.Top != 5 || len(stored.Question.Filters) != 1 {
+	if stored.Owner != "cashier-1" || stored.OwnerName != "Wanjiru K." || stored.Question.Measure != "sum:amount" || len(stored.Question.By) != 1 || stored.Question.Top != 5 || len(stored.Question.Filters) != 1 {
 		t.Fatalf("stored question = %+v", stored)
 	}
 
@@ -215,11 +220,11 @@ func exerciseReports(t *testing.T, router *gin.Engine, database *sql.DB, dialect
 	// field, keeps it listed, and an update to a valid question clears the state.
 	markBrokenReports(context.Background(), database, kdb.Resolve(dialect), &doctype.ConfigSnapshot{}, reportRegistry(false))
 	broken := reportNames(t, router, "Cashier", "cashier-1")["Fuel by month"]
-	if broken.BrokenReason == "" || broken.BrokenAt == "" || !strings.Contains(broken.BrokenReason, "sum:amount") {
-		t.Fatalf("broken report = %+v, want a reason naming sum:amount and a time", broken)
+	if broken.Broken == nil || broken.BrokenAt == "" || broken.Broken.Kind != "missing_field" || broken.Broken.Field != "sum:amount" {
+		t.Fatalf("broken report = %+v, want a missing_field break on sum:amount and a time", broken)
 	}
 	reportCall(t, router, doctype.AdminRole, "admin-1", http.MethodPut, base+"/"+shop, savedReportBody(t, "Fuel by month", "shop", contract.SavedQuestion{RecordType: "Expense"}), http.StatusOK)
-	if fixed := reportNames(t, router, "Cashier", "cashier-1")["Fuel by month"]; fixed.BrokenReason != "" || fixed.BrokenAt != "" {
+	if fixed := reportNames(t, router, "Cashier", "cashier-1")["Fuel by month"]; fixed.Broken != nil || fixed.BrokenAt != "" {
 		t.Fatalf("fixed report still broken: %+v", fixed)
 	}
 

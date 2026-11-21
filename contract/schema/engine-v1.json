@@ -2672,10 +2672,11 @@
     "SavedReport": {
       "additionalProperties": false,
       "properties": {
-        "broken_at": {
-          "type": "string"
+        "broken": {
+          "$ref": "#/$defs/SavedReportBroken",
+          "x-optional-pointer": true
         },
-        "broken_reason": {
+        "broken_at": {
           "type": "string"
         },
         "id": {
@@ -2688,6 +2689,9 @@
           "type": "string"
         },
         "owner": {
+          "type": "string"
+        },
+        "owner_name": {
           "type": "string"
         },
         "question": {
@@ -2708,9 +2712,32 @@
         "modified",
         "name",
         "owner",
+        "owner_name",
         "question",
         "record_types",
         "visibility"
+      ],
+      "type": "object"
+    },
+    "SavedReportBroken": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "record_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "label"
       ],
       "type": "object"
     },
@@ -5658,10 +5685,11 @@
     "SavedReport": {
       "additionalProperties": false,
       "properties": {
-        "broken_at": {
-          "type": "string"
+        "broken": {
+          "$ref": "#/$defs/SavedReportBroken",
+          "x-optional-pointer": true
         },
-        "broken_reason": {
+        "broken_at": {
           "type": "string"
         },
         "id": {
@@ -5674,6 +5702,9 @@
           "type": "string"
         },
         "owner": {
+          "type": "string"
+        },
+        "owner_name": {
           "type": "string"
         },
         "question": {
@@ -5694,9 +5725,32 @@
         "modified",
         "name",
         "owner",
+        "owner_name",
         "question",
         "record_types",
         "visibility"
+      ],
+      "type": "object"
+    },
+    "SavedReportBroken": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "record_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "label"
       ],
       "type": "object"
     },

@@ -11,6 +11,49 @@ import (
 	"github.com/asenawritescode/kora/internal/metrics"
 )
 
+// Broken kinds: the piece of a question a configuration change removed, as contract.SavedReportBroken.Kind.
+const (
+	brokenMissingRecordType = "missing_record_type"
+	brokenMissingField      = "missing_field"
+	brokenMissingMetric     = "missing_metric"
+	brokenInvalidQuestion   = "invalid_question"
+)
+
+// questionError is a saved question that no longer checks. Broken names the missing piece for the UI; the
+// message keeps the text for logs and for the refusal of a save.
+type questionError struct {
+	broken contract.SavedReportBroken
+	msg    string
+}
+
+func (e *questionError) Error() string { return e.msg }
+
+// missingPiece returns a questionError that names the piece b, with the message from format.
+func missingPiece(b contract.SavedReportBroken, format string, args ...any) error {
+	return &questionError{broken: b, msg: fmt.Sprintf(format, args...)}
+}
+
+// brokenPiece is the broken state of a question that lost kind's piece: a record type, or a field or measure
+// of it. The label falls back to the key.
+func brokenPiece(kind, recordType, field string) contract.SavedReportBroken {
+	label := field
+	if label == "" {
+		label = recordType
+	}
+	return contract.SavedReportBroken{Kind: kind, RecordType: recordType, Field: field, Label: label}
+}
+
+// brokenOf returns the broken state an error from checkSavedQuestion stands for. An error without a named
+// piece is an invalid question, labelled with its message.
+func brokenOf(err error) *contract.SavedReportBroken {
+	var qe *questionError
+	if errors.As(err, &qe) {
+		b := qe.broken
+		return &b
+	}
+	return &contract.SavedReportBroken{Kind: brokenInvalidQuestion, Label: err.Error()}
+}
+
 // checkSavedQuestion checks a saved question against the catalog and returns the record types it reads.
 // A record question names an offered measure of a record type, with "by" dimensions the type has and filters
 // the fact model accepts. A metric question names a defined metric whose record types have every "by"
@@ -136,7 +179,7 @@ func checkQuestionSettings(q contract.SavedQuestion) error {
 func checkRecordQuestion(cat metrics.Catalog, join map[string]bool, q contract.SavedQuestion, filters []metrics.Filter) ([]string, error) {
 	rec, ok := cat.ExploreRecord(q.RecordType, join)
 	if !ok {
-		return nil, fmt.Errorf("record type %q is not in the explore catalog", q.RecordType)
+		return nil, missingPiece(brokenPiece(brokenMissingRecordType, q.RecordType, ""), "record type %q is not in the explore catalog", q.RecordType)
 	}
 	key := q.Measure
 	if key == "" {
@@ -144,13 +187,13 @@ func checkRecordQuestion(cat metrics.Catalog, join map[string]bool, q contract.S
 	}
 	measure, ok := exploreMeasure(rec, key)
 	if !ok {
-		return nil, fmt.Errorf("measure %q is not offered by %q", key, q.RecordType)
+		return nil, missingPiece(brokenPiece(brokenMissingField, q.RecordType, key), "measure %q is not offered by %q", key, q.RecordType)
 	}
 	if err := checkBy(rec, q.By); err != nil {
 		return nil, err
 	}
 	if _, _, err := cat.WithAdHoc([]metrics.AdHoc{{Model: q.RecordType, Agg: measure.Agg, Field: measure.Field, Filters: filters}}); err != nil {
-		return nil, err
+		return nil, missingPiece(brokenPiece(brokenMissingField, q.RecordType, measure.Field), "%s", err)
 	}
 	return withHops(cat, q.RecordType, questionPaths(q), []string{q.RecordType}), nil
 }
@@ -159,7 +202,7 @@ func checkRecordQuestion(cat metrics.Catalog, join map[string]bool, q contract.S
 // dimensions and the filter fields.
 func checkMetricQuestion(cat metrics.Catalog, join map[string]bool, q contract.SavedQuestion, filters []metrics.Filter) ([]string, error) {
 	if _, ok := cat.Metrics[q.Metric]; !ok {
-		return nil, fmt.Errorf("metric %q is not defined", q.Metric)
+		return nil, missingPiece(brokenPiece(brokenMissingMetric, "", q.Metric), "metric %q is not defined", q.Metric)
 	}
 	if q.Measure != "" {
 		return nil, errors.New("a metric question takes no measure")
@@ -173,14 +216,14 @@ func checkMetricQuestion(cat metrics.Catalog, join map[string]bool, q contract.S
 	for _, model := range models {
 		rec, ok := cat.ExploreRecord(model, join)
 		if !ok {
-			return nil, fmt.Errorf("record type %q of metric %q is not in the explore catalog", model, q.Metric)
+			return nil, missingPiece(brokenPiece(brokenMissingRecordType, model, ""), "record type %q of metric %q is not in the explore catalog", model, q.Metric)
 		}
 		if err := checkBy(rec, q.By); err != nil {
 			return nil, err
 		}
 		for _, f := range filters {
 			if !offersDimension(rec, f.Field) {
-				return nil, fmt.Errorf("%q is not a dimension of %q", f.Field, model)
+				return nil, missingPiece(brokenPiece(brokenMissingField, model, f.Field), "%q is not a dimension of %q", f.Field, model)
 			}
 		}
 		types = withHops(cat, model, questionPaths(q), types)
@@ -203,7 +246,7 @@ func exploreMeasure(rec contract.ExploreRecordType, key string) (contract.Explor
 func checkBy(rec contract.ExploreRecordType, by []string) error {
 	for _, path := range by {
 		if !offersDimension(rec, path) {
-			return fmt.Errorf("%q is not a dimension of %q", path, rec.RecordType)
+			return missingPiece(brokenPiece(brokenMissingField, rec.RecordType, path), "%q is not a dimension of %q", path, rec.RecordType)
 		}
 	}
 	return nil

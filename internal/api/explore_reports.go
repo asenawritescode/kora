@@ -189,11 +189,19 @@ func (r reportsAPI) list(c *gin.Context) {
 		internalError(c, "listing saved reports", err)
 		return
 	}
-	out := []contract.SavedReport{}
+	visible := []savedReport{}
 	for _, rep := range reports {
 		if r.visible(c, rep) {
-			out = append(out, rep.contract())
+			visible = append(visible, rep)
 		}
+	}
+	if err := store.fillOwnerNames(c.Request.Context(), siteName(c), visible); err != nil {
+		internalError(c, "loading saved report owners", err)
+		return
+	}
+	out := []contract.SavedReport{}
+	for _, rep := range visible {
+		out = append(out, rep.contract())
 	}
 	c.JSON(http.StatusOK, Response{Data: out})
 }
@@ -205,6 +213,10 @@ func (r reportsAPI) get(c *gin.Context) {
 		return
 	}
 	rep, ok := r.load(c, store)
+	if !ok {
+		return
+	}
+	rep, ok = withOwnerName(c, store, rep)
 	if !ok {
 		return
 	}
@@ -229,12 +241,26 @@ func (r reportsAPI) create(c *gin.Context) {
 	r.save(c, store, savedReport{Name: draft.name, Visibility: draft.visibility, Owner: callerID(c), Question: draft.question, RecordTypes: draft.models})
 }
 
+// withOwnerName returns rep with its owner's name filled in, writing 500 when the lookup fails.
+func withOwnerName(c *gin.Context, store reportStore, rep savedReport) (savedReport, bool) {
+	reps := []savedReport{rep}
+	if err := store.fillOwnerNames(c.Request.Context(), siteName(c), reps); err != nil {
+		internalError(c, "loading saved report owner", err)
+		return savedReport{}, false
+	}
+	return reps[0], true
+}
+
 // save inserts a new report and writes it with 201.
 func (r reportsAPI) save(c *gin.Context, store reportStore, rep savedReport) {
 	now := time.Now().UTC()
 	rep.ID, rep.Created, rep.Modified = contract.NewID(), now, now
 	if err := store.insert(c.Request.Context(), rep); err != nil {
 		saveError(c, "saving report", err)
+		return
+	}
+	rep, ok := withOwnerName(c, store, rep)
+	if !ok {
 		return
 	}
 	c.JSON(http.StatusCreated, Response{Data: rep.contract()})
@@ -261,10 +287,14 @@ func (r reportsAPI) update(c *gin.Context) {
 		return
 	}
 	cur.Name, cur.Visibility, cur.Question, cur.RecordTypes = draft.name, draft.visibility, draft.question, draft.models
-	cur.BrokenReason, cur.BrokenAt = "", time.Time{}
+	cur.Broken, cur.BrokenAt = nil, time.Time{}
 	cur.Modified = time.Now().UTC()
 	if err := store.update(c.Request.Context(), cur); err != nil {
 		saveError(c, "updating saved report", err)
+		return
+	}
+	cur, ok = withOwnerName(c, store, cur)
+	if !ok {
 		return
 	}
 	c.JSON(http.StatusOK, Response{Data: cur.contract()})
@@ -339,8 +369,14 @@ func markBrokenReports(ctx context.Context, database *sql.DB, dialect db.Dialect
 	}
 	now := time.Now().UTC()
 	for _, rep := range reports {
-		if err := store.setState(ctx, rep.recheck(cat, join, now)); err != nil {
+		checked := rep.recheck(cat, join, now)
+		if err := store.setState(ctx, checked); err != nil {
 			slog.Error("record saved report state", "report", rep.ID, "error", err)
+			continue
+		}
+		if checked.Broken != nil {
+			slog.Warn("saved report broken by config activation", "report", rep.ID, "kind", checked.Broken.Kind,
+				"record_type", checked.Broken.RecordType, "field", checked.Broken.Field)
 		}
 	}
 }

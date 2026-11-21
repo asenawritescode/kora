@@ -21,21 +21,36 @@ type SavedQuestion struct {
 	View       string         `json:"view,omitempty"`
 }
 
+// SavedReportBroken says which piece of a report's question a configuration change removed. Kind is
+// missing_record_type, missing_field, missing_metric or invalid_question. RecordType and Field name the
+// piece (Field is a field or measure key, or a metric key for a metric question). Label is what the UI
+// shows; it falls back to the key because the removed piece has no label left.
+//
+//contract:wire
+type SavedReportBroken struct {
+	Kind       string `json:"kind"`
+	RecordType string `json:"record_type,omitempty"`
+	Field      string `json:"field,omitempty"`
+	Label      string `json:"label"`
+}
+
 // SavedReport is one saved Explore report a caller may read. Visibility is "shop" (every caller who can
-// read its record types sees it) or "private" (only its owner sees it). A broken report names the
-// missing piece in BrokenReason; BrokenAt is when it broke.
+// read its record types sees it) or "private" (only its owner sees it). OwnerName is the owner's full name,
+// or the owner's user id when the user has none. Broken is set when a configuration change removed a piece
+// of the question; BrokenAt is when it broke.
 //
 //contract:wire
 type SavedReport struct {
-	ID           string        `json:"id"`
-	Name         string        `json:"name"`
-	Visibility   string        `json:"visibility"`
-	Owner        string        `json:"owner"`
-	Question     SavedQuestion `json:"question"`
-	RecordTypes  []string      `json:"record_types"`
-	BrokenReason string        `json:"broken_reason,omitempty"`
-	BrokenAt     string        `json:"broken_at,omitempty"`
-	Modified     string        `json:"modified"`
+	ID          string             `json:"id"`
+	Name        string             `json:"name"`
+	Visibility  string             `json:"visibility"`
+	Owner       string             `json:"owner"`
+	OwnerName   string             `json:"owner_name"`
+	Question    SavedQuestion      `json:"question"`
+	RecordTypes []string           `json:"record_types"`
+	Broken      *SavedReportBroken `json:"broken,omitempty"`
+	BrokenAt    string             `json:"broken_at,omitempty"`
+	Modified    string             `json:"modified"`
 }
 
 // SavedReportRequest saves a report: its name, who can see it and its question.

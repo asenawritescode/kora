@@ -77,7 +77,7 @@ func TestReportNameKey(t *testing.T) {
 }
 
 // TestRecheckKeepsBrokenSince checks that a report stays broken from the first moment it broke, that a
-// different reason is a new break, and that a question that checks again clears the state.
+// different missing piece is a new break, and that a question that checks again clears the state.
 func TestRecheckKeepsBrokenSince(t *testing.T) {
 	cat := questionCatalog()
 	first := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
@@ -85,17 +85,68 @@ func TestRecheckKeepsBrokenSince(t *testing.T) {
 	rep := savedReport{ID: "r1", Question: contract.SavedQuestion{RecordType: "Expense", Measure: "sum:cost"}}
 
 	rep = rep.recheck(cat, allJoin(cat), first)
-	if rep.BrokenReason == "" || !rep.BrokenAt.Equal(first) {
-		t.Fatalf("first check: reason %q at %v, want broken at %v", rep.BrokenReason, rep.BrokenAt, first)
+	want := &contract.SavedReportBroken{Kind: brokenMissingField, RecordType: "Expense", Field: "sum:cost", Label: "sum:cost"}
+	if rep.Broken == nil || *rep.Broken != *want || !rep.BrokenAt.Equal(first) {
+		t.Fatalf("first check: broken %+v at %v, want %+v at %v", rep.Broken, rep.BrokenAt, want, first)
 	}
-	reason := rep.BrokenReason
-	if rep = rep.recheck(cat, allJoin(cat), later); !rep.BrokenAt.Equal(first) || rep.BrokenReason != reason {
-		t.Fatalf("same break moved: at %v, reason %q", rep.BrokenAt, rep.BrokenReason)
+	if rep = rep.recheck(cat, allJoin(cat), later); !rep.BrokenAt.Equal(first) || *rep.Broken != *want {
+		t.Fatalf("same break moved: at %v, broken %+v", rep.BrokenAt, rep.Broken)
 	}
 	rep.Question = contract.SavedQuestion{RecordType: "Expense", Measure: "sum:amount"}
 	rep = rep.recheck(cat, allJoin(cat), later)
-	if rep.BrokenReason != "" || !rep.BrokenAt.IsZero() || !reflect.DeepEqual(rep.RecordTypes, []string{"Expense"}) {
-		t.Fatalf("fixed report: reason %q, at %v, types %v", rep.BrokenReason, rep.BrokenAt, rep.RecordTypes)
+	if rep.Broken != nil || !rep.BrokenAt.IsZero() || !reflect.DeepEqual(rep.RecordTypes, []string{"Expense"}) {
+		t.Fatalf("fixed report: broken %+v, at %v, types %v", rep.Broken, rep.BrokenAt, rep.RecordTypes)
+	}
+}
+
+// TestBrokenOfPiece checks the piece each lost part of a question names.
+func TestBrokenOfPiece(t *testing.T) {
+	cat := questionCatalog()
+	tests := []struct {
+		name string
+		q    contract.SavedQuestion
+		want contract.SavedReportBroken
+	}{
+		{"record type", contract.SavedQuestion{RecordType: "Ghost"},
+			contract.SavedReportBroken{Kind: brokenMissingRecordType, RecordType: "Ghost", Label: "Ghost"}},
+		{"measure", contract.SavedQuestion{RecordType: "Expense", Measure: "sum:cost"},
+			contract.SavedReportBroken{Kind: brokenMissingField, RecordType: "Expense", Field: "sum:cost", Label: "sum:cost"}},
+		{"by dimension", contract.SavedQuestion{RecordType: "Expense", By: []string{"ghost"}},
+			contract.SavedReportBroken{Kind: brokenMissingField, RecordType: "Expense", Field: "ghost", Label: "ghost"}},
+		{"metric", contract.SavedQuestion{Metric: "ghost"},
+			contract.SavedReportBroken{Kind: brokenMissingMetric, Field: "ghost", Label: "ghost"}},
+		{"settings", contract.SavedQuestion{RecordType: "Expense", Grain: "hour"},
+			contract.SavedReportBroken{Kind: brokenInvalidQuestion, Label: `grain "hour" is not day, week, month or range`}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := checkSavedQuestion(cat, allJoin(cat), tc.q)
+			if err == nil {
+				t.Fatal("question checked, want an error")
+			}
+			if got := brokenOf(err); *got != tc.want {
+				t.Fatalf("broken = %+v, want %+v", *got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBrokenColumnRoundTrip checks that the broken column keeps the piece, and that text from before it was
+// structured still loads.
+func TestBrokenColumnRoundTrip(t *testing.T) {
+	want := &contract.SavedReportBroken{Kind: brokenMissingField, RecordType: "Expense", Field: "amount", Label: "amount"}
+	stored, err := encodeBroken(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := decodeBroken(stored); *got != *want {
+		t.Fatalf("round trip = %+v, want %+v", *got, *want)
+	}
+	if got := decodeBroken(""); got != nil {
+		t.Fatalf("running report decoded as broken: %+v", got)
+	}
+	if got := decodeBroken("Old text reason"); got.Kind != brokenInvalidQuestion || got.Label != "Old text reason" {
+		t.Fatalf("text column = %+v", got)
 	}
 }
 
