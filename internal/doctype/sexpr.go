@@ -37,6 +37,7 @@ func ToSExpr(snapshot *ConfigSnapshot) string {
 	writeAnalyticsMetricsSection(&b, snapshot.AnalyticsMetrics)
 	writeReportsSection(&b, snapshot.Reports)
 	writeJSONSection(&b, "metrics", "metric-json", snapshot.Metrics)
+	writeJSONSection(&b, "dashboards", "dashboard-json", snapshot.Dashboards)
 	writeCommandsSection(&b, snapshot.Commands)
 	writeJSONSection(&b, "queries", "query-json", snapshot.Queries)
 	writeJSONSection(&b, "print-formats", "print-format-json", snapshot.PrintFormats)
@@ -1100,7 +1101,7 @@ func FromSExpr(sexpr string) (*ConfigSnapshot, error) {
 }
 
 // jsonSections are the config sections stored as JSON forms, keyed by section name.
-var jsonSections = map[string]string{"queries": "query-json", "print-formats": "print-format-json", "metrics": "metric-json"}
+var jsonSections = map[string]string{"queries": "query-json", "print-formats": "print-format-json", "metrics": "metric-json", "dashboards": "dashboard-json"}
 
 // setJSONSection stores the decoded items of a JSON-form section on the snapshot.
 func setJSONSection(snapshot *ConfigSnapshot, section string, items []json.RawMessage) {
@@ -1111,6 +1112,8 @@ func setJSONSection(snapshot *ConfigSnapshot, section string, items []json.RawMe
 		snapshot.PrintFormats = items
 	case "metrics":
 		snapshot.Metrics = items
+	case "dashboards":
+		snapshot.Dashboards = items
 	}
 }
 
@@ -1161,7 +1164,7 @@ func buildSnapshot(children []*sNode) (*ConfigSnapshot, error) {
 					return nil, err
 				}
 				snapshot.Commands = commands
-			case "queries", "print-formats", "metrics":
+			case "queries", "print-formats", "metrics", "dashboards":
 				items, err := parseJSONForms(child.Children[1:], jsonSections[sectionHead])
 				if err != nil {
 					return nil, err

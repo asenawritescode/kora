@@ -16,7 +16,7 @@ func TestPOSMetricPackLoadsAndValidates(t *testing.T) {
 	if len(defs) != 4 {
 		t.Fatalf("got %d metrics; want 4", len(defs))
 	}
-	raw, err := Load("../../config/pos/metrics", posDoctypes(t))
+	raw, _, err := LoadPack("../../config/pos", posDoctypes(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestPOSMetricPackLoadsAndValidates(t *testing.T) {
 }
 
 func TestMetricsSurviveSExprSnapshot(t *testing.T) {
-	raw, err := Load("../../config/pos/metrics", posDoctypes(t))
+	raw, _, err := LoadPack("../../config/pos", posDoctypes(t))
 	if err != nil {
 		t.Fatal(err)
 	}

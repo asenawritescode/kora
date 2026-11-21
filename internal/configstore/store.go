@@ -897,6 +897,7 @@ func (s *Store) CollectSnapshot(reg *doctype.Registry, site string) (*doctype.Co
 		Scripts:           scripts,
 		Reports:           head.Reports,
 		Metrics:           head.Metrics,
+		Dashboards:        head.Dashboards,
 		Queries:           head.Queries,
 		Commands:          head.Commands,
 		PrintFormats:      head.PrintFormats,

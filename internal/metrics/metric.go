@@ -75,9 +75,8 @@ type catalog struct {
 	metrics map[string]Metric
 }
 
-// Validate checks metric definitions against the record types of the same import and
-// returns every problem at once.
-func Validate(defs []Metric, doctypes []*doctype.DocType) error {
+// newCatalog indexes the record types and metrics of one import. It also returns the metrics declared twice.
+func newCatalog(defs []Metric, doctypes []*doctype.DocType) (catalog, []error) {
 	c := catalog{models: map[string]*doctype.DocType{}, metrics: map[string]Metric{}}
 	for _, dt := range doctypes {
 		c.models[dt.Name] = dt
@@ -90,6 +89,13 @@ func Validate(defs []Metric, doctypes []*doctype.DocType) error {
 		}
 		c.metrics[m.Name] = m
 	}
+	return c, errs
+}
+
+// Validate checks metric definitions against the record types of the same import and
+// returns every problem at once.
+func Validate(defs []Metric, doctypes []*doctype.DocType) error {
+	c, errs := newCatalog(defs, doctypes)
 	for _, m := range defs {
 		if err := m.validate(c); err != nil {
 			errs = append(errs, fmt.Errorf("metric %q: %w", m.Name, err))
