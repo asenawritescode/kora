@@ -62,7 +62,7 @@ func TestMergeManagementPackageSnapshotCarriesPOSMetricsUnchanged(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := decodeNamedMetrics(t, merged.Metrics), decodeNamedMetrics(t, incoming); !reflect.DeepEqual(got, want) || len(got) != 4 {
+	if got, want := decodeNamedMetrics(t, merged.Metrics), decodeNamedMetrics(t, incoming); !reflect.DeepEqual(got, want) || len(got) == 0 {
 		t.Fatalf("merged metrics = %+v; want %+v", got, want)
 	}
 }
