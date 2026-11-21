@@ -74,7 +74,7 @@ func (t *answerTurn) cardFor(q queryAnswer, page cardPage) contract.AnswerCard {
 		card.Kind = "table"
 		fillTable(&card, q, cat, page.Currency)
 	}
-	card.Actions = actionsOf(q, cat, page, recordLabelOf(q, cat))
+	card.Actions = actionsOf(q, page, recordLabelOf(q, cat))
 	return card
 }
 
@@ -291,7 +291,7 @@ func asOfClock(asOf, zone string) string {
 
 // actionsOf are the buttons of a card: the question in Explore, the records behind a number, and the save and pin
 // actions for a question a saved report can keep. A caller who may not use a button does not get it.
-func actionsOf(q queryAnswer, cat *metricsCatalog, page cardPage, recordLabel string) []contract.AnswerAction {
+func actionsOf(q queryAnswer, page cardPage, recordLabel string) []contract.AnswerAction {
 	actions := []contract.AnswerAction{{Kind: "open_in_insights", Label: "Open in Insights", Question: q.question}}
 	if isNumberResult(q.result) {
 		if drill, ok := drillRequestOf(q); ok {

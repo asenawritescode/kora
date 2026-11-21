@@ -214,12 +214,12 @@ func openConversation(ctx context.Context, tx *orm.TxManager, key conversationKe
 	conv, err := LoadConversation(ctx, tx.DB, siteName, subjectKey)
 	switch {
 	case err == nil:
-		transcript, err := ListConversationMessages(ctx, tx.DB, siteName, conv.ID)
-		if err != nil {
+		transcript, listErr := ListConversationMessages(ctx, tx.DB, siteName, conv.ID)
+		if listErr != nil {
 			return openedConversation{}, http.StatusInternalServerError, "Unable to load AI conversation."
 		}
-		last, err := lastAnswerQuestion(ctx, tx.DB, siteName, conv.ID)
-		if err != nil {
+		last, lastErr := lastAnswerQuestion(ctx, tx.DB, siteName, conv.ID)
+		if lastErr != nil {
 			return openedConversation{}, http.StatusInternalServerError, "Unable to load AI conversation."
 		}
 		return openedConversation{ID: conv.ID, Transcript: transcript, LastQuestion: last}, http.StatusOK, ""

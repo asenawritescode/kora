@@ -118,7 +118,7 @@ func executeMetricsTool(turn *answerTurn, name string, args map[string]any) stri
 func (t *answerTurn) list() string {
 	parts := make([]json.RawMessage, 0, 3)
 	for _, route := range []MetricsRoute{MetricsRouteMetrics, MetricsRouteExplore, MetricsRouteReports} {
-		data, err := t.data(route, nil)
+		data, err := t.data(route)
 		if err != nil {
 			return toolError(err)
 		}
@@ -150,7 +150,7 @@ func (t *answerTurn) query(args map[string]any) string {
 
 // savedQuery runs the question of a saved report the person may read, as the person. Its figures are not checked.
 func (t *answerTurn) savedQuery(id string) string {
-	data, err := t.data(MetricsRouteReports, nil)
+	data, err := t.data(MetricsRouteReports)
 	if err != nil {
 		return toolError(err)
 	}
@@ -315,7 +315,7 @@ func (t *answerTurn) metricsCatalog() (*metricsCatalog, error) {
 		return t.catalog, nil
 	}
 	var metricList []contract.MetricSummary
-	data, err := t.data(MetricsRouteMetrics, nil)
+	data, err := t.data(MetricsRouteMetrics)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +323,7 @@ func (t *answerTurn) metricsCatalog() (*metricsCatalog, error) {
 		return nil, errors.New("the metric list could not be read")
 	}
 	var types []contract.ExploreRecordType
-	data, err = t.data(MetricsRouteExplore, nil)
+	data, err = t.data(MetricsRouteExplore)
 	if err != nil {
 		return nil, err
 	}
@@ -342,8 +342,8 @@ func (t *answerTurn) metricsCatalog() (*metricsCatalog, error) {
 }
 
 // data runs one read and returns the data of its answer, or the refusal as an error.
-func (t *answerTurn) data(route MetricsRoute, body []byte) (json.RawMessage, error) {
-	resp := t.run(route, body)
+func (t *answerTurn) data(route MetricsRoute) (json.RawMessage, error) {
+	resp := t.run(route, nil)
 	if resp.Status != 200 {
 		return nil, errors.New(refusalMessage(resp))
 	}
