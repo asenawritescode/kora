@@ -58,10 +58,11 @@ func NewCatalog(defs []Metric, doctypes []*doctype.DocType) Catalog {
 }
 
 // Row is one bucket of one group. Values follow Result.Metrics; Group follows Result.Dimensions.
+// A value is null (Valid false) when a ratio's denominator is zero; sums and counts are never null.
 type Row struct {
 	Period tenanttime.Date
 	Group  []string
-	Values []decimal.Decimal
+	Values []decimal.NullDecimal
 }
 
 // Result holds every bucket of every group in order. Empty buckets are zero.

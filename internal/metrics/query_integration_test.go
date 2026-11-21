@@ -33,13 +33,15 @@ type sale struct {
 }
 
 // seedSales: SAL-4 is held, so it has no facts. SAL-5 is created 22:30 UTC on 19 November,
-// which is 01:30 on 20 November in Nairobi, so its business date is 20 November.
+// which is 01:30 on 20 November in Nairobi, so its business date is 20 November. SAL-6 is a
+// return on 19 November only, so that day has facts but no receipts.
 var seedSales = []sale{
 	{"SAL-1", "u1", "2026-11-18 09:00:00", "Paid", "100.00", "R1", "E1"},
 	{"SAL-2", "u2", "2026-11-18 10:00:00", "Paid", "50.00", "R2", "E2"},
 	{"SAL-3", "u1", "2026-11-18 11:00:00", "Return", "30.00", "R1", "E1"},
 	{"SAL-4", "u2", "2026-11-18 12:00:00", "Held", "999.00", "R1", "E1"},
 	{"SAL-5", "u2", "2026-11-19 22:30:00", "Paid", "200.00", "R1", "E1"},
+	{"SAL-6", "u2", "2026-11-19 10:00:00", "Return", "25.00", "R1", "E1"},
 }
 
 // TestMetricsQueryAcrossDialects seeds POS sales through the real fact consumer, refreshes the
@@ -163,8 +165,10 @@ type expectation struct {
 }
 
 // queries holds the hand computation. Sales is Paid totals; Receipts counts Paid sales; Average
-// sale is Sales over Receipts. Day 18 Nov: Paid 100 (SAL-1) and 50 (SAL-2), Return 30 (SAL-3)
-// excluded, Held 999 (SAL-4) excluded. Day 20 Nov: Paid 200 (SAL-5). Week of 16 Nov: 350 and 3.
+// sale is Sales over Receipts, null when Receipts is zero. Day 18 Nov: Paid 100 (SAL-1) and 50
+// (SAL-2), Return 30 (SAL-3) and Held 999 (SAL-4) excluded. Day 19 Nov: only Return 25 (SAL-6),
+// so Sales and Receipts are zero and Average sale is null. Day 20 Nov: Paid 200 (SAL-5).
+// Week of 16 Nov: 350 and 3.
 func queries() []expectation {
 	day := func(d int) tenanttime.Date { return tenanttime.Date{Year: 2026, Month: 11, Day: d} }
 	all := []string{"sales", "receipts", "average_sale"}
@@ -172,9 +176,9 @@ func queries() []expectation {
 		return Query{Metrics: metrics, From: day(18), To: day(20), Grain: grain}
 	}
 	return []expectation{
-		{"daily totals fill empty days with zero", span(GrainDay, all), []string{
+		{"daily totals fill empty days with zero and a zero-receipt ratio with null", span(GrainDay, all), []string{
 			"2026-11-18||150.00,2.00,75.00",
-			"2026-11-19||0.00,0.00,0.00",
+			"2026-11-19||0.00,0.00,null",
 			"2026-11-20||200.00,1.00,200.00",
 		}},
 		{"weekly bucket starts on Monday and divides totals", span(GrainWeek, all), []string{
@@ -185,12 +189,12 @@ func queries() []expectation {
 		}},
 		{"owner scope reads the facts", Query{Metrics: all, From: day(18), To: day(20), Grain: GrainDay, Scope: Scope{Owner: "u1"}}, []string{
 			"2026-11-18||100.00,1.00,100.00",
-			"2026-11-19||0.00,0.00,0.00",
-			"2026-11-20||0.00,0.00,0.00",
+			"2026-11-19||0.00,0.00,null",
+			"2026-11-20||0.00,0.00,null",
 		}},
 		{"entity scope reads the summary", Query{Metrics: all, From: day(18), To: day(20), Grain: GrainDay, Scope: Scope{LegalEntity: "E1"}}, []string{
 			"2026-11-18||100.00,1.00,100.00",
-			"2026-11-19||0.00,0.00,0.00",
+			"2026-11-19||0.00,0.00,null",
 			"2026-11-20||200.00,1.00,200.00",
 		}},
 		{"one dimension groups the summary", Query{Metrics: []string{"sales"}, Dimensions: []string{"register"}, From: day(18), To: day(20), Grain: GrainDay}, []string{
@@ -204,13 +208,16 @@ func queries() []expectation {
 	}
 }
 
-// render prints each row as period|group|values with two decimals, one line per row.
+// render prints each row as period|group|values with two decimals, or null, one line per row.
 func render(res Result) []string {
 	var out []string
 	for _, r := range res.Rows {
 		vals := make([]string, len(r.Values))
 		for i, v := range r.Values {
-			vals[i] = v.StringFixed(2)
+			vals[i] = "null"
+			if v.Valid {
+				vals[i] = v.Decimal.StringFixed(2)
+			}
 		}
 		out = append(out, r.Period.String()+"|"+strings.Join(r.Group, "/")+"|"+strings.Join(vals, ","))
 	}
