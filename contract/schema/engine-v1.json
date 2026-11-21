@@ -544,6 +544,126 @@
       ],
       "type": "object"
     },
+    "DashboardChart": {
+      "additionalProperties": false,
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "compare": {
+          "type": "string"
+        },
+        "drill": {
+          "type": "boolean"
+        },
+        "grain": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "metrics": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        },
+        "top": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "by",
+        "id",
+        "kind",
+        "metrics",
+        "title"
+      ],
+      "type": "object"
+    },
+    "DashboardDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "charts": {
+          "items": {
+            "$ref": "#/$defs/DashboardChart"
+          },
+          "type": "array"
+        },
+        "default_range": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "tiles": {
+          "items": {
+            "$ref": "#/$defs/DashboardTile"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "charts",
+        "default_range",
+        "label",
+        "name",
+        "tiles"
+      ],
+      "type": "object"
+    },
+    "DashboardOverride": {
+      "additionalProperties": false,
+      "properties": {
+        "default_range": {
+          "type": "string"
+        },
+        "hidden": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "order": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "hidden",
+        "order"
+      ],
+      "type": "object"
+    },
+    "DashboardTile": {
+      "additionalProperties": false,
+      "properties": {
+        "compare": {
+          "type": "string"
+        },
+        "metric": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric"
+      ],
+      "type": "object"
+    },
     "Delivery": {
       "additionalProperties": false,
       "properties": {
@@ -2810,6 +2930,126 @@
       "required": [
         "at",
         "token"
+      ],
+      "type": "object"
+    },
+    "DashboardChart": {
+      "additionalProperties": false,
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "compare": {
+          "type": "string"
+        },
+        "drill": {
+          "type": "boolean"
+        },
+        "grain": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "metrics": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        },
+        "top": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "by",
+        "id",
+        "kind",
+        "metrics",
+        "title"
+      ],
+      "type": "object"
+    },
+    "DashboardDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "charts": {
+          "items": {
+            "$ref": "#/$defs/DashboardChart"
+          },
+          "type": "array"
+        },
+        "default_range": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "tiles": {
+          "items": {
+            "$ref": "#/$defs/DashboardTile"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "charts",
+        "default_range",
+        "label",
+        "name",
+        "tiles"
+      ],
+      "type": "object"
+    },
+    "DashboardOverride": {
+      "additionalProperties": false,
+      "properties": {
+        "default_range": {
+          "type": "string"
+        },
+        "hidden": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "order": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "hidden",
+        "order"
+      ],
+      "type": "object"
+    },
+    "DashboardTile": {
+      "additionalProperties": false,
+      "properties": {
+        "compare": {
+          "type": "string"
+        },
+        "metric": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric"
       ],
       "type": "object"
     },

@@ -89,6 +89,26 @@
       "handler": "github.com/asenawritescode/kora/internal/auth.registerSignInDiscovery.func1"
     },
     {
+      "method": "GET",
+      "path": "/api/dashboards",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.list-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboards/:name",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.describe-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/dashboards/:name/override",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.resetOverride-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/dashboards/:name/override",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.saveOverride-fm"
+    },
+    {
       "method": "DELETE",
       "path": "/api/files/*path",
       "handler": "github.com/asenawritescode/kora/internal/api.(*Handler).HandleFileDelete-fm"
@@ -817,6 +837,26 @@
       "method": "GET",
       "path": "/api/v1/auth/oidc/callback",
       "handler": "github.com/asenawritescode/kora/internal/auth.(*OIDCLogin).Register.func3"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboards",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.list-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboards/:name",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.describe-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/dashboards/:name/override",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.resetOverride-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/dashboards/:name/override",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.saveOverride-fm"
     },
     {
       "method": "DELETE",

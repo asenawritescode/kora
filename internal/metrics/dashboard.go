@@ -57,6 +57,11 @@ var (
 	grainNames    = []string{"day", "week", "month"}
 )
 
+// ValidDashboardRange reports whether name is a range a dashboard may default to.
+func ValidDashboardRange(name string) bool {
+	return slices.Contains(rangeNames, name)
+}
+
 // ParseDashboardDirectory reads the dashboard documents of a pack's dashboards/ directory. A missing directory has none.
 func ParseDashboardDirectory(dir string) ([]Dashboard, error) {
 	return readYAMLDir(dir, ParseDashboardYAML)
