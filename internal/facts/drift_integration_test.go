@@ -44,8 +44,11 @@ func TestDriftCheckerRepairsSourceDrift(t *testing.T) {
 			dialect := db.Resolve(tc.driver)
 			ctx := context.Background()
 			setupSourceSales(t, database.DB, dialect)
+			// Held sales leave the fact tables: SAL-1 moved to Held must have its live header tombstoned.
+			sales := saleFacts()
+			sales.Facts.ExcludeStatus = []string{"Held"}
 			reg := doctype.NewRegistry()
-			reg.Register(saleFacts())
+			reg.Register(sales)
 			builder := &Builder{DB: database.DB, Dialect: dialect, Registry: reg}
 			refresher := &Refresher{DB: database.DB, Dialect: dialect, Registry: reg, Admission: openLane{}, Owner: "test-refresher"}
 			counter := &countingDrift{}
