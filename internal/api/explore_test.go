@@ -83,13 +83,19 @@ func linkedRegistry(perms []*doctype.Permission) *doctype.Registry {
 // TestExploreCatalogLinkedDimensionsNeedReadOfTheLinkedType checks that a Link dimension opens its linked
 // record's fields only when the caller may read that record type.
 func TestExploreCatalogLinkedDimensionsNeedReadOfTheLinkedType(t *testing.T) {
+	expenseRead := &doctype.Permission{Doctype: "Expense", Role: "Cashier", Read: true}
+	supplierRead := &doctype.Permission{Doctype: "Supplier", Role: "Cashier", Read: true}
+	supplierOwnerOnly := &doctype.Permission{Doctype: "Supplier", Role: "Cashier", Read: true, IfOwner: true}
 	tests := []struct {
-		name     string
-		perms    []*doctype.Permission
-		wantPath bool
+		name        string
+		perms       []*doctype.Permission
+		legalEntity bool
+		wantPath    bool
 	}{
-		{"linked type readable", []*doctype.Permission{{Doctype: "Expense", Role: "Cashier", Read: true}, {Doctype: "Supplier", Role: "Cashier", Read: true}}, true},
-		{"linked type not readable", []*doctype.Permission{{Doctype: "Expense", Role: "Cashier", Read: true}}, false},
+		{"linked type readable", []*doctype.Permission{expenseRead, supplierRead}, false, true},
+		{"linked type not readable", []*doctype.Permission{expenseRead}, false, false},
+		{"entity-scoped caller reads tenant-shared linked type", []*doctype.Permission{expenseRead, supplierRead}, true, true},
+		{"owner-only grant on linked type is refused", []*doctype.Permission{expenseRead, supplierOwnerOnly}, false, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,8 +112,12 @@ func TestExploreCatalogLinkedDimensionsNeedReadOfTheLinkedType(t *testing.T) {
 				c.Next()
 			})
 			registerExploreRoutes(router.Group("/api/v1"), registry)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/explore/catalog", nil)
+			if tc.legalEntity {
+				req.Header.Set("X-Kora-Legal-Entity-ID", "branch-nairobi")
+			}
 			recorder := httptest.NewRecorder()
-			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/explore/catalog", nil))
+			router.ServeHTTP(recorder, req)
 			if got := strings.Contains(recorder.Body.String(), `"path":"supplier.town"`); got != tc.wantPath {
 				t.Fatalf("supplier.town offered = %v, want %v: %s", got, tc.wantPath, recorder.Body)
 			}

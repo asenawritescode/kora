@@ -71,24 +71,43 @@ func exploreRecord(dt *doctype.DocType, links exploreLinks) contract.ExploreReco
 			Label: fieldLabel(dt, col), Format: formatOf(fld)})
 	}
 	for _, d := range f.Dimensions {
-		col := d.ColumnName()
-		if strings.Contains(d.Field, ".") {
+		if fieldPath(d.Field).isLine() {
+			rec.Dimensions = append(rec.Dimensions, lineDimensions(dt, d.ColumnName(), links)...)
 			continue
 		}
+		col := d.ColumnName()
 		fld := dt.GetField(col)
 		rec.Dimensions = append(rec.Dimensions, contract.ExploreDimension{Path: col, Label: fieldLabel(dt, col), Kind: kindOf(fld)})
 		rec.Measures = append(rec.Measures, contract.ExploreMeasure{Key: "distinct:" + col, Agg: aggCountDistinct, Field: col,
 			Label: "Distinct " + fieldLabel(dt, col), Format: "number"})
-		rec.Dimensions = append(rec.Dimensions, linkedDimensions(dt, col, links)...)
+		rec.Dimensions = append(rec.Dimensions, linkedDimensions(dt, col, col, links)...)
 	}
 	return rec
 }
 
-// linkedDimensions lists the paths a header Link dimension opens: each dimension field of the record type
-// it names (one hop), and each dimension field of a record type that one of its Link fields names (two
-// hops). Nothing is listed when joins to the record type are not allowed.
-func linkedDimensions(dt *doctype.DocType, col string, links exploreLinks) []contract.ExploreDimension {
-	fld := dt.GetField(col)
+// lineDimensions lists a dimension of the child table named by facts lines, as lines.<col>, and the paths
+// through it. The child table's own fields are the source of its label and its links.
+func lineDimensions(dt *doctype.DocType, col string, links exploreLinks) []contract.ExploreDimension {
+	lf := dt.GetField(dt.Facts.Lines)
+	if lf == nil || links.models[lf.Options] == nil {
+		return nil
+	}
+	lines := links.models[lf.Options]
+	fld := lines.GetField(col)
+	if fld == nil {
+		return nil
+	}
+	path := dt.Facts.Lines + "." + col
+	out := []contract.ExploreDimension{{Path: path, Label: fieldLabel(lines, col), Kind: kindOf(fld)}}
+	return append(out, linkedDimensions(lines, col, path, links)...)
+}
+
+// linkedDimensions lists the paths a Link dimension opens: each dimension field of the record type it names
+// (one hop), and each dimension field of a record type that one of its Link fields names (two hops). src
+// holds the field col, and path is the name the dimension goes by. Nothing is listed when joins to the
+// record type are not allowed.
+func linkedDimensions(src *doctype.DocType, col, path string, links exploreLinks) []contract.ExploreDimension {
+	fld := src.GetField(col)
 	if fld == nil || fld.Fieldtype != "Link" {
 		return nil
 	}
@@ -96,8 +115,8 @@ func linkedDimensions(dt *doctype.DocType, col string, links exploreLinks) []con
 	if first == nil {
 		return nil
 	}
-	head := fieldLabel(dt, col) + " ›"
-	out := pathFields(col, first, head, 1)
+	head := fieldLabel(src, col) + " ›"
+	out := pathFields(path, first, head, 1)
 	for i := range first.Fields {
 		mid := &first.Fields[i]
 		if mid.Fieldtype != "Link" {
@@ -107,7 +126,7 @@ func linkedDimensions(dt *doctype.DocType, col string, links exploreLinks) []con
 		if second == nil {
 			continue
 		}
-		out = append(out, pathFields(col+"."+mid.Fieldname, second, head+" "+fieldLabel(first, mid.Fieldname)+" ›", 2)...)
+		out = append(out, pathFields(path+"."+mid.Fieldname, second, head+" "+fieldLabel(first, mid.Fieldname)+" ›", 2)...)
 	}
 	return out
 }

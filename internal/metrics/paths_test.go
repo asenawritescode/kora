@@ -71,7 +71,7 @@ func TestPlanDimensionPaths(t *testing.T) {
 			forbidden: true},
 		{name: "a path into a record type the caller may not read is refused", dims: []string{"supplier.town"}, forbidden: true},
 		{name: "a path starts at a fact dimension", dims: []string{"amount.town"}, joinable: []string{"Supplier"},
-			wantErr: "header dimension"},
+			wantErr: "not a facts dimension"},
 		{name: "the leaf must be a dimension field", dims: []string{"supplier.amount"}, joinable: []string{"Supplier"},
 			wantErr: "not a dimension field"},
 		{name: "the hop must be a Link field", dims: []string{"supplier.supplier_name.town"}, joinable: []string{"Supplier"},
@@ -178,4 +178,101 @@ func TestExploreCatalogOffersLinkedDimensions(t *testing.T) {
 
 func itoa(n int) string {
 	return string(rune('0' + n))
+}
+
+// lineFixture is a Sale whose child table Sale Item links to Product; Product is categorised by a Select.
+func lineFixture(t *testing.T) (Catalog, []*doctype.DocType) {
+	t.Helper()
+	reg := doctype.NewRegistry()
+	reg.Register(&doctype.DocType{Name: "Sale", Fields: []doctype.Field{
+		{Fieldname: "status", Fieldtype: "Select"},
+		{Fieldname: "items", Label: "Items", Fieldtype: "Table", Options: "Sale Item"},
+	}, Facts: &doctype.FactModel{Time: "creation", StatusField: "status", Lines: "items",
+		Measures:   []doctype.FactMeasure{{Field: "items.line_total"}},
+		Dimensions: []doctype.FactDimension{{Field: "items.product"}}}})
+	reg.Register(&doctype.DocType{Name: "Sale Item", IsChildTable: true, Fields: []doctype.Field{
+		{Fieldname: "product", Label: "Product", Fieldtype: "Link", Options: "Product"},
+		{Fieldname: "line_total", Fieldtype: "Currency"},
+	}})
+	reg.Register(&doctype.DocType{Name: "Product", TitleField: "product_name", Fields: []doctype.Field{
+		{Fieldname: "product_name", Label: "Product name", Fieldtype: "Data"},
+		{Fieldname: "category", Label: "Category", Fieldtype: "Select"},
+	}})
+	docs := reg.All()
+	count := Metric{Name: "expenses", Type: KindSimple, Model: "Sale", Measure: &Measure{Agg: aggCount}}
+	return NewCatalog([]Metric{count}, docs), docs
+}
+
+func TestPlanLineDimensionPaths(t *testing.T) {
+	cat, _ := lineFixture(t)
+	tests := []struct {
+		name      string
+		dims      []string
+		joinable  []string
+		wantJoins int
+		wantLeaf  string
+		wantLabel string
+		wantErr   string
+		forbidden bool
+	}{
+		{name: "a line dimension is a plain dimension, labelled by its record", dims: []string{"items.product"},
+			joinable: []string{"Product"}, wantLabel: "Product"},
+		{name: "a path from a line dimension follows its link", dims: []string{"items.product.category"},
+			joinable: []string{"Product"}, wantJoins: 1, wantLeaf: "category"},
+		{name: "a line path needs the linked type joinable", dims: []string{"items.product.category"}, forbidden: true},
+		{name: "a path ends on a dimension field", dims: []string{"items.product.product_name.x"}, joinable: []string{"Product"},
+			wantErr: "not a Link field"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := planQuery(cat, pathQuery(tc.dims, tc.joinable...))
+			if tc.wantErr != "" || tc.forbidden {
+				checkPlanError(t, err, tc.wantErr, tc.forbidden)
+				return
+			}
+			if err != nil {
+				t.Fatalf("plan: %v", err)
+			}
+			dim := p.dims[0]
+			if len(dim.joins) != tc.wantJoins || dim.leaf != tc.wantLeaf || !dim.line {
+				t.Errorf("joins = %d leaf = %q line = %v, want %d %q true", len(dim.joins), dim.leaf, dim.line, tc.wantJoins, tc.wantLeaf)
+			}
+			if got := labelName(dim); got != tc.wantLabel {
+				t.Errorf("label = %q, want %q", got, tc.wantLabel)
+			}
+			if p.summary {
+				t.Error("a line dimension must not read the summary")
+			}
+		})
+	}
+}
+
+func TestLineDimensionReadsLinesOnly(t *testing.T) {
+	cat, _ := lineFixture(t)
+	p, err := planQuery(cat, pathQuery([]string{"items.product.category"}, "Product"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stmt, _ := p.build(db.Resolve("mysql"))
+	if strings.Contains(stmt, "`_kora_fact_sale` AS t") || !strings.Contains(stmt, "`_kora_fact_sale_line` AS t") {
+		t.Errorf("a line dimension must read the line table only:\n%s", stmt)
+	}
+}
+
+func TestExploreCatalogOffersLineDimensions(t *testing.T) {
+	_, docs := lineFixture(t)
+	got := ExploreCatalog(docs, readAll(docs), map[string]bool{"Product": true})
+	var paths []string
+	for _, rec := range got {
+		if rec.RecordType != "Sale" {
+			continue
+		}
+		for _, d := range rec.Dimensions {
+			paths = append(paths, d.Path+"|"+itoa(d.Hops)+"|"+d.Group)
+		}
+	}
+	want := "items.product|0|,items.product.product_name|1|Product ›,items.product.category|1|Product ›"
+	if strings.Join(paths, ",") != want {
+		t.Errorf("dimensions = %v, want %s", paths, want)
+	}
 }

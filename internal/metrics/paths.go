@@ -20,10 +20,11 @@ const factAlias = "t"
 // table. A path follows joins from the fact column through Link fields and reads leaf from the last
 // record type it reaches; alias names that column of the derived table.
 type dimension struct {
-	name  string           // as requested: "supplier" or "product.supplier.town"
+	name  string           // as requested: "supplier", "items.product" or "items.product.category"
 	alias string           // column of the derived table the group reads
-	joins []join           // one per Link field followed; empty for a fact dimension
-	leaf  string           // field read from the last joined record type; empty for a fact dimension
+	line  bool             // the fact dimension is on the child table named by facts lines
+	joins []join           // one per Link field followed; empty for a plain fact dimension
+	leaf  string           // field read from the last joined record type; empty for a plain fact dimension
 	label *doctype.DocType // record type whose titles label the group values; nil for none
 }
 
@@ -41,67 +42,80 @@ func (d dimension) lastAlias() string {
 	return d.joins[len(d.joins)-1].alias
 }
 
+// factDimOf finds the fact dimension a requested name reads, and how many leading name segments name it.
+// "category" is a header dimension (one segment); "items.product" is a dimension of the child table named by
+// facts lines (two segments). The segments after those are a path through Link fields.
+func factDimOf(f *doctype.FactModel, name string) (doctype.FactDimension, int, bool) {
+	parts := strings.Split(name, ".")
+	if f.Lines != "" && len(parts) >= 2 && parts[0] == f.Lines {
+		for _, d := range f.Dimensions {
+			if fieldPath(d.Field).isLine() && d.ColumnName() == parts[1] {
+				return d, 2, true
+			}
+		}
+		return doctype.FactDimension{}, 0, false
+	}
+	for _, d := range f.Dimensions {
+		if d.ColumnName() == parts[0] {
+			return d, 1, true
+		}
+	}
+	return doctype.FactDimension{}, 0, false
+}
+
 // dimensionOf resolves one requested dimension of the planned model. index is its position in the
 // query, which keeps the aliases of different paths apart.
 func (p *plan) dimensionOf(cat Catalog, name string, index int) (dimension, error) {
-	if !strings.Contains(name, ".") {
-		return p.factDimension(cat, name)
-	}
-	return p.pathDimension(cat, name, index)
-}
-
-// factDimension resolves a fact dimension. A Link dimension is labelled with the titles of the record
-// type it names, when the caller may read that record type.
-func (p *plan) factDimension(cat Catalog, name string) (dimension, error) {
-	if !isDimension(p.model.Facts, name) {
+	fd, segments, ok := factDimOf(p.model.Facts, name)
+	if !ok {
 		return dimension{}, fmt.Errorf("dimension %q is not a facts dimension of %s", name, p.model.Name)
 	}
-	dim := dimension{name: name, alias: name}
-	if fld := p.factField(cat, name); fld != nil && fld.Fieldtype == "Link" {
-		dim.label = p.labelTarget(cat, fld)
+	dim := dimension{name: name, alias: fd.ColumnName(), line: fieldPath(fd.Field).isLine()}
+	rest := strings.Split(name, ".")[segments:]
+	if len(rest) == 0 {
+		if holder := p.holderOf(cat, fd); holder != nil {
+			if fld := holder.GetField(fd.ColumnName()); fld != nil && fld.Fieldtype == "Link" {
+				dim.label = p.labelTarget(cat, fld)
+			}
+		}
+		return dim, nil
 	}
-	return dim, nil
+	return p.pathDimension(cat, dim, fd, rest, index)
 }
 
-// factField is the record field a fact dimension reads: a header field, or a field of the child table
-// named by the facts lines. It is nil when the field cannot be found.
-func (p *plan) factField(cat Catalog, column string) *doctype.Field {
-	f := p.model.Facts
-	for _, d := range f.Dimensions {
-		if d.ColumnName() != column {
-			continue
-		}
-		if !fieldPath(d.Field).isLine() {
-			return p.model.GetField(column)
-		}
-		lf := p.model.GetField(f.Lines)
-		if lf == nil || cat.Models[lf.Options] == nil {
-			return nil
-		}
-		return cat.Models[lf.Options].GetField(column)
+// holderOf is the record type that holds a fact dimension's field: the record, or the child table for a
+// dimension named by facts lines. It is nil when the child table is not in the catalog.
+func (p *plan) holderOf(cat Catalog, fd doctype.FactDimension) *doctype.DocType {
+	if !fieldPath(fd.Field).isLine() {
+		return p.model
 	}
-	return nil
+	lf := p.model.GetField(p.model.Facts.Lines)
+	if lf == nil {
+		return nil
+	}
+	return cat.Models[lf.Options]
 }
 
-// pathDimension resolves "a.b.c": a header Link dimension a, then Link field b on the record type a
-// names, then field c on the last record type. Every record type joined to must be joinable.
-func (p *plan) pathDimension(cat Catalog, name string, index int) (dimension, error) {
-	parts := strings.Split(name, ".")
-	links, leafName := parts[:len(parts)-1], parts[len(parts)-1]
-	switch {
-	case len(links) > maxHops:
-		return dimension{}, fmt.Errorf("dimension %q follows %d links: a path follows at most %d", name, len(links), maxHops)
-	case !headerDimension(p.model.Facts, links[0]):
-		return dimension{}, fmt.Errorf("dimension %q must start at a header dimension of %s", name, p.model.Name)
+// pathDimension resolves a dimension whose fact field fd is followed by rest: Link fields, then a leaf.
+// The fact field is the first link, so a path follows len(rest) links: "items.product.category" follows
+// one (product) and reads category from it.
+func (p *plan) pathDimension(cat Catalog, dim dimension, fd doctype.FactDimension, rest []string, index int) (dimension, error) {
+	if len(rest) > maxHops {
+		return dimension{}, fmt.Errorf("dimension %q follows %d links: a path follows at most %d", dim.name, len(rest), maxHops)
 	}
-	dim := dimension{name: name, alias: fmt.Sprintf("_path%d", index)}
-	cur, prev := p.model, factAlias
+	holder := p.holderOf(cat, fd)
+	if holder == nil {
+		return dimension{}, fmt.Errorf("dimension %q: lines table %q is not defined", dim.name, p.model.Facts.Lines)
+	}
+	dim.alias = fmt.Sprintf("_path%d", index)
+	links := append([]string{fd.ColumnName()}, rest[:len(rest)-1]...)
+	cur, prev := holder, factAlias
 	for i, link := range links {
 		fld := cur.GetField(link)
 		if fld == nil || fld.Fieldtype != "Link" {
-			return dimension{}, fmt.Errorf("dimension %q: %q is not a Link field of %s", name, link, cur.Name)
+			return dimension{}, fmt.Errorf("dimension %q: %q is not a Link field of %s", dim.name, link, cur.Name)
 		}
-		target, err := p.joinTo(cat, name, fld)
+		target, err := p.joinTo(cat, dim.name, fld)
 		if err != nil {
 			return dimension{}, err
 		}
@@ -109,7 +123,7 @@ func (p *plan) pathDimension(cat Catalog, name string, index int) (dimension, er
 		dim.joins = append(dim.joins, j)
 		cur, prev = target, j.alias
 	}
-	return p.leafOf(cat, dim, cur, leafName)
+	return p.leafOf(cat, dim, cur, rest[len(rest)-1])
 }
 
 // joinTo is the record type a Link field names. It is refused with ErrForbidden when the caller may
@@ -171,6 +185,17 @@ func (p plan) joinClauses(d db.Dialect) string {
 		}
 	}
 	return b.String()
+}
+
+// hasLineDim reports whether a dimension is on the child table. Such a query reads the line rows only:
+// a header row has no line to group by.
+func (p plan) hasLineDim() bool {
+	for _, dim := range p.dims {
+		if dim.line {
+			return true
+		}
+	}
+	return false
 }
 
 // hasJoins reports whether any dimension is a path, which only the facts route can answer.

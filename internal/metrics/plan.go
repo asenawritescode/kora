@@ -293,7 +293,7 @@ func (p *plan) addGrouping(cat Catalog, q Query) error {
 // status, and per one declared dimension, and they carry no owner. Distinct counts and dimension paths
 // need the facts.
 func (p plan) fitsSummary() bool {
-	if p.scope.Owner != "" || len(p.dims) > 1 || p.hasJoins() {
+	if p.scope.Owner != "" || len(p.dims) > 1 || p.hasJoins() || p.hasLineDim() {
 		return false
 	}
 	usable := func(field string) bool {

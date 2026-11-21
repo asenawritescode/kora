@@ -5,7 +5,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/metrics"
 )
@@ -39,12 +38,13 @@ func exploreAccess(c *gin.Context, reg *doctype.Registry, docs []*doctype.DocTyp
 	return read, join
 }
 
-// joinableRecordType reports whether a dimension path or a label may read a record type: the caller's grant
-// on it is unrestricted. An owner-only grant, a field-assigned grant and a legal-entity scope each narrow
-// the rows, so a linked record type with one of them is not joined to.
+// joinableRecordType reports whether a dimension path or a label may read a record type. permScope makes the
+// same policy decision the record list makes for that record type under the caller's business scope, using
+// its own entity-owned flag: tenant-shared master data stays joinable for an entity-scoped caller. A denial,
+// an owner-only grant or a field-assigned grant narrows or forbids the rows, so the record type is not joined.
 func joinableRecordType(c *gin.Context, reg *doctype.Registry, name string) bool {
 	row, denial := permScope(c, reg, name, "read")
-	return denial == nil && !row.Owner && len(row.AssignedFields) == 0 && row.Business.Kind != contract.ScopeKindLegalEntity
+	return denial == nil && !row.Owner && len(row.AssignedFields) == 0
 }
 
 // readableRecordType reports whether the caller may read every row of a record type through the metric

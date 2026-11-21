@@ -52,7 +52,8 @@ func (p plan) summarySQL(d db.Dialect) (string, []any) {
 }
 
 // factsSQL aggregates the fact rows, header and line, per day and group. Measures sum over every row,
-// as the summary does. A count takes header rows only, so a record with lines counts once.
+// as the summary does. A count takes header rows only, so a record with lines counts once, unless the
+// query groups by a line dimension: then it reads the line rows only.
 func (p plan) factsSQL(d db.Dialect) (string, []any) {
 	q := d.QuoteIdent
 	var args []any
@@ -66,7 +67,10 @@ func (p plan) factsSQL(d db.Dialect) (string, []any) {
 	for _, s := range p.series {
 		sel = append(sel, p.factsAggregate(d, f, s, &args))
 	}
-	parts := []string{p.factsPart(d, p.model.Facts.TableName(p.model), &args)}
+	var parts []string
+	if !p.hasLineDim() {
+		parts = append(parts, p.factsPart(d, p.model.Facts.TableName(p.model), &args))
+	}
 	if p.model.Facts.Lines != "" {
 		parts = append(parts, p.factsPart(d, p.model.Facts.LineTableName(p.model), &args))
 	}
@@ -79,8 +83,15 @@ func (p plan) factsSQL(d db.Dialect) (string, []any) {
 func (p plan) factsAggregate(d db.Dialect, f string, s series, args *[]any) string {
 	switch s.agg {
 	case aggCount:
-		header := append([]predicate{{field: "line_id", op: "=", value: ""}}, s.conds...)
-		return "SUM(" + p.caseWhen(d, f, header, "1", args) + ")"
+		// A query on a line dimension reads line rows only, so each line counts once.
+		conds := s.conds
+		if !p.hasLineDim() {
+			conds = append([]predicate{{field: "line_id", op: "=", value: ""}}, conds...)
+		}
+		if len(conds) == 0 {
+			return "COUNT(*)"
+		}
+		return "SUM(" + p.caseWhen(d, f, conds, "1", args) + ")"
 	case aggSum:
 		return "SUM(" + p.withConds(d, f, s.conds, f+d.QuoteIdent(s.column), args) + ")"
 	}
