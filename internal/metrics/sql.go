@@ -42,8 +42,8 @@ func (p plan) summarySQL(d db.Dialect) (string, []any) {
 		}
 		sel = append(sel, "SUM("+p.withConds(d, "", s.conds, value, &args)+")")
 	}
-	where := []string{q("grain") + " = ?", q("business_date") + " >= ?", q("business_date") + " <= ?"}
-	args = append(args, grain, p.from.String(), p.to.String())
+	args = append(args, grain)
+	where := append([]string{q("grain") + " = ?"}, p.rangeConds(d, "", &args)...)
 	where = append(where, p.scopeConds(d, "", false, &args)...)
 	where = append(where, p.filterConds(d, "", &args)...)
 	stmt := fmt.Sprintf("SELECT %s FROM %s WHERE %s GROUP BY %s",
@@ -116,11 +116,23 @@ func (p plan) factsPart(d db.Dialect, table string, args *[]any) string {
 	for i, c := range cols {
 		quoted[i] = q(c)
 	}
-	*args = append(*args, p.from.String(), p.to.String(), db.BoolParam(d, false))
-	where := []string{q("business_date") + " >= ?", q("business_date") + " <= ?", q("deleted") + " = ?"}
+	where := append(p.rangeConds(d, "", args), q("deleted")+" = ?")
+	*args = append(*args, db.BoolParam(d, false))
 	where = append(where, p.scopeConds(d, "", true, args)...)
 	where = append(where, p.filterConds(d, "", args)...)
 	return fmt.Sprintf("SELECT %s FROM %s WHERE %s", strings.Join(quoted, ", "), q(table), strings.Join(where, " AND "))
+}
+
+// rangeConds bounds business_date to From through To, both inclusive. An opening reads every day
+// before From instead; its one bucket is the balance a range starts from.
+func (p plan) rangeConds(d db.Dialect, prefix string, args *[]any) []string {
+	col := prefix + d.QuoteIdent("business_date")
+	if p.opening {
+		*args = append(*args, p.from.String())
+		return []string{col + " < ?"}
+	}
+	*args = append(*args, p.from.String(), p.to.String())
+	return []string{col + " >= ?", col + " <= ?"}
 }
 
 // scopeConds are the caller's scope as conditions. Owner exists only on the fact tables.

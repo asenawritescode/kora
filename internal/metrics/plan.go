@@ -31,24 +31,31 @@ type plan struct {
 	scope     Scope
 	top       int
 	compare   Compare
+	opening   bool // read only the days before from: the opening of every balance series
 }
 
-// series is one aggregate of one simple metric. Its own filters apply only to that series.
+// series is one aggregate of one metric. Its own filters apply only to that series.
 type series struct {
 	metric string
+	kind   Kind // simple, balance or cumulative: the bucket sums are settled per kind
 	agg    string
 	column string // measure column for sum, dimension for count_distinct, empty for count
 	conds  []predicate
 }
 
-// output is one computed metric. A simple metric reads series num; a ratio divides series num by
-// series den; a derived metric evaluates expr over the values of the metrics it names.
+// running reports whether the series accumulates over the buckets, see Kind.running.
+func (s series) running() bool { return s.kind.running() }
+
+// output is one computed metric. A simple, balance or cumulative metric reads series num; a ratio
+// divides series num by series den; a derived metric evaluates expr over the values of the metrics it
+// names. running is set when the value depends on a running series, so ranking reads the last bucket.
 type output struct {
-	metric string
-	kind   Kind
-	num    int
-	den    int
-	expr   *formulaNode
+	metric  string
+	kind    Kind
+	num     int
+	den     int
+	expr    *formulaNode
+	running bool
 }
 
 // predicate compares a column with a value. For status the field is the status field name; for a
@@ -157,7 +164,11 @@ func (c *planner) output(m Metric) (output, error) {
 	case KindDerived:
 		return c.derived(m)
 	case KindBalance, KindCumulative:
-		return output{}, fmt.Errorf("metric %q is %s: %w", m.Name, m.Type, ErrNotSupported)
+		num, err := c.addSeries(m)
+		if err != nil {
+			return output{}, err
+		}
+		return output{metric: m.Name, kind: m.Type, num: num, den: -1, running: true}, nil
 	}
 	return output{}, fmt.Errorf("metric %q has unknown type %q", m.Name, m.Type)
 }
@@ -169,15 +180,17 @@ func (c *planner) derived(m Metric) (output, error) {
 		return output{}, fmt.Errorf("metric %q: %w", m.Name, err)
 	}
 	slots := map[string]int{}
+	running := false
 	for _, ref := range m.refs() {
 		i, err := c.compile(ref)
 		if err != nil {
 			return output{}, fmt.Errorf("metric %q: %w", m.Name, err)
 		}
 		slots[ref] = i
+		running = running || c.plan.metrics[i].running
 	}
 	root.bind(slots)
-	return output{metric: m.Name, kind: KindDerived, expr: root}, nil
+	return output{metric: m.Name, kind: KindDerived, expr: root, running: running}, nil
 }
 
 // componentSeries resolves a ratio's numerator or denominator, which must be a simple metric.
@@ -185,6 +198,9 @@ func (c *planner) componentSeries(ratio Metric, name string) (int, error) {
 	m, ok := c.cat.Metrics[name]
 	if !ok {
 		return 0, fmt.Errorf("metric %q refers to unknown metric %q", ratio.Name, name)
+	}
+	if m.Type.running() {
+		return 0, fmt.Errorf("ratio %q divides by %s metric %q: ratio components must be simple", ratio.Name, m.Type, name)
 	}
 	if m.Type != KindSimple {
 		return 0, fmt.Errorf("ratio %q divides by %s metric %q: %w", ratio.Name, m.Type, name, ErrNotSupported)
@@ -207,7 +223,10 @@ func (c *planner) addSeries(m Metric) (int, error) {
 	if c.plan.model != nil && c.plan.model != dt {
 		return 0, fmt.Errorf("metric %q reads %q, not %q: metrics of one query must share a model: %w", m.Name, m.Model, c.plan.model.Name, ErrNotSupported)
 	}
-	s := series{metric: m.Name, agg: m.Measure.Agg}
+	if err := m.checkAdditive(); err != nil {
+		return 0, fmt.Errorf("metric %q: %w", m.Name, err)
+	}
+	s := series{metric: m.Name, kind: m.Type, agg: m.Measure.Agg}
 	switch m.Measure.Agg {
 	case aggSum, aggCountDistinct:
 		s.column = m.Measure.Field
@@ -272,6 +291,16 @@ func (p plan) fitsSummary() bool {
 		}
 	}
 	return true
+}
+
+// needsOpening reports whether a balance reads the days before the range as well.
+func (p plan) needsOpening() bool {
+	for _, s := range p.series {
+		if s.kind == KindBalance {
+			return true
+		}
+	}
+	return false
 }
 
 // metricNames lists the requested metrics by name, in request order.
