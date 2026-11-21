@@ -996,7 +996,17 @@ func RegisterRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry
 	// System schema/navigation endpoints.
 	RegisterSystemRoutes(apiGroup, handler)
 
-	// Script management (CRUD for _kora_script).
+	registerScriptRoutes(apiGroup, handler)
+
+	// Analytics endpoints (no-op if siteBuses is empty).
+	RegisterAnalyticsRoutes(apiGroup, registry, txManager.DB, txManager.Dialect, opts.analyticsOptions())
+
+	// Metric catalog, query and drill (permission-scoped per record type).
+	registerMetricsRoutes(apiGroup, registry, txManager.DB, txManager.Dialect)
+}
+
+// registerScriptRoutes mounts script management (CRUD for _kora_script).
+func registerScriptRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
 	scripts := apiGroup.Group("/system/script")
 	{
 		scripts.GET("", handler.HandleScriptList)
@@ -1007,9 +1017,6 @@ func RegisterRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry
 		scripts.POST("/:name/validate", handler.HandleScriptValidate)
 		scripts.GET("/:name/executions", handler.HandleScriptExecutions)
 	}
-
-	// Analytics endpoints (no-op if siteBuses is empty).
-	RegisterAnalyticsRoutes(apiGroup, registry, txManager.DB, txManager.Dialect, opts.analyticsOptions())
 }
 
 // registerManagementRoutes mounts administrator-only page manifest, agent,
