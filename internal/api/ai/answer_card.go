@@ -32,11 +32,25 @@ func (t *answerTurn) cards() []contract.AnswerCard {
 	if len(queries) > maxCards {
 		queries = queries[len(queries)-maxCards:]
 	}
-	cards := make([]contract.AnswerCard, 0, len(queries))
+	cards := make([]contract.AnswerCard, 0, len(queries)+1)
 	for _, q := range queries {
 		cards = append(cards, t.cardFor(q, t.page))
 	}
+	if n := len(t.building); n > 0 {
+		cards = append(cards, buildingCard(t.building[n-1]))
+	}
 	return cards
+}
+
+// buildingCard says that a figure is not ready: its history is still building, with the progress. It carries no
+// number of the figure.
+func buildingCard(b buildingRead) contract.AnswerCard {
+	return contract.AnswerCard{
+		Kind:   "building",
+		Label:  b.label,
+		Change: fmt.Sprintf("Still building history: %d%% done", int(b.progress*100)),
+		Meta:   metaOf(queryAnswer{meta: b.meta}),
+	}
 }
 
 // cardFor draws one card: a number when the query returns one value, else a table.
@@ -51,7 +65,7 @@ func (t *answerTurn) cardFor(q queryAnswer, page cardPage) contract.AnswerCard {
 		Meta:     metaOf(q),
 	}
 	if q.meta.OwnerOnly {
-		card.ScopeNote = "Only your own " + strings.ToLower(recordLabelOf(q, cat))
+		card.ScopeNote = "Only your own records"
 	}
 	if isNumberResult(q.result) {
 		card.Kind = "number"
@@ -71,6 +85,9 @@ func isNumberResult(res contract.MetricQueryResult) bool {
 
 // labelOf names the metrics a query reads, as the card shows them.
 func labelOf(q queryAnswer, cat *metricsCatalog) string {
+	if q.saved != nil {
+		return q.saved.Name + " (saved by " + q.saved.Owner + ")"
+	}
 	names := make([]string, 0, len(q.result.Metrics))
 	for _, name := range q.result.Metrics {
 		if m, ok := cat.metrics[name]; ok && m.Label != "" {
@@ -98,11 +115,20 @@ func recordLabelOf(q queryAnswer, cat *metricsCatalog) string {
 	return "records"
 }
 
-// formatOf is the number format of the first metric of a query: an unsaved measure is a plain number.
+// formatOf is the number format of the first metric of a query. An unsaved measure takes the format of its field in
+// the record type's catalog, and is a plain number when the catalog names none.
 func formatOf(q queryAnswer, cat *metricsCatalog) string {
 	if len(q.result.Metrics) > 0 {
 		if m, ok := cat.metrics[q.result.Metrics[0]]; ok && m.Format != "" {
 			return m.Format
+		}
+	}
+	if len(q.request.Measures) > 0 {
+		ms := q.request.Measures[0]
+		for _, m := range cat.types[ms.RecordType].Measures {
+			if m.Agg == ms.Agg && m.Field == ms.Field && m.Format != "" {
+				return m.Format
+			}
 		}
 	}
 	return "number"

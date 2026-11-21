@@ -110,7 +110,8 @@ func seedGoldenSales(ctx context.Context, t *testing.T, database *sql.DB, dialec
 	t.Helper()
 	d := kdb.Resolve(dialect)
 	setup := []string{
-		fmt.Sprintf("CREATE TABLE %s (name VARCHAR(140) NOT NULL PRIMARY KEY, reference VARCHAR(140) NOT NULL, owner VARCHAR(140) NOT NULL, creation TIMESTAMP NOT NULL)", d.QuoteIdent("tabSale")),
+		fmt.Sprintf("CREATE TABLE %s (name VARCHAR(140) NOT NULL PRIMARY KEY, reference VARCHAR(140) NOT NULL, owner VARCHAR(140) NOT NULL, creation TIMESTAMP NOT NULL, sale_date DATE NOT NULL, status VARCHAR(140) NOT NULL, customer VARCHAR(140) NOT NULL, total DECIMAL(18,2) NOT NULL, base_total DECIMAL(18,2) NOT NULL, cost_total DECIMAL(18,2) NOT NULL, profit DECIMAL(18,2) NOT NULL, discount_amount DECIMAL(18,2) NOT NULL, tax_amount DECIMAL(18,2) NOT NULL)", d.QuoteIdent("tabSale")),
+		fmt.Sprintf("CREATE TABLE %s (name VARCHAR(140) NOT NULL PRIMARY KEY, parent VARCHAR(140) NOT NULL, parentfield VARCHAR(140) NOT NULL, product VARCHAR(140) NOT NULL, quantity DECIMAL(18,2) NOT NULL, line_total DECIMAL(18,2) NOT NULL, line_cost DECIMAL(18,2) NOT NULL, line_profit DECIMAL(18,2) NOT NULL)", d.QuoteIdent("tabSale__items")),
 		fmt.Sprintf("CREATE TABLE %s (name VARCHAR(140) NOT NULL PRIMARY KEY, status VARCHAR(140) NOT NULL)", d.QuoteIdent("tabCustomer")),
 		fmt.Sprintf("CREATE TABLE %s (name VARCHAR(140) NOT NULL PRIMARY KEY, product_name VARCHAR(140) NOT NULL)", d.QuoteIdent("tabProduct")),
 		"CREATE TABLE IF NOT EXISTS _kora_site_setting (site VARCHAR(140) NOT NULL, setting_key VARCHAR(140) NOT NULL, setting_value VARCHAR(140) NOT NULL, PRIMARY KEY (site, setting_key))",
@@ -141,15 +142,44 @@ func seedGoldenSales(ctx context.Context, t *testing.T, database *sql.DB, dialec
 	}
 	builder := &facts.Builder{DB: database, Dialect: d, Registry: reg}
 	for i, s := range sales {
-		insert := kdb.Rebind(d, fmt.Sprintf("INSERT INTO %s (name, reference, owner, creation) VALUES (?, ?, ?, ?)", d.QuoteIdent("tabSale")))
-		if _, err := database.ExecContext(ctx, insert, s.record, s.record, s.owner, s.date+" 10:00:00"); err != nil {
-			t.Fatalf("insert %s: %v", s.record, err)
-		}
+		insertGoldenSourceSale(ctx, t, database, d, s)
 		consumeGoldenSale(ctx, t, database, builder, int64(i+1), s)
 	}
 	refresher := &facts.Refresher{DB: database, Dialect: d, Registry: reg, Admission: stockAdmission{}, Owner: "ask-zana-golden"}
 	if _, err := refresher.RefreshDue(ctx); err != nil {
 		t.Fatalf("refresh summaries: %v", err)
+	}
+	// The rebuild the sync queued runs now, from the source rows, so the history reads ready.
+	drainGoldenRebuild(ctx, t, database, dialect, reg)
+}
+
+// drainGoldenRebuild runs the queued rebuild of the Sale model from its source rows.
+func drainGoldenRebuild(ctx context.Context, t *testing.T, database *sql.DB, dialect string, reg *doctype.Registry) {
+	t.Helper()
+	saleOnly := doctype.NewRegistry()
+	saleOnly.Register(reg.Get("Sale"))
+	if _, err := (&facts.RebuildRunner{DB: database, Dialect: kdb.Resolve(dialect), Registry: saleOnly, Site: goldenSite, Owner: "ask-zana-golden"}).Drain(ctx); err != nil {
+		t.Fatalf("rebuild fact models: %v", err)
+	}
+}
+
+// insertGoldenSourceSale writes a sale and its lines as the source tables hold them, for the rebuild to read.
+func insertGoldenSourceSale(ctx context.Context, t *testing.T, database *sql.DB, d kdb.Dialect, s goldenSale) {
+	t.Helper()
+	total := 0
+	for _, l := range s.lines {
+		total += l.total
+	}
+	amount := strconv.Itoa(total)
+	header := kdb.Rebind(d, fmt.Sprintf("INSERT INTO %s (name, reference, owner, creation, sale_date, status, customer, total, base_total, cost_total, profit, discount_amount, tax_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0)", d.QuoteIdent("tabSale")))
+	if _, err := database.ExecContext(ctx, header, s.record, s.record, s.owner, s.date+" 10:00:00", s.date, s.status, s.customer, amount, amount, amount); err != nil {
+		t.Fatalf("insert %s: %v", s.record, err)
+	}
+	for i, l := range s.lines {
+		line := kdb.Rebind(d, fmt.Sprintf("INSERT INTO %s (name, parent, parentfield, product, quantity, line_total, line_cost, line_profit) VALUES (?, ?, 'items', ?, ?, ?, 0, ?)", d.QuoteIdent("tabSale__items")))
+		if _, err := database.ExecContext(ctx, line, fmt.Sprintf("%s-%d", s.record, i+1), s.record, l.product, strconv.Itoa(l.qty), strconv.Itoa(l.total), strconv.Itoa(l.total)); err != nil {
+			t.Fatalf("insert line of %s: %v", s.record, err)
+		}
 	}
 }
 
@@ -298,12 +328,38 @@ type goldenTurn struct {
 	check   func(t *testing.T, got ai.ChatResponse, requests []string)
 }
 
-// goldenCase is one question: who asks it and its turns. Each case has its own conversation.
+// goldenCase is one question: who asks it and its turns. Each case has its own conversation. A building case
+// queues a rebuild of the sales history before its turns and runs it after them.
 type goldenCase struct {
-	name  string
-	user  string
-	roles string
-	turns []goldenTurn
+	name     string
+	user     string
+	roles    string
+	building bool
+	turns    []goldenTurn
+}
+
+// createGoldenReport saves "Last week sales" for the shop, as the administrator, through the reports API, and
+// returns its id. The shop's report is visible to everyone who can read Sale.
+func createGoldenReport(t *testing.T, router *gin.Engine) string {
+	t.Helper()
+	body := `{"name":"Last week sales","visibility":"shop","question":{"metric":"sales","period":"last_week","grain":"range"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/explore/reports", strings.NewReader(body))
+	req.Header.Set("X-User", goldenAdminUser)
+	req.Header.Set("X-Roles", doctype.AdminRole)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("create saved report = %d: %s", recorder.Code, recorder.Body)
+	}
+	var env struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &env); err != nil || env.Data.ID == "" {
+		t.Fatalf("create saved report: %v: %s", err, recorder.Body)
+	}
+	return env.Data.ID
 }
 
 // askZana sends one message as user and returns the answer the chat wrote.
@@ -385,7 +441,7 @@ func sameSet(got, want []string) bool {
 
 // goldenCases are the questions, each with the answer the dataset gives. The expected figures are the hand
 // computations above; the replies are what the model would say, which the server must let through or replace.
-func goldenCases(d goldenDates) []goldenCase {
+func goldenCases(d goldenDates, reportID string) []goldenCase {
 	lastWeek := spanOf(d.lastMon, d.lastMon.AddDate(0, 0, 6))
 	weekBefore := spanOf(d.weekBeforeMon, d.weekBeforeMon.AddDate(0, 0, 6))
 	lastWeekQuery := `{"metrics":["sales"],"period":{"preset":"last_week"},"grain":"range"}`
@@ -498,8 +554,37 @@ func goldenCases(d goldenDates) []goldenCase {
 			steps:   []modelStep{{tool: "query_metrics", args: lastWeekQuery}, {content: "Your sales last week were KES 1,350."}},
 			check: func(t *testing.T, got ai.ChatResponse, _ []string) {
 				card := requireCards(t, got, 1)[0]
-				if card.Value != "KES 1,350" || !strings.HasPrefix(card.ScopeNote, "Only your own ") {
+				if card.Value != "KES 1,350" || card.ScopeNote != "Only your own records" {
 					t.Fatalf("card = %+v; want the cashier's own 1,350 with the scope note", card)
+				}
+			},
+		}}},
+		{name: "saved report is run and labelled as unchecked", user: goldenAdminUser, roles: doctype.AdminRole, turns: []goldenTurn{{
+			message: "What did the saved last week sales report say?",
+			steps: []modelStep{
+				{tool: "query_metrics", args: fmt.Sprintf(`{"saved_report":%q}`, reportID)},
+				{content: "Last week sales, from the report saved by shop-admin, were KES 1,820."},
+			},
+			check: func(t *testing.T, got ai.ChatResponse, _ []string) {
+				card := requireCards(t, got, 1)[0]
+				if card.Verified || card.Value != "KES 1,820" || card.Label != "Last week sales (saved by shop-admin)" {
+					t.Fatalf("card = %+v; want an unchecked 1,820 named for the saved report", card)
+				}
+			},
+		}}},
+		{name: "history still building gives no number", user: goldenAdminUser, roles: doctype.AdminRole, building: true, turns: []goldenTurn{{
+			message: "How did sales do last week?",
+			steps: []modelStep{
+				{tool: "query_metrics", args: lastWeekQuery},
+				{content: "The history for sales is still building, so I can't give that figure yet."},
+			},
+			check: func(t *testing.T, got ai.ChatResponse, _ []string) {
+				card := requireCards(t, got, 1)[0]
+				if card.Kind != "building" || card.Value != "" || card.Previous != "" || !strings.Contains(card.Change, "Still building history") {
+					t.Fatalf("card = %+v; want a building card with no figure", card)
+				}
+				if strings.ContainsAny(got.Reply, "0123456789") {
+					t.Fatalf("reply %q states a number while the history builds", got.Reply)
 				}
 			},
 		}}},
@@ -507,11 +592,11 @@ func goldenCases(d goldenDates) []goldenCase {
 			message: "Add up the base amounts of last week's sales records.",
 			steps: []modelStep{
 				{tool: "query_metrics", args: `{"measures":[{"record_type":"Sale","agg":"sum","field":"base_total"}],"period":{"preset":"last_week"},"grain":"range"}`},
-				{content: "Last week's base amounts add up to 1,670."},
+				{content: "Last week's base amounts add up to KES 1,670."},
 			},
 			check: func(t *testing.T, got ai.ChatResponse, _ []string) {
 				card := requireCards(t, got, 1)[0]
-				if card.Verified || card.Value != "1,670" {
+				if card.Verified || card.Value != "KES 1,670" {
 					t.Fatalf("card = %+v; want an unchecked 1,670", card)
 				}
 			},
@@ -631,6 +716,7 @@ func TestAskZanaGoldenQuestions(t *testing.T) {
 				[]*doctype.Permission{{Doctype: "Sale", Role: tillCashierRole, Read: true, IfOwner: true}})
 			dates := goldenStart(t, database, tc.dialect)
 			seedGoldenSales(context.Background(), t, database, tc.dialect, reg, goldenDataset(dates))
+			reportID := createGoldenReport(t, askZanaRouter(t, database, reg, tc.dialect))
 
 			model := startFakeModel(t)
 			t.Setenv("KORA_CLOUD_AI_GATEWAY_URL", model.server.URL)
@@ -638,8 +724,14 @@ func TestAskZanaGoldenQuestions(t *testing.T) {
 			t.Setenv(envcompat.IntegrationTokenEnv, "golden-token")
 			router := askZanaRouter(t, database, reg, tc.dialect)
 
-			for _, c := range goldenCases(dates) {
+			for _, c := range goldenCases(dates, reportID) {
 				t.Run(c.name, func(t *testing.T) {
+					if c.building {
+						if _, err := (&facts.JobStore{DB: database, Dialect: kdb.Resolve(tc.dialect)}).ReplaceWhole(context.Background(), "Sale"); err != nil {
+							t.Fatalf("queue sales rebuild: %v", err)
+						}
+						defer drainGoldenRebuild(context.Background(), t, database, tc.dialect, reg)
+					}
 					thread := goldenThreadBase + strings.ReplaceAll(c.name, " ", "-")
 					for _, turn := range c.turns {
 						model.script(turn.steps)

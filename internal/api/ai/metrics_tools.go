@@ -59,7 +59,9 @@ type answerTurn struct {
 	queries []queryAnswer
 	drills  []drillAnswer
 	choice  *contract.ChoiceQuestion
-	catalog *metricsCatalog
+	// building is every read whose history was still building: it gives no number, only its progress.
+	building []buildingRead
+	catalog  *metricsCatalog
 	// corrected is set once the reply was sent back for a wrong number; it is sent back at most once.
 	corrected bool
 }
@@ -72,6 +74,15 @@ type queryAnswer struct {
 	result   contract.MetricQueryResult
 	meta     contract.MetricsMeta
 	verified bool
+	// saved is the saved report the question came from, nil for a question the model asked itself.
+	saved *contract.SavedReport
+}
+
+// buildingRead is a read the server refused to answer as numbers because a fact model it reads is still rebuilding.
+type buildingRead struct {
+	label    string
+	progress float64
+	meta     contract.MetricsMeta
 }
 
 // drillAnswer is one successful drill: the request and the records behind the number.
@@ -121,7 +132,11 @@ func (t *answerTurn) list() string {
 }
 
 // query answers query_metrics. It runs the query through the API and keeps the result as evidence for the reply.
+// A query with saved_report runs the stored question of that report instead.
 func (t *answerTurn) query(args map[string]any) string {
+	if id, _ := args["saved_report"].(string); id != "" {
+		return t.savedQuery(id)
+	}
 	body, err := json.Marshal(args)
 	if err != nil {
 		return "Error: query_metrics arguments are not valid JSON."
@@ -130,6 +145,54 @@ func (t *answerTurn) query(args map[string]any) string {
 	if decodeErr := json.Unmarshal(body, &req); decodeErr != nil {
 		return "Error: query_metrics arguments do not match the query shape."
 	}
+	return t.answerQuery(body, req, nil)
+}
+
+// savedQuery runs the question of a saved report the person may read, as the person. Its figures are not checked.
+func (t *answerTurn) savedQuery(id string) string {
+	data, err := t.data(MetricsRouteReports, nil)
+	if err != nil {
+		return toolError(err)
+	}
+	var reports []contract.SavedReport
+	if decodeErr := json.Unmarshal(data, &reports); decodeErr != nil {
+		return "Error: the saved reports could not be read."
+	}
+	for i := range reports {
+		if reports[i].ID != id {
+			continue
+		}
+		req, ok := requestOfQuestion(reports[i].Question)
+		if !ok {
+			return "Error: this saved report does not hold a metric question that can be run."
+		}
+		body, err := json.Marshal(req)
+		if err != nil {
+			return toolError(err)
+		}
+		return t.answerQuery(body, req, &reports[i])
+	}
+	return "Error: no saved report with that id is visible to you."
+}
+
+// requestOfQuestion is the metrics query a saved question asks: its metric, grouping, period and filters.
+func requestOfQuestion(q contract.SavedQuestion) (contract.MetricQueryRequest, bool) {
+	if q.Metric == "" {
+		return contract.MetricQueryRequest{}, false
+	}
+	req := contract.MetricQueryRequest{Metrics: []string{q.Metric}, Dimensions: q.By, Filters: q.Filters,
+		From: q.From, To: q.To, Grain: q.Grain, Compare: q.Compare, Top: q.Top}
+	if q.Period != "" {
+		req.Period = &contract.MetricPeriod{Preset: q.Period}
+	}
+	if req.Grain == "" {
+		req.Grain = "range"
+	}
+	return req, true
+}
+
+// answerQuery runs one query and keeps its result as evidence. A saved report's figures are never checked.
+func (t *answerTurn) answerQuery(body []byte, req contract.MetricQueryRequest, saved *contract.SavedReport) string {
 	resp := t.run(MetricsRouteQuery, body)
 	if resp.Status != 200 {
 		return toolError(errors.New(refusalMessage(resp)))
@@ -141,12 +204,30 @@ func (t *answerTurn) query(args map[string]any) string {
 	if decodeErr := json.Unmarshal(resp.Body, &env); decodeErr != nil {
 		return "Error: the query answer could not be read."
 	}
-	verified, err := t.verified(req)
-	if err != nil {
-		return toolError(err)
+	if h := env.Meta.History; h != nil && h.State == "building" {
+		t.building = append(t.building, buildingRead{label: requestLabel(req), progress: h.Progress, meta: env.Meta})
+		return fmt.Sprintf("Error: the history behind this figure is still building (%d%% done). Give no number for it; say that the history is still building.", int(h.Progress*100))
 	}
-	t.queries = append(t.queries, queryAnswer{question: body, request: req, result: env.Data, meta: env.Meta, verified: verified})
+	verified := false
+	if saved == nil {
+		var err error
+		if verified, err = t.verified(req); err != nil {
+			return toolError(err)
+		}
+	}
+	t.queries = append(t.queries, queryAnswer{question: body, request: req, result: env.Data, meta: env.Meta, verified: verified, saved: saved})
 	return string(resp.Body)
+}
+
+// requestLabel names what a query asks for, before its result is read: the metric names, or the measure's record type.
+func requestLabel(req contract.MetricQueryRequest) string {
+	if len(req.Metrics) > 0 {
+		return strings.Join(req.Metrics, " and ")
+	}
+	if len(req.Measures) > 0 {
+		return req.Measures[0].RecordType
+	}
+	return "the figure"
 }
 
 // drill answers drill_metrics with the records behind one number, and keeps the total as evidence.
@@ -308,19 +389,20 @@ func metricsToolDefs() []map[string]any {
 			"type": "function",
 			"function": map[string]any{
 				"name":        toolQueryMetrics,
-				"description": "Get business numbers from checked metrics (or measures of record types). The only source of numbers in a reply. Periods: set period.preset to today, yesterday, this_week, last_week (previous Monday to Sunday), this_month, last_month, last_7_days, last_30_days, last_3_months, or custom with from and to (YYYY-MM-DD). Grain is day, week, month or range. compare is none, previous_period or week_before. by dimensions and filters use the list_metrics names.",
+				"description": "Get business numbers from checked metrics (or measures of record types), or from a saved report by saved_report id. The only source of numbers in a reply. Periods: set period.preset to today, yesterday, this_week, last_week (previous Monday to Sunday), this_month, last_month, last_7_days, last_30_days, last_3_months, or custom with from and to (YYYY-MM-DD). Grain is day, week, month or range. compare is none, previous_period or week_before. by dimensions and filters use the list_metrics names.",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"metrics":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Metric names from list_metrics"},
-						"measures":   map[string]any{"type": "array", "description": "Unsaved measures of a record type (never checked)", "items": map[string]any{"type": "object", "properties": map[string]any{"record_type": map[string]any{"type": "string"}, "agg": map[string]any{"type": "string", "enum": []string{"count", "sum", "count_distinct"}}, "field": map[string]any{"type": "string"}}, "required": []string{"record_type", "agg"}}},
-						"dimensions": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-						"period":     map[string]any{"type": "object", "properties": map[string]any{"preset": map[string]any{"type": "string"}}},
-						"from":       map[string]any{"type": "string"},
-						"to":         map[string]any{"type": "string"},
-						"grain":      map[string]any{"type": "string", "enum": []string{"day", "week", "month", "range"}},
-						"compare":    map[string]any{"type": "string", "enum": []string{"none", "previous_period", "week_before"}},
-						"top":        map[string]any{"type": "integer"},
+						"metrics":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Metric names from list_metrics"},
+						"measures":     map[string]any{"type": "array", "description": "Unsaved measures of a record type (never checked)", "items": map[string]any{"type": "object", "properties": map[string]any{"record_type": map[string]any{"type": "string"}, "agg": map[string]any{"type": "string", "enum": []string{"count", "sum", "count_distinct"}}, "field": map[string]any{"type": "string"}}, "required": []string{"record_type", "agg"}}},
+						"dimensions":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						"period":       map[string]any{"type": "object", "properties": map[string]any{"preset": map[string]any{"type": "string"}}},
+						"from":         map[string]any{"type": "string"},
+						"to":           map[string]any{"type": "string"},
+						"grain":        map[string]any{"type": "string", "enum": []string{"day", "week", "month", "range"}},
+						"compare":      map[string]any{"type": "string", "enum": []string{"none", "previous_period", "week_before"}},
+						"top":          map[string]any{"type": "integer"},
+						"saved_report": map[string]any{"type": "string", "description": "Id of a saved report from list_metrics: runs its stored question instead; its figures are not checked"},
 					},
 					"required": []string{"grain"},
 				},

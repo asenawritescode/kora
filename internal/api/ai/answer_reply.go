@@ -31,7 +31,7 @@ func newAnswerTurn(c *gin.Context, turn ChatTurn, currency string) *answerTurn {
 // not on the cards, and not in the person's message. A turn with no metrics read has no figures to check against
 // and returns nothing.
 func (t *answerTurn) unbacked(reply, message string) []string {
-	if len(t.queries)+len(t.drills) == 0 {
+	if len(t.queries)+len(t.drills)+len(t.building) == 0 {
 		return nil
 	}
 	var allowed numberSet
@@ -84,6 +84,9 @@ func (t *answerTurn) finalReply(reply, message string) string {
 
 // fallbackSentence states what the last figure was for, in words, without a number.
 func (t *answerTurn) fallbackSentence() string {
+	if len(t.queries) == 0 && len(t.building) > 0 {
+		return "The history for " + strings.ToLower(t.building[len(t.building)-1].label) + " is still building, so I can't give that figure yet."
+	}
 	if len(t.queries) == 0 {
 		return "I can't give an exact figure for that from this shop's data."
 	}
