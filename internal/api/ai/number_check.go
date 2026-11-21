@@ -11,6 +11,32 @@ import (
 // numberToken is one number as written in a reply: digits with optional thousands separators and a decimal part.
 var numberToken = regexp.MustCompile(`\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?`)
 
+// codeToken is a record code: letters and digits joined by "-" or "/" (PROD-3, ITM-0005, INV/22). The digits in
+// a code name a record; they are not quantities, so a reply may repeat them without a figure to back them.
+var codeToken = regexp.MustCompile(`[A-Za-z0-9]+(?:[-/][A-Za-z0-9]+)+`)
+
+// codeSpans returns the byte spans of the record codes in text: joined tokens that contain a letter. A run of digits
+// joined by "-" alone ("2-8") is a range, not a code, and stays checked.
+func codeSpans(text string) [][2]int {
+	var spans [][2]int
+	for _, loc := range codeToken.FindAllStringIndex(text, -1) {
+		if strings.IndexFunc(text[loc[0]:loc[1]], func(r rune) bool { return r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' }) >= 0 {
+			spans = append(spans, [2]int{loc[0], loc[1]})
+		}
+	}
+	return spans
+}
+
+// inSpans reports whether the byte offset lies inside one of the spans.
+func inSpans(spans [][2]int, at int) bool {
+	for _, sp := range spans {
+		if at >= sp[0] && at < sp[1] {
+			return true
+		}
+	}
+	return false
+}
+
 // numberTolerance is how far a number in a reply may sit from a figure the turn produced. Figures are compared as
 // the card prints them, so the tolerance only absorbs floating-point noise.
 const numberTolerance = 1e-6
@@ -60,7 +86,11 @@ func parseNumber(token string) (float64, bool) {
 // followed by k or m is checked as written in thousands or millions.
 func unmatchedNumbers(reply string, allowed numberSet) []string {
 	var out []string
+	codes := codeSpans(reply)
 	for _, loc := range numberToken.FindAllStringIndex(reply, -1) {
+		if inSpans(codes, loc[0]) {
+			continue
+		}
 		token := reply[loc[0]:loc[1]]
 		v, ok := parseNumber(token)
 		if !ok {

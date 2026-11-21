@@ -490,12 +490,11 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 			message: "What were my top 5 products last week?",
 			steps: []modelStep{
 				{tool: "query_metrics", args: productQuery},
-				{content: "PROD-3 led last week with 900."},
+				{content: "Bread led last week with 900."},
 			},
 			check: func(t *testing.T, got ai.ChatResponse, _ []string) {
-				// Rows carry the product codes: the line-dimension label is not resolved to the product name yet (a finding).
 				card := requireCards(t, got, 1)[0]
-				want := []string{"PROD-1 450", "PROD-2 470", "PROD-3 900"}
+				want := []string{"Soda KES 450", "Juice KES 470", "Bread KES 900"}
 				if card.Kind != "table" || card.Verified || !sameSet(rowValues(card), want) {
 					t.Fatalf("rows = %v (kind %s verified %v), want %v unchecked", rowValues(card), card.Kind, card.Verified, want)
 				}
@@ -511,6 +510,25 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 				card := requireCards(t, got, 1)[0]
 				if card.Kind != "number" || card.Label != "Average sale" || card.Value != "KES 150" || !card.Verified {
 					t.Fatalf("card = %+v", card)
+				}
+			},
+		}}},
+		{name: "sales split by product is refused and the line measure is offered", user: goldenAdminUser, roles: doctype.AdminRole, turns: []goldenTurn{{
+			message: "What were my sales by product last week?",
+			steps: []modelStep{
+				{tool: "query_metrics", args: `{"metrics":["sales"],"dimensions":["items.product"],"period":{"preset":"last_week"},"grain":"range"}`},
+				{tool: "query_metrics", args: productQuery},
+				{content: "A sale total cannot be split by product, so these are the line sales by product: Bread 900, Juice 470, Soda 450."},
+			},
+			check: func(t *testing.T, got ai.ChatResponse, requests []string) {
+				results := toolResults(t, requests[1])
+				if len(results) != 1 || !strings.Contains(results[0], "use a line measure") || strings.Contains(results[0], `"rows"`) {
+					t.Fatalf("refusal = %q; want the typed refusal with no rows", results)
+				}
+				card := requireCards(t, got, 1)[0]
+				want := []string{"Soda KES 450", "Juice KES 470", "Bread KES 900"}
+				if card.Kind != "table" || !sameSet(rowValues(card), want) {
+					t.Fatalf("rows = %v, want the line measure's %v", rowValues(card), want)
 				}
 			},
 		}}},

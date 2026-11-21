@@ -25,6 +25,14 @@ func TestUnmatchedNumbersAgainstFigures(t *testing.T) {
 		{"no figures in the reply", "", []float64{1}, "Here are the sales.", nil},
 		{"thousands suffix is checked scaled", "", []float64{12000}, "KES 12k in credit.", nil},
 		{"thousands suffix off by one", "", []float64{12500}, "KES 12k in credit.", []string{"12k"}},
+		{"a product code is not a quantity", "", nil, "PROD-3 led last week.", nil},
+		{"a long code is not a quantity", "", nil, "Item ITM-0005 and sale SAL-0001 were checked.", nil},
+		{"a code with a slash is not a quantity", "", nil, "Invoice INV/22 is open.", nil},
+		{"a code does not excuse a figure next to it", "", []float64{900}, "PROD-3 sold 901.", []string{"901"}},
+		{"a count of products is still checked", "", nil, "There are 3 products.", []string{"3"}},
+		{"a shop amount is still checked", "", nil, "KES 900 last week.", []string{"900"}},
+		{"a percent is still checked", "", nil, "up 12.5%.", []string{"12.5"}},
+		{"a range of days is still checked", "", nil, "2-8 Nov.", []string{"2", "8"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
