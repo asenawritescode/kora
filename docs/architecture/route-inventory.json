@@ -165,6 +165,26 @@
     },
     {
       "method": "GET",
+      "path": "/api/metrics",
+      "handler": "github.com/asenawritescode/kora/internal/api.metricsAPI.list-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/metrics/:name",
+      "handler": "github.com/asenawritescode/kora/internal/api.metricsAPI.describe-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/metrics/drill",
+      "handler": "github.com/asenawritescode/kora/internal/api.metricsAPI.drill-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/metrics/query",
+      "handler": "github.com/asenawritescode/kora/internal/api.metricsAPI.query-fm"
+    },
+    {
+      "method": "GET",
       "path": "/api/modules/:module/projections/:projection",
       "handler": "github.com/asenawritescode/kora/internal/api.(*Handler).HandlePublishedModuleProjection-fm"
     },
@@ -872,6 +892,26 @@
       "method": "POST",
       "path": "/api/v1/method/:name",
       "handler": "github.com/asenawritescode/kora/internal/api.(*Handler).HandleMethod-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/metrics",
+      "handler": "github.com/asenawritescode/kora/internal/api.metricsAPI.list-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/metrics/:name",
+      "handler": "github.com/asenawritescode/kora/internal/api.metricsAPI.describe-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/metrics/drill",
+      "handler": "github.com/asenawritescode/kora/internal/api.metricsAPI.drill-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/metrics/query",
+      "handler": "github.com/asenawritescode/kora/internal/api.metricsAPI.query-fm"
     },
     {
       "method": "GET",
