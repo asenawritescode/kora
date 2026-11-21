@@ -50,6 +50,21 @@ func TestQuantityEffectStatusGateIsChecked(t *testing.T) {
 		{"status is not an option of the field", func(q *QuantityEffect) {
 			q.StatusField, q.ApplyInStatuses = "status", []string{"Done", "Lost"}
 		}, "is not one of the options"},
+		{"status direction on an applying status", func(q *QuantityEffect) {
+			q.StatusField, q.ApplyInStatuses = "status", []string{"Open", "Done"}
+			q.StatusDirections = map[string]string{"Done": "decrease"}
+		}, ""},
+		{"status direction on a status outside the set", func(q *QuantityEffect) {
+			q.StatusField, q.ApplyInStatuses = "status", []string{"Done"}
+			q.StatusDirections = map[string]string{"Open": "decrease"}
+		}, "status_directions"},
+		{"status direction that is not increase or decrease", func(q *QuantityEffect) {
+			q.StatusField, q.ApplyInStatuses = "status", []string{"Done"}
+			q.StatusDirections = map[string]string{"Done": "sideways"}
+		}, "status_directions"},
+		{"status directions without a gate", func(q *QuantityEffect) {
+			q.StatusDirections = map[string]string{"Done": "decrease"}
+		}, "status_directions"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
