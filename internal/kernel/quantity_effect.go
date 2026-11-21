@@ -92,6 +92,8 @@ func decodeCreateData(raw json.RawMessage) (map[string]any, bool) {
 // stored record must carry the signed number.
 func createEffectTotals(dt *doctype.DocType, effect *doctype.QuantityEffect, data map[string]any) (totals map[string]float64, normalised bool, cerr *contract.Error) {
 	totals = map[string]float64{}
+	status, _ := data[effect.StatusField].(string)
+	effect = effect.ForStatus(status)
 	if effect.LinesField == "" {
 		normalised, cerr = addEffectRow(dt, effect, data, true, totals)
 		return totals, normalised, cerr

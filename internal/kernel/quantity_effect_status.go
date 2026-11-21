@@ -128,9 +128,10 @@ func moveQuantity(ctx context.Context, w effectWriter, cause moveCause, source *
 }
 
 // effectTotalsOf sums the stored change of a record per target record, with the
-// effect's direction applied. Blank and zero rows add nothing.
+// effect's direction for the record's status applied. Blank and zero rows add nothing.
 func effectTotalsOf(effect *doctype.QuantityEffect, doc *doctype.Document) map[string]float64 {
 	totals := map[string]float64{}
+	effect = effect.ForStatus(doc.GetString(effect.StatusField))
 	if effect.LinesField == "" {
 		addStoredChange(totals, effect, doc.GetString(effect.SourceRecordField), doc.Get(effect.DeltaField))
 		return totals
