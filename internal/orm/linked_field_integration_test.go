@@ -139,7 +139,7 @@ func linkedFieldItem(product, unitPrice string) *doctype.Document {
 // then inserts doc (old is nil) or saves it over old.
 func (s *linkedFieldSite) write(dt *doctype.DocType, doc, old *doctype.Document) {
 	s.t.Helper()
-	if err := s.manager.DeriveFields(dt, doc); err != nil {
+	if err := s.manager.DeriveFields(dt, doc, old); err != nil {
 		s.t.Fatalf("derive %s %s: %v", dt.Name, doc.Name, err)
 	}
 	dbTx, err := s.database.DB.Begin()
