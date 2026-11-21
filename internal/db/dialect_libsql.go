@@ -21,6 +21,12 @@ func (d *LibSQLDialect) DriverName() string { return "libsql" }
 // IsAbortedTransaction is always false: SQLite-family drivers report no 25P02.
 func (d *LibSQLDialect) IsAbortedTransaction(err error) bool { return false }
 
+// IsUniqueViolation matches the SQLite constraint message: libsql-client-go
+// exposes no error code at this boundary.
+func (d *LibSQLDialect) IsUniqueViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+
 func (d *LibSQLDialect) IsWriteConflict(err error) bool {
 	if err == nil {
 		return false

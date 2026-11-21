@@ -19,6 +19,12 @@ func (d *MySQLDialect) DriverName() string { return "mysql" }
 // IsAbortedTransaction is always false: MySQL reports no SQLSTATE 25P02.
 func (d *MySQLDialect) IsAbortedTransaction(err error) bool { return false }
 
+// IsUniqueViolation reports MySQL error 1062 (duplicate entry).
+func (d *MySQLDialect) IsUniqueViolation(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
+}
+
 func (d *MySQLDialect) IsWriteConflict(err error) bool {
 	var mysqlErr *mysql.MySQLError
 	if !errors.As(err, &mysqlErr) {
