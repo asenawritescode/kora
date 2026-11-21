@@ -1,0 +1,13 @@
+name: manufacturing_work_orders_count_in_progress
+label: "Work orders: In progress"
+type: simple
+model: "Work Order"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "In progress"
+time: business_date
+format: number
+description: "Work orders: In progress from the Work Order records (count)."

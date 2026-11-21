@@ -1,0 +1,9 @@
+name: manufacturing_work_orders_count
+label: "Work orders"
+type: simple
+model: "Work Order"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Work orders from the Work Order records (count)."

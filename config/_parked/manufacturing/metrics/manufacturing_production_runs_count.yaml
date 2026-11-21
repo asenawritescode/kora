@@ -1,0 +1,9 @@
+name: manufacturing_production_runs_count
+label: "Production runs"
+type: simple
+model: "Production Run"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Production runs from the Production Run records (count)."

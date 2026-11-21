@@ -1,0 +1,15 @@
+name: manufacturing_insights
+label: "Manufacturing insights"
+description: "Figures and charts that reproduce the manufacturing overview report."
+default_range: last_30_days
+tiles:
+  - metric: manufacturing_work_orders_count_planned
+  - metric: manufacturing_work_orders_count_in_progress
+  - metric: manufacturing_work_orders_count_done
+  - metric: manufacturing_work_orders_count_cancelled
+charts:
+  - id: production_by_product
+    title: "Quantity made by product"
+    kind: bar
+    metrics: [manufacturing_quantity_made]
+    by: product
