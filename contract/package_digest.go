@@ -188,7 +188,7 @@ func ValidPackageFileType(filePath, contentType string) bool {
 }
 
 // packageDirs are the directories holding the YAML files of each content type.
-var packageDirs = map[string]string{"view": "views/", "report": "reports/", "metric": "metrics/", "query": "queries/", "command": "commands/"}
+var packageDirs = map[string]string{"view": "views/", "report": "reports/", "metric": "metrics/", "dashboard": "dashboards/", "query": "queries/", "command": "commands/"}
 
 func validPackageFileType(filePath, contentType string) bool {
 	ext := strings.ToLower(path.Ext(filePath))
@@ -202,7 +202,7 @@ func validPackageFileType(filePath, contentType string) bool {
 		return (filePath == "permissions.yaml" || (strings.HasPrefix(filePath, "components/") && path.Base(filePath) == "permissions.yaml")) && ext == ".yaml"
 	case "workflow_definition":
 		return strings.HasPrefix(filePath, "workflows/") && ext == ".json"
-	case "view", "report", "metric":
+	case "view", "report", "metric", "dashboard":
 		return strings.HasPrefix(filePath, packageDirs[contentType]) && yml
 	case "script":
 		return strings.HasPrefix(filePath, "scripts/") && ext == ".js"
@@ -247,7 +247,7 @@ func (n packNamespace) valid() bool {
 
 // PackageFileType infers the content type of a package file from its path.
 func PackageFileType(filePath string) (string, bool) {
-	for _, t := range []string{"doctype", "roles", "permissions", "workflow_definition", "view", "report", "metric", "script", "query", "command", "print_format", "pack"} {
+	for _, t := range []string{"doctype", "roles", "permissions", "workflow_definition", "view", "report", "metric", "dashboard", "script", "query", "command", "print_format", "pack"} {
 		if validPackageFileType(filePath, t) {
 			return t, true
 		}

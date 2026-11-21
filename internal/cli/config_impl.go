@@ -182,13 +182,13 @@ func runConfigImport(ctx context.Context, siteName, path, dbName string) (return
 	return runConfigImportForSiteContext(ctx, siteName, path, siteCfg, tenantID)
 }
 
-// loadReportsAndMetrics reads a pack's reports and metric definitions, reporting how many reports it found.
-func loadReportsAndMetrics(path string, doctypes []*doctype.DocType) (reports, metricDefs []json.RawMessage, err error) {
-	reports, metricDefs, err = site.LoadPackReportsAndMetrics(path, doctypes)
+// loadReportsAndMetrics reads a pack's reports, metric and dashboard definitions, reporting how many reports it found.
+func loadReportsAndMetrics(path string, doctypes []*doctype.DocType) (reports, metricDefs, dashboardDefs []json.RawMessage, err error) {
+	reports, metricDefs, dashboardDefs, err = site.LoadPackReportsAndMetrics(path, doctypes)
 	if len(reports) > 0 {
 		fmt.Printf("Found %d reports\n", len(reports))
 	}
-	return reports, metricDefs, err
+	return reports, metricDefs, dashboardDefs, err
 }
 
 func runConfigImportForSiteContext(ctx context.Context, siteName, path string, siteCfg *site.Config, tenantID string) (returnErr error) { //nolint:contextcheck // tolerates a nil ctx from legacy callers
@@ -264,7 +264,7 @@ func runConfigImportForSiteContext(ctx context.Context, siteName, path string, s
 	if len(views) > 0 {
 		fmt.Printf("Found %d views\n", len(views))
 	}
-	reports, metricDefs, err := loadReportsAndMetrics(path, doctypes)
+	reports, metricDefs, dashboardDefs, err := loadReportsAndMetrics(path, doctypes)
 	if err != nil {
 		return err
 	}
@@ -276,7 +276,7 @@ func runConfigImportForSiteContext(ctx context.Context, siteName, path string, s
 		fmt.Printf("Found %d workflow definitions\n", len(workflowDefinitions))
 	}
 
-	snapshot := &doctype.ConfigSnapshot{DocTypes: doctypes, Roles: roles, Permissions: permissions, WorkflowDefinitions: workflowDefinitions, Views: views, Reports: reports, Metrics: metricDefs, MinKoraVersion: Version}
+	snapshot := &doctype.ConfigSnapshot{DocTypes: doctypes, Roles: roles, Permissions: permissions, WorkflowDefinitions: workflowDefinitions, Views: views, Reports: reports, Metrics: metricDefs, Dashboards: dashboardDefs, MinKoraVersion: Version}
 	dialect := kdb.Resolve(siteCfg.DBType)
 	registry := doctype.NewRegistry()
 	if err := site.ImportConfigFromSnapshotContext(ctx, db, registry, siteCfg.DBName, siteName, tenantID, "Config import from "+path, snapshot, dialect, nil); err != nil {

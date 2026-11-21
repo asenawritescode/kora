@@ -218,6 +218,7 @@ type packResourceNames struct {
 	scripts          map[string]string
 	reports          map[string]string
 	metrics          map[string]string
+	dashboards       map[string]string
 	queries          map[string]string
 	commands         map[string]string
 	printFormats     map[string]string
@@ -227,7 +228,7 @@ func newPackResourceNames() packResourceNames {
 	return packResourceNames{
 		doctypes: map[string]string{}, doctypeResources: map[string]string{}, roles: map[string]string{}, permissions: map[string]string{},
 		workflows: map[string]string{}, views: map[string]string{}, scripts: map[string]string{}, reports: map[string]string{}, metrics: map[string]string{},
-		queries: map[string]string{}, commands: map[string]string{}, printFormats: map[string]string{},
+		dashboards: map[string]string{}, queries: map[string]string{}, commands: map[string]string{}, printFormats: map[string]string{},
 	}
 }
 
@@ -313,20 +314,27 @@ func (names packResourceNames) add(file PackFile) error {
 			return err
 		}
 		return register(names.printFormats, definition.Name, "print format")
-	case "report", "metric":
-		return names.addReportOrMetric(file, register)
+	case "report", "metric", "dashboard":
+		return names.addDefinition(file, register)
 	}
 	return nil
 }
 
-// addReportOrMetric claims the names of a report (and its route) or of a metric definition.
-func (names packResourceNames) addReportOrMetric(file PackFile, register func(map[string]string, string, string) error) error {
-	if file.ContentType == "metric" {
+// addDefinition claims the names of a report (and its route), a metric or a dashboard definition.
+func (names packResourceNames) addDefinition(file PackFile, register func(map[string]string, string, string) error) error {
+	switch file.ContentType {
+	case "metric":
 		definition, err := metrics.ParseYAML([]byte(file.Content), file.Path)
 		if err != nil {
 			return err
 		}
 		return register(names.metrics, definition.Name, "metric")
+	case "dashboard":
+		definition, err := metrics.ParseDashboardYAML([]byte(file.Content), file.Path)
+		if err != nil {
+			return err
+		}
+		return register(names.dashboards, definition.Name, "dashboard")
 	}
 	definition, err := analytics.ParseReportYAML([]byte(file.Content), file.Path)
 	if err != nil {
@@ -377,7 +385,7 @@ func validatePackFileSyntax(file PackFile) error {
 	case "view":
 		_, err := doctype.ParseViewYAML(data)
 		return err
-	case "report", "metric":
+	case "report", "metric", "dashboard":
 		return validateYAMLDefinition(file.ContentType, file.Path, data)
 	case "command":
 		_, err := kernel.ParseCommandResource(data)
@@ -434,10 +442,14 @@ func ParsePackDigest(value string) error {
 	return contract.ParsePackDigest(value)
 }
 
-// validateYAMLDefinition checks a report or metric document against its parser.
+// validateYAMLDefinition checks a report, metric or dashboard document against its parser.
 func validateYAMLDefinition(contentType, path string, data []byte) error {
-	if contentType == "metric" {
+	switch contentType {
+	case "metric":
 		_, err := metrics.ParseYAML(data, path)
+		return err
+	case "dashboard":
+		_, err := metrics.ParseDashboardYAML(data, path)
 		return err
 	}
 	_, err := analytics.ParseReportYAML(data, path)

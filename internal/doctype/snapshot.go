@@ -53,6 +53,7 @@ type ConfigSnapshot struct {
 	AnalyticsMetrics    []*AnalyticsMetricConfig               `json:"analytics_metrics,omitempty"`
 	Reports             []json.RawMessage                      `json:"reports,omitempty"`
 	Metrics             []json.RawMessage                      `json:"metrics,omitempty"`
+	Dashboards          []json.RawMessage                      `json:"dashboards,omitempty"`
 	Commands            []json.RawMessage                      `json:"commands,omitempty"`
 	PrintFormats        []json.RawMessage                      `json:"print_formats,omitempty"`
 	Queries             []json.RawMessage                      `json:"queries,omitempty"`

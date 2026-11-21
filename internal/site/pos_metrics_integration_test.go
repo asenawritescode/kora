@@ -40,7 +40,7 @@ func TestPOSMetricsRoundTripAcrossDialects(t *testing.T) {
 				}
 				dts = append(dts, parsed...)
 			}
-			raw, err := metrics.Load(filepath.Join("..", "..", "config", "pos", "metrics"), dts)
+			raw, _, err := metrics.LoadPack(filepath.Join("..", "..", "config", "pos"), dts)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -1,0 +1,27 @@
+name: till_insights
+label: Till insights
+description: Test only.
+default_range: last_30_days
+tiles:
+  - metric: sales
+    compare: previous_period
+charts:
+  - id: sales_by_day
+    title: Sales by day
+    kind: bar
+    metrics: [sales, refunds]
+    by: time
+    grain: day
+    compare: none
+    drill: true
+  - id: sales_by_register
+    title: Sales by register
+    kind: table
+    metrics: [sales]
+    by: register
+    top: 5
+  - id: average_by_register
+    title: Average by register
+    kind: line
+    metrics: [average_sale]
+    by: register

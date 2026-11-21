@@ -23,6 +23,11 @@ var (
 
 // ParseDirectory reads the metric documents of a pack's metrics/ directory. A missing directory has none.
 func ParseDirectory(dir string) ([]Metric, error) {
+	return readYAMLDir(dir, ParseYAML)
+}
+
+// readYAMLDir parses every YAML file of dir with parse. A missing directory has no documents.
+func readYAMLDir[T any](dir string, parse func([]byte, string) (T, error)) ([]T, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -30,7 +35,7 @@ func ParseDirectory(dir string) ([]Metric, error) {
 	if err != nil {
 		return nil, err
 	}
-	var defs []Metric
+	var docs []T
 	for _, e := range entries {
 		if ext := filepath.Ext(e.Name()); e.IsDir() || (ext != ".yaml" && ext != ".yml") {
 			continue
@@ -40,19 +45,19 @@ func ParseDirectory(dir string) ([]Metric, error) {
 		if err != nil {
 			return nil, err
 		}
-		m, err := ParseYAML(body, path)
+		doc, err := parse(body, path)
 		if err != nil {
 			return nil, err
 		}
-		defs = append(defs, m)
+		docs = append(docs, doc)
 	}
-	return defs, nil
+	return docs, nil
 }
 
 // ParseYAML decodes one metric document; source names it in errors.
 func ParseYAML(body []byte, source string) (Metric, error) {
 	var m Metric
-	if err := checkKeys(body); err != nil {
+	if err := checkKeys(body, metricKeys, nestedKeyProblems); err != nil {
 		return m, fmt.Errorf("%s: %w", source, err)
 	}
 	if err := goyaml.UnmarshalWithOptions(body, &m, goyaml.DisallowUnknownField()); err != nil {
@@ -61,8 +66,9 @@ func ParseYAML(body []byte, source string) (Metric, error) {
 	return m, nil
 }
 
-// checkKeys reports unknown keys of a metric document, with line numbers and did-you-mean hints.
-func checkKeys(body []byte) error {
+// checkKeys reports unknown keys of a document, with line numbers and did-you-mean hints.
+// nested checks the keys of the mappings under each top-level key.
+func checkKeys(body []byte, known map[string]bool, nested func(key string, v *yamlv3.Node) []string) error {
 	var root yamlv3.Node
 	if err := yamlv3.Unmarshal(body, &root); err != nil {
 		return fmt.Errorf("yaml: %w", err)
@@ -71,9 +77,9 @@ func checkKeys(body []byte) error {
 		return nil // not a mapping: the decoder reports it
 	}
 	top := root.Content[0]
-	problems := unknownKeys(top, metricKeys)
+	problems := unknownKeys(top, known)
 	for i := 0; i+1 < len(top.Content); i += 2 {
-		problems = append(problems, nestedKeyProblems(top.Content[i].Value, top.Content[i+1])...)
+		problems = append(problems, nested(top.Content[i].Value, top.Content[i+1])...)
 	}
 	if len(problems) == 0 {
 		return nil
@@ -122,14 +128,35 @@ func yamlKeys(v any) map[string]bool {
 	return keys
 }
 
-// Load parses the metrics/ directory of a pack, checks the definitions against the pack's
-// record types and returns them as the JSON documents a config snapshot carries.
-func Load(dir string, doctypes []*doctype.DocType) ([]json.RawMessage, error) {
-	defs, err := ParseDirectory(dir)
+// LoadPack reads a pack's metrics/ and dashboards/ directories and returns both as the JSON
+// documents a config snapshot carries. Metrics and dashboards are checked together against the pack's record types.
+func LoadPack(packDir string, doctypes []*doctype.DocType) ([]json.RawMessage, []json.RawMessage, error) {
+	defs, err := ParseDirectory(filepath.Join(packDir, "metrics"))
 	if err != nil {
-		return nil, fmt.Errorf("parsing metrics: %w", err)
+		return nil, nil, fmt.Errorf("parsing metrics: %w", err)
 	}
-	return EncodeValidated(defs, doctypes)
+	dashboards, err := ParseDashboardDirectory(filepath.Join(packDir, "dashboards"))
+	if err != nil {
+		return nil, nil, fmt.Errorf("parsing dashboards: %w", err)
+	}
+	return EncodePack(defs, dashboards, doctypes)
+}
+
+// EncodePack checks metric and dashboard definitions against the record types of a pack and returns
+// both as the JSON documents a config snapshot carries.
+func EncodePack(defs []Metric, dashboards []Dashboard, doctypes []*doctype.DocType) ([]json.RawMessage, []json.RawMessage, error) {
+	metricDocs, err := EncodeValidated(defs, doctypes)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err = ValidateDashboards(dashboards, defs, doctypes); err != nil {
+		return nil, nil, fmt.Errorf("validating dashboards: %w", err)
+	}
+	dashboardDocs, err := encodeDocs(dashboards)
+	if err != nil {
+		return nil, nil, err
+	}
+	return metricDocs, dashboardDocs, nil
 }
 
 // EncodeValidated checks definitions against the record types of a pack and returns them
@@ -138,11 +165,16 @@ func EncodeValidated(defs []Metric, doctypes []*doctype.DocType) ([]json.RawMess
 	if err := Validate(defs, doctypes); err != nil {
 		return nil, fmt.Errorf("validating metrics: %w", err)
 	}
+	return encodeDocs(defs)
+}
+
+// encodeDocs marshals each definition to the JSON document a config snapshot carries.
+func encodeDocs[T Metric | Dashboard](defs []T) ([]json.RawMessage, error) {
 	out := make([]json.RawMessage, 0, len(defs))
-	for _, m := range defs {
-		raw, err := json.Marshal(m)
+	for _, d := range defs {
+		raw, err := json.Marshal(d)
 		if err != nil {
-			return nil, fmt.Errorf("encoding metric %s: %w", m.Name, err)
+			return nil, fmt.Errorf("encoding definition: %w", err)
 		}
 		out = append(out, raw)
 	}

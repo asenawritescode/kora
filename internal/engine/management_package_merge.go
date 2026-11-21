@@ -102,8 +102,11 @@ func mergeRawPackageItems(merged *doctype.ConfigSnapshot, current, incoming *doc
 	}); err != nil {
 		return fmt.Errorf("merge package print formats: %w", err)
 	}
-	if merged.Metrics, err = mergeRawSnapshotItems(current.Metrics, incoming.Metrics, metricName); err != nil {
+	if merged.Metrics, err = mergeRawSnapshotItems(current.Metrics, incoming.Metrics, definitionName); err != nil {
 		return fmt.Errorf("merge package metrics: %w", err)
+	}
+	if merged.Dashboards, err = mergeRawSnapshotItems(current.Dashboards, incoming.Dashboards, definitionName); err != nil {
+		return fmt.Errorf("merge package dashboards: %w", err)
 	}
 	return dropReplacedModuleItems(merged, incoming, replacedModuleIDs(current.Modules, incoming.Modules), registry)
 }
@@ -519,8 +522,8 @@ func mergeRawSnapshotItems(current, incoming []json.RawMessage, key func(json.Ra
 	return items, nil
 }
 
-// metricName is the key of a metric definition in a config snapshot.
-func metricName(raw json.RawMessage) (string, error) {
+// definitionName is the key of a metric or dashboard definition in a config snapshot.
+func definitionName(raw json.RawMessage) (string, error) {
 	var m struct {
 		Name string `json:"name"`
 	}
