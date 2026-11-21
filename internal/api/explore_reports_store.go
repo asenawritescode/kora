@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -93,6 +94,18 @@ func (s reportStore) nameTaken(ctx context.Context, name, exceptID string) (bool
 	return n > 0, err
 }
 
+// errReportNameTaken is returned by insert and update when the unique name index refuses the row, which a
+// concurrent save of the same name can cause after the name check passed.
+var errReportNameTaken = errors.New("saved report name is taken")
+
+// writeErr returns errReportNameTaken for a unique violation and err otherwise.
+func writeErr(err error) error {
+	if db.IsUniqueViolation(err) {
+		return errReportNameTaken
+	}
+	return err
+}
+
 // insert adds a new report.
 func (s reportStore) insert(ctx context.Context, rep savedReport) error {
 	question, recordTypes, err := encodeReport(rep)
@@ -104,7 +117,7 @@ func (s reportStore) insert(ctx context.Context, rep savedReport) error {
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		rep.ID, rep.Name, reportNameKey(rep.Name), rep.Visibility, rep.Owner, question, recordTypes,
 		rep.BrokenReason, nullTime(rep.BrokenAt), rep.Created, rep.Modified)
-	return err
+	return writeErr(err)
 }
 
 // update replaces the name, visibility, question and state of a report.
@@ -117,7 +130,7 @@ func (s reportStore) update(ctx context.Context, rep savedReport) error {
 		SET name = ?, name_key = ?, visibility = ?, question = ?, record_types = ?, broken_reason = ?, broken_at = ?, modified = ?
 		WHERE id = ?`),
 		rep.Name, reportNameKey(rep.Name), rep.Visibility, question, recordTypes, rep.BrokenReason, nullTime(rep.BrokenAt), rep.Modified, rep.ID)
-	return err
+	return writeErr(err)
 }
 
 // setState writes only the broken state and the record types of a report, after a recheck.

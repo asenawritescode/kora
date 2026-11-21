@@ -151,6 +151,15 @@ func (r reportsAPI) checkDraft(c *gin.Context, name, visibility string, question
 	return reportDraft{name: name, visibility: visibility, question: question, models: models}, true
 }
 
+// saveError writes 409 when the unique name index refused the row, and 500 for any other failure.
+func saveError(c *gin.Context, msg string, err error) {
+	if errors.Is(err, errReportNameTaken) {
+		conflictError(c, "reports.name_taken", "There's already a report with this name. Pick another name.", nil)
+		return
+	}
+	internalError(c, msg, err)
+}
+
 // checkName writes 409 when another report already has the name. It reports false when the name is taken.
 func checkName(c *gin.Context, store reportStore, name, exceptID string) bool {
 	taken, err := store.nameTaken(c.Request.Context(), name, exceptID)
@@ -221,7 +230,7 @@ func (r reportsAPI) save(c *gin.Context, store reportStore, rep savedReport) {
 	now := time.Now().UTC()
 	rep.ID, rep.Created, rep.Modified = contract.NewID(), now, now
 	if err := store.insert(c.Request.Context(), rep); err != nil {
-		internalError(c, "saving report", err)
+		saveError(c, "saving report", err)
 		return
 	}
 	c.JSON(http.StatusCreated, Response{Data: rep.contract()})
@@ -251,7 +260,7 @@ func (r reportsAPI) update(c *gin.Context) {
 	cur.BrokenReason, cur.BrokenAt = "", time.Time{}
 	cur.Modified = time.Now().UTC()
 	if err := store.update(c.Request.Context(), cur); err != nil {
-		internalError(c, "updating saved report", err)
+		saveError(c, "updating saved report", err)
 		return
 	}
 	c.JSON(http.StatusOK, Response{Data: cur.contract()})

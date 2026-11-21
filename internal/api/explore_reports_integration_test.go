@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -158,6 +159,7 @@ func exerciseReports(t *testing.T, router *gin.Engine, database *sql.DB, dialect
 	reportCall(t, router, "Cashier", "cashier-1", http.MethodPost, base, savedReportBody(t, "My fuel", "private", count), http.StatusCreated)
 	reportCall(t, router, "Cashier", "cashier-1", http.MethodPost, base, savedReportBody(t, "  my FUEL ", "private", count), http.StatusConflict)
 	reportCall(t, router, "Cashier", "cashier-1", http.MethodPost, base, savedReportBody(t, "   ", "private", count), http.StatusUnprocessableEntity)
+	raceCreates(t, router, base, savedReportBody(t, "Race fuel", "private", count))
 	reportCall(t, router, "Cashier", "cashier-1", http.MethodPost, base, savedReportBody(t, "Ghost", "private", contract.SavedQuestion{RecordType: "Ghost"}), http.StatusUnprocessableEntity)
 	reportCall(t, router, "Cashier", "cashier-1", http.MethodPost, base, savedReportBody(t, "Payroll peek", "private", payroll), http.StatusForbidden)
 	reportCall(t, router, doctype.AdminRole, "admin-1", http.MethodPost, base, savedReportBody(t, "Payroll net", "shop", payroll), http.StatusCreated)
@@ -209,4 +211,43 @@ func exerciseReports(t *testing.T, router *gin.Engine, database *sql.DB, dialect
 	reportCall(t, router, doctype.AdminRole, "admin-1", http.MethodDelete, base+"/"+shop, "", http.StatusNoContent)
 	reportCall(t, router, "Cashier", "cashier-1", http.MethodDelete, base+"/"+mine, "", http.StatusNoContent)
 	reportCall(t, router, "Cashier", "cashier-1", http.MethodGet, base+"/"+mine, "", http.StatusNotFound)
+}
+
+// raceCreates sends two creates of the same name at once. The name check passes for both, so the unique index
+// decides: one is saved and one is refused with 409.
+func raceCreates(t *testing.T, router *gin.Engine, path, body string) {
+	t.Helper()
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	codes := make(chan int, 2)
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+			req.Header.Set("X-Roles", "Cashier")
+			req.Header.Set("X-User", "cashier-race")
+			recorder := httptest.NewRecorder()
+			<-start
+			router.ServeHTTP(recorder, req)
+			codes <- recorder.Code
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(codes)
+	var created, refused int
+	for code := range codes {
+		switch code {
+		case http.StatusCreated:
+			created++
+		case http.StatusConflict:
+			refused++
+		default:
+			t.Fatalf("concurrent create = %d, want 201 or 409", code)
+		}
+	}
+	if created != 1 || refused != 1 {
+		t.Fatalf("concurrent creates: %d created, %d refused; want 1 and 1", created, refused)
+	}
 }
