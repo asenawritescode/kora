@@ -1,7 +1,8 @@
 // Package metrics defines the metrics a pack declares in its metrics/ directory:
-// named reads over fact models. Definitions are validated here; query.go, plan.go,
-// sql.go and run.go compile and run simple and ratio metrics over the summaries
-// and the fact tables.
+// named reads over fact models. Definitions are validated here. plan.go compiles
+// simple, ratio and derived metrics; sql.go and run.go run them over the summaries
+// and the fact tables; compare.go holds the previous-period window and top-N folding;
+// formula.go parses and evaluates derived formulas.
 package metrics
 
 import (
@@ -148,17 +149,33 @@ func (m Metric) validateFact(c catalog) error {
 
 // validateRefs checks a ratio or derived metric and that every metric it names exists.
 func (m Metric) validateRefs(c catalog) error {
-	bare := m.Model == "" && m.Measure == nil && len(m.Filters) == 0
-	if m.Type == KindRatio && (!bare || m.Formula != "" || m.Numerator == "" || m.Denominator == "") {
-		return errors.New("a ratio takes only numerator and denominator")
-	}
-	if m.Type == KindDerived && (!bare || m.Numerator != "" || m.Denominator != "" || strings.TrimSpace(m.Formula) == "") {
-		return errors.New("a derived metric takes only formula")
+	if err := m.checkRefShape(); err != nil {
+		return err
 	}
 	for _, ref := range m.refs() {
 		if _, ok := c.metrics[ref]; !ok {
 			return fmt.Errorf("refers to unknown metric %q", ref)
 		}
+	}
+	return nil
+}
+
+// checkRefShape checks which fields a ratio or derived metric takes, and that a derived formula parses.
+func (m Metric) checkRefShape() error {
+	bare := m.Model == "" && m.Measure == nil && len(m.Filters) == 0
+	switch m.Type {
+	case KindRatio:
+		if !bare || m.Formula != "" || m.Numerator == "" || m.Denominator == "" {
+			return errors.New("a ratio takes only numerator and denominator")
+		}
+	case KindDerived:
+		if !bare || m.Numerator != "" || m.Denominator != "" || strings.TrimSpace(m.Formula) == "" {
+			return errors.New("a derived metric takes only formula")
+		}
+		_, err := parseFormula(m.Formula)
+		return err
+	case KindSimple, KindBalance, KindCumulative:
+		// Fact metrics name no other metric; validateFact checks their fields.
 	}
 	return nil
 }

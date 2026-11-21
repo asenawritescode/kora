@@ -1,0 +1,115 @@
+package metrics
+
+import (
+	"context"
+	"slices"
+	"strings"
+
+	"github.com/shopspring/decimal"
+
+	"github.com/asenawritescode/kora/internal/tenanttime"
+)
+
+// otherGroup is the group that holds every group outside the top N. Its label is otherLabel.
+const (
+	otherGroup = "__other__"
+	otherLabel = "Other"
+)
+
+// previousRange is the window of as many buckets as the range has, ending the day before its
+// first bucket. For a range that starts on a bucket boundary that is the day before From.
+func (p plan) previousRange() (tenanttime.Date, tenanttime.Date) {
+	first := periodStart(toTime(p.from), p.grain)
+	n := len(bucketStarts(p.from, p.to, p.grain))
+	return toDate(stepPeriod(first, p.grain, -n)), toDate(first.AddDate(0, 0, -1))
+}
+
+// previousRows runs the previous-period window and returns its rows aligned with cur's rows. It
+// uses the current keys: with top-N, the previous Other group is every group outside the current
+// top N. A group that appears only in the previous period has no current row and is dropped.
+func (e Engine) previousRows(ctx context.Context, p plan, cur aggregate, keys []string) ([]Row, error) {
+	from, to := p.previousRange()
+	prevPlan := p
+	prevPlan.from, prevPlan.to = from, to
+	prev, err := e.run(ctx, prevPlan)
+	if err != nil {
+		return nil, err
+	}
+	if p.top > 0 {
+		prev = prev.fold(keptGroups(keys))
+	}
+	prev.groups = cur.groups
+	return p.rows(prev, keys, from, to), nil
+}
+
+// keptGroups is the set of keys that are real groups: every key except the Other group.
+func keptGroups(keys []string) map[string]bool {
+	kept := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		if k != otherGroup {
+			kept[k] = true
+		}
+	}
+	return kept
+}
+
+// fold keeps the groups in keep and sums every other group into the Other group, bucket by bucket.
+// Sums of components fold exactly, so a ratio computed afterwards divides summed components.
+func (agg aggregate) fold(keep map[string]bool) aggregate {
+	out := aggregate{sums: map[bucketKey]bucketSums{}, groups: map[string][]string{}}
+	rest := false
+	for bk, vals := range agg.sums {
+		if keep[bk.group] {
+			out.sums[bk] = vals
+			out.groups[bk.group] = agg.groups[bk.group]
+			continue
+		}
+		rest = true
+		other := bucketKey{period: bk.period, group: otherGroup}
+		out.sums[other] = out.sums[other].add(vals)
+	}
+	if rest {
+		out.groups[otherGroup] = []string{otherGroup}
+	}
+	return out
+}
+
+// rankedGroup is one group with its value for the ranking metric over the whole range.
+type rankedGroup struct {
+	key   string
+	value decimal.NullDecimal
+}
+
+// compare orders groups for the top N: larger values first, null last, then the smaller key.
+func (g rankedGroup) compare(h rankedGroup) int {
+	if g.value.Valid != h.value.Valid {
+		if g.value.Valid {
+			return -1
+		}
+		return 1
+	}
+	if g.value.Valid {
+		if c := h.value.Decimal.Cmp(g.value.Decimal); c != 0 {
+			return c
+		}
+	}
+	return strings.Compare(g.key, h.key)
+}
+
+// topKeys ranks the groups by the first requested metric over the whole range and keeps the first n.
+func (p plan) topKeys(agg aggregate, n int) map[string]bool {
+	totals := map[string]bucketSums{}
+	for bk, vals := range agg.sums {
+		totals[bk.group] = totals[bk.group].add(vals)
+	}
+	ranked := make([]rankedGroup, 0, len(totals))
+	for key, total := range totals {
+		ranked = append(ranked, rankedGroup{key: key, value: p.values(total)[0]})
+	}
+	slices.SortFunc(ranked, rankedGroup.compare)
+	keep := make(map[string]bool, n)
+	for _, r := range ranked[:min(n, len(ranked))] {
+		keep[r.key] = true
+	}
+	return keep
+}

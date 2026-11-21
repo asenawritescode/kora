@@ -14,7 +14,7 @@ import (
 	"github.com/asenawritescode/kora/internal/tenanttime"
 )
 
-// defaultTimeout bounds one metrics query when the Engine sets no Timeout.
+// defaultTimeout bounds one metrics query, previous period included, when the Engine sets no Timeout.
 const defaultTimeout = 10 * time.Second
 
 // groupSep joins dimension values into a map key. Dimension values do not contain NUL.
@@ -34,6 +34,26 @@ type bucketKey struct {
 	group  string
 }
 
+// bucketSums holds one sum per series for one bucket of one group.
+type bucketSums []decimal.Decimal
+
+// add returns the element-wise sum of b and other; a nil b starts from zero.
+func (b bucketSums) add(other bucketSums) bucketSums {
+	if b == nil {
+		b = make(bucketSums, len(other))
+	}
+	for i, v := range other {
+		b[i] = b[i].Add(v)
+	}
+	return b
+}
+
+// aggregate is the summed series of one run. Groups maps each group key to its dimension values.
+type aggregate struct {
+	sums   map[bucketKey]bucketSums
+	groups map[string][]string
+}
+
 // Query compiles q and runs it. A metric or shape this compiler does not run yet fails with
 // ErrNotSupported before any SQL is sent.
 func (e Engine) Query(ctx context.Context, q Query) (Result, error) {
@@ -41,23 +61,39 @@ func (e Engine) Query(ctx context.Context, q Query) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	stmt, args := p.build(e.Dialect)
 	timeout := e.Timeout
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	rows, err := e.DB.QueryContext(ctx, db.Rebind(e.Dialect, stmt), args...)
-	if err != nil {
-		return Result{}, fmt.Errorf("metrics: query %s: %w", p.sourceName(), err)
-	}
-	defer func() { _ = rows.Close() }()
-	sums, groups, err := p.read(rows)
+	cur, err := e.run(ctx, p)
 	if err != nil {
 		return Result{}, err
 	}
-	return p.result(sums, groups), nil
+	if p.top > 0 {
+		cur = cur.fold(p.topKeys(cur, p.top))
+	}
+	keys := p.keys(cur)
+	res := Result{Metrics: p.metricNames(), Dimensions: slices.Clone(p.dims), Rows: p.rows(cur, keys, p.from, p.to)}
+	if p.compare == ComparePreviousPeriod {
+		res.Previous, err = e.previousRows(ctx, p, cur, keys)
+		if err != nil {
+			return Result{}, err
+		}
+	}
+	return res, nil
+}
+
+// run sends the plan's statement and sums the rows it returns.
+func (e Engine) run(ctx context.Context, p plan) (aggregate, error) {
+	stmt, args := p.build(e.Dialect)
+	rows, err := e.DB.QueryContext(ctx, db.Rebind(e.Dialect, stmt), args...)
+	if err != nil {
+		return aggregate{}, fmt.Errorf("metrics: query %s: %w", p.sourceName(), err)
+	}
+	defer func() { _ = rows.Close() }()
+	return p.read(rows)
 }
 
 // sourceName names the source for errors: the summary table or the fact table.
@@ -68,23 +104,22 @@ func (p plan) sourceName() string {
 	return p.model.Facts.TableName(p.model)
 }
 
-// read sums the returned rows into buckets. Groups maps each group key to its values.
-func (p plan) read(rows *sql.Rows) (map[bucketKey][]decimal.Decimal, map[string][]string, error) {
-	sums := map[bucketKey][]decimal.Decimal{}
-	groups := map[string][]string{}
+// read sums the returned rows into buckets.
+func (p plan) read(rows *sql.Rows) (aggregate, error) {
+	agg := aggregate{sums: map[bucketKey]bucketSums{}, groups: map[string][]string{}}
 	for rows.Next() {
-		if err := p.addRow(rows, sums, groups); err != nil {
-			return nil, nil, err
+		if err := p.addRow(rows, agg); err != nil {
+			return aggregate{}, err
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, nil, fmt.Errorf("metrics: read rows: %w", err)
+		return aggregate{}, fmt.Errorf("metrics: read rows: %w", err)
 	}
-	return sums, groups, nil
+	return agg, nil
 }
 
 // addRow scans one returned row and adds its values to its bucket.
-func (p plan) addRow(rows *sql.Rows, sums map[bucketKey][]decimal.Decimal, groups map[string][]string) error {
+func (p plan) addRow(rows *sql.Rows, agg aggregate) error {
 	var day any
 	dims := make([]sql.NullString, len(p.dims))
 	vals := make([]sql.NullString, len(p.series))
@@ -102,16 +137,16 @@ func (p plan) addRow(rows *sql.Rows, sums map[bucketKey][]decimal.Decimal, group
 		group[i] = d.String
 	}
 	key := strings.Join(group, groupSep)
-	groups[key] = group
+	agg.groups[key] = group
 	bk := bucketKey{period: toDate(periodStart(t, p.grain)), group: key}
-	if sums[bk] == nil {
-		sums[bk] = make([]decimal.Decimal, len(p.series))
+	if agg.sums[bk] == nil {
+		agg.sums[bk] = make(bucketSums, len(p.series))
 	}
-	return p.accumulate(sums[bk], vals)
+	return p.accumulate(agg.sums[bk], vals)
 }
 
 // accumulate adds each returned series value to the bucket. A NULL sum adds nothing.
-func (p plan) accumulate(bucket []decimal.Decimal, vals []sql.NullString) error {
+func (p plan) accumulate(bucket bucketSums, vals []sql.NullString) error {
 	for i, v := range vals {
 		if !v.Valid {
 			continue
@@ -134,44 +169,63 @@ func nullStringDests(vals []sql.NullString) []any {
 	return dests
 }
 
-// result gap-fills every group across the range and computes each output from its component sums.
-func (p plan) result(sums map[bucketKey][]decimal.Decimal, groups map[string][]string) Result {
-	keys := make([]string, 0, len(groups))
-	for k := range groups {
+// keys lists the group keys a result is built from, in order. A query without dimensions has one
+// group, so the total is one group even when no fact matched.
+func (p plan) keys(agg aggregate) []string {
+	if len(p.dims) == 0 {
+		return []string{""}
+	}
+	keys := make([]string, 0, len(agg.groups))
+	for k := range agg.groups {
 		keys = append(keys, k)
 	}
-	if len(p.dims) == 0 {
-		keys = []string{""} // the total is one group even when no fact matched
-	}
 	slices.Sort(keys)
-	out := Result{Metrics: make([]string, len(p.outputs)), Dimensions: slices.Clone(p.dims)}
-	for i, o := range p.outputs {
-		out.Metrics[i] = o.metric
-	}
+	return keys
+}
+
+// rows gap-fills every key across [from, to] and computes each requested metric from its component
+// sums. Rows come out key by key, bucket by bucket, so two calls with equal keys and equal bucket
+// counts line up by position.
+func (p plan) rows(agg aggregate, keys []string, from, to tenanttime.Date) []Row {
+	starts := bucketStarts(from, to, p.grain)
+	out := make([]Row, 0, len(keys)*len(starts))
 	for _, key := range keys {
-		for period := periodStart(toTime(p.from), p.grain); !period.After(toTime(p.to)); period = nextPeriod(period, p.grain) {
-			bucket := sums[bucketKey{period: toDate(period), group: key}]
+		for _, start := range starts {
+			period := toDate(start)
+			bucket := agg.sums[bucketKey{period: period, group: key}]
 			if bucket == nil {
-				bucket = make([]decimal.Decimal, len(p.series))
+				bucket = make(bucketSums, len(p.series))
 			}
-			out.Rows = append(out.Rows, Row{Period: toDate(period), Group: groups[key], Values: p.values(bucket)})
+			row := Row{Period: period, Group: agg.groups[key], Values: p.values(bucket)}
+			if key == otherGroup {
+				row.Label = otherLabel
+			}
+			out = append(out, row)
 		}
 	}
 	return out
 }
 
-// values computes each output of one bucket. A ratio divides its summed components; a zero
-// denominator gives null. Simple outputs are the summed value, zero when the bucket is empty.
-func (p plan) values(bucket []decimal.Decimal) []decimal.NullDecimal {
-	vals := make([]decimal.NullDecimal, len(p.outputs))
-	for i, o := range p.outputs {
-		if o.kind != KindRatio {
-			vals[i] = decimal.NullDecimal{Decimal: bucket[o.num], Valid: true}
-			continue
+// values computes each requested metric of one bucket. Metrics compute in plan order, so a derived
+// metric reads values that already exist. A ratio or derived metric is null when a divisor is zero
+// or an operand is null. Simple values are the summed value, zero when the bucket is empty.
+func (p plan) values(bucket bucketSums) []decimal.NullDecimal {
+	computed := make([]decimal.NullDecimal, len(p.metrics))
+	for i, o := range p.metrics {
+		switch o.kind {
+		case KindDerived:
+			computed[i] = o.expr.eval(computed)
+		case KindRatio:
+			if den := bucket[o.den]; !den.IsZero() {
+				computed[i] = decimal.NullDecimal{Decimal: bucket[o.num].Div(den), Valid: true}
+			}
+		default:
+			computed[i] = decimal.NullDecimal{Decimal: bucket[o.num], Valid: true}
 		}
-		if den := bucket[o.den]; !den.IsZero() {
-			vals[i] = decimal.NullDecimal{Decimal: bucket[o.num].Div(den), Valid: true}
-		}
+	}
+	vals := make([]decimal.NullDecimal, len(p.requested))
+	for i, r := range p.requested {
+		vals[i] = computed[r]
 	}
 	return vals
 }
