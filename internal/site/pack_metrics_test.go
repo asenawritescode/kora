@@ -1,9 +1,14 @@
 package site
 
 import (
+	"encoding/json"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
+
+	"github.com/asenawritescode/kora/internal/metrics"
 )
 
 const posMetricCount = 4
@@ -47,5 +52,47 @@ func TestUploadedPackRejectsBadMetricFile(t *testing.T) {
 	snap, _, err := parsePackPart("pos", good)
 	if err != nil || len(snap.Metrics) != posMetricCount {
 		t.Fatalf("upload carried %d metrics, %v; want %d", len(snap.Metrics), err, posMetricCount)
+	}
+}
+
+// decodeMetrics turns the snapshot documents back into definitions, sorted by name.
+func decodeMetrics(t *testing.T, raw []json.RawMessage) []metrics.Metric {
+	t.Helper()
+	out := make([]metrics.Metric, 0, len(raw))
+	for _, r := range raw {
+		var m metrics.Metric
+		if err := json.Unmarshal(r, &m); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, m)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// The directory, package and upload install paths decode to the same metric definitions.
+func TestMetricDefinitionsAgreeAcrossInstallPaths(t *testing.T) {
+	packDir := filepath.Join("..", "..", "config", "pos")
+	dir, err := parsePackSnapshot(packDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := readPackFiles(t, packDir, "")
+	pkg, _, err := ParseConfigPack("pos", files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upload, _, err := parsePackPart("pos", files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := decodeMetrics(t, dir.Metrics)
+	if len(want) != posMetricCount {
+		t.Fatalf("directory install carried %d metrics; want %d", len(want), posMetricCount)
+	}
+	for name, raw := range map[string][]json.RawMessage{"package": pkg.Metrics, "upload": upload.Metrics} {
+		if got := decodeMetrics(t, raw); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s install metrics = %+v; want %+v", name, got, want)
+		}
 	}
 }

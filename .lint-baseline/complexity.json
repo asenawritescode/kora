@@ -1065,9 +1065,9 @@
    "statements": 75
   },
   "internal/cli::runConfigImportForSiteContext": {
-   "cognitive": 27,
-   "cyclomatic": 27,
-   "statements": 68
+   "cognitive": 23,
+   "cyclomatic": 24,
+   "statements": 60
   },
   "internal/cli::runConfigRollbackContext": {
    "cognitive": 21,
@@ -1112,10 +1112,6 @@
   "internal/configstore::(*ModuleStore).BeginPublishedOperationAttempt": {
    "cyclomatic": 37
   },
-  "internal/configstore::(*ModuleStore).EnsureCapabilityLease": {
-   "cognitive": 18,
-   "cyclomatic": 18
-  },
   "internal/configstore::(*ModuleStore).LoadPublishedOperationAttempt": {
    "cognitive": 21,
    "cyclomatic": 47
@@ -1144,9 +1140,6 @@
   },
   "internal/configstore::ApplyModuleLifecycleChangeTx": {
    "statements": 42
-  },
-  "internal/configstore::CollectSnapshot": {
-   "statements": 43
   },
   "internal/configstore::CompleteManagementActivation": {
    "cyclomatic": 16
@@ -1271,9 +1264,9 @@
    "cognitive": 16
   },
   "internal/doctype::buildSnapshot": {
-   "cognitive": 69,
-   "cyclomatic": 33,
-   "statements": 76
+   "cognitive": 65,
+   "cyclomatic": 31,
+   "statements": 71
   },
   "internal/doctype::checkFieldUnknownKeys": {
    "cognitive": 69,
@@ -1349,7 +1342,7 @@
   "internal/doctype::validateDocConstraint": {
    "cognitive": 72,
    "cyclomatic": 46,
-   "statements": 87
+   "statements": 86
   },
   "internal/doctype::validatePageActionInput": {
    "cognitive": 70,
@@ -1551,9 +1544,9 @@
    "statements": 69
   },
   "internal/engine::bindOwnedPackageResource": {
-   "cognitive": 101,
-   "cyclomatic": 55,
-   "statements": 74
+   "cognitive": 55,
+   "cyclomatic": 26,
+   "statements": 43
   },
   "internal/engine::collectLoadedStartupTenants": {
    "cognitive": 17
@@ -1635,11 +1628,6 @@
    "cognitive": 21,
    "cyclomatic": 18,
    "statements": 46
-  },
-  "internal/engine::packageContainsResource": {
-   "cognitive": 85,
-   "cyclomatic": 48,
-   "statements": 55
   },
   "internal/engine::processOneDurableLifecycleHook": {
    "cognitive": 35,
@@ -2481,8 +2469,8 @@
    "cyclomatic": 36
   },
   "internal/site::(packResourceNames).add": {
-   "cognitive": 43,
-   "cyclomatic": 31
+   "cognitive": 37,
+   "cyclomatic": 28
   },
   "internal/site::BootstrapSystemTables": {
    "cognitive": 91,
@@ -2559,7 +2547,7 @@
    "statements": 67
   },
   "internal/site::add": {
-   "statements": 71
+   "statements": 65
   },
   "internal/site::addPackCommands": {
    "cognitive": 22,

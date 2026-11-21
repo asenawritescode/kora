@@ -3,7 +3,6 @@ package engine
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/asenawritescode/kora/contract"
@@ -157,48 +156,8 @@ func bindOwnedPackageResource(snapshot *doctype.ConfigSnapshot, owner contract.M
 				return true, setDocTypeOwner(dt)
 			}
 		}
-	case "role":
-		for _, value := range snapshot.Roles {
-			if value != nil && value.Name == resource.Ref.Name {
-				return true, nil
-			}
-		}
-	case "permission":
-		for _, value := range snapshot.Permissions {
-			if value != nil && value.Doctype+"/"+value.Role == resource.Ref.Name {
-				return true, nil
-			}
-		}
-	case "workflow":
-		for _, value := range snapshot.WorkflowDefinitions {
-			if string(value.ID) == resource.Ref.Name {
-				return true, nil
-			}
-		}
-	case "view":
-		for _, value := range snapshot.Views {
-			if value != nil && value.Name == resource.Ref.Name {
-				return true, nil
-			}
-		}
-	case "metric":
-		for _, value := range snapshot.AnalyticsMetrics {
-			if value != nil && value.Name == resource.Ref.Name {
-				return true, nil
-			}
-		}
-	case "script":
-		for _, value := range snapshot.Scripts {
-			if value != nil && value.Name == resource.Ref.Name {
-				return true, nil
-			}
-		}
-	case "job":
-		for _, value := range snapshot.ScheduledJobs {
-			if value.Name == resource.Ref.Name {
-				return true, nil
-			}
-		}
+	case "role", "permission", "workflow", "view", "metric", "script", "job", "report", "metric_definition":
+		return packageContainsResource(snapshot, resource.Ref.Namespace, resource.Ref.Name), nil
 	case "query":
 		for _, module := range snapshot.Modules {
 			if module.ID != owner {
@@ -232,21 +191,6 @@ func bindOwnedPackageResource(snapshot *doctype.ConfigSnapshot, owner contract.M
 						return true, nil
 					}
 				}
-			}
-		}
-	case "report":
-		for _, value := range snapshot.Reports {
-			var report struct {
-				Name string `json:"name"`
-			}
-			if json.Unmarshal(value, &report) == nil && report.Name == resource.Ref.Name {
-				return true, nil
-			}
-		}
-	case "metric_definition":
-		for _, value := range snapshot.Metrics {
-			if name, err := metricName(value); err == nil && name == resource.Ref.Name {
-				return true, nil
 			}
 		}
 	}
