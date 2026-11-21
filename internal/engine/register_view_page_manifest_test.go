@@ -49,7 +49,7 @@ func assertPageManifestEndpointsServeRegisterView(t *testing.T, database *sql.DB
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, err := mergeManagementPackageSnapshot(current, incoming)
+	target, err := mergeManagementPackageSnapshot(current, incoming, packageAuthority{})
 	if err != nil {
 		t.Fatalf("merge package: %v", err)
 	}

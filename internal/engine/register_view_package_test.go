@@ -65,7 +65,7 @@ components:
 			if err != nil {
 				t.Fatal(err)
 			}
-			target, err := mergeManagementPackageSnapshot(current, incoming)
+			target, err := mergeManagementPackageSnapshot(current, incoming, packageAuthority{})
 			if err != nil {
 				t.Fatalf("merge package: %v", err)
 			}
@@ -126,7 +126,7 @@ func TestPOSPackRegisterViewReachesTenant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, err := mergeManagementPackageSnapshot(current, incoming)
+	target, err := mergeManagementPackageSnapshot(current, incoming, packageAuthority{})
 	if err != nil {
 		t.Fatalf("merge package: %v", err)
 	}

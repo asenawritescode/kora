@@ -1604,7 +1604,7 @@
    "statements": 41
   },
   "internal/engine::mergeModuleDescriptors": {
-   "cognitive": 20
+   "cognitive": 17
   },
   "internal/engine::mergeProviderSelections": {
    "cognitive": 24

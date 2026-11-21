@@ -92,7 +92,7 @@ func TestMergeManagementPackageSnapshotMergesCommandsQueriesAndPrintFormats(t *t
 			cur := tc.current
 			for i := 0; i < tc.runs; i++ {
 				var err error
-				if cur, err = mergeManagementPackageSnapshot(cur, pkg); err != nil {
+				if cur, err = mergeManagementPackageSnapshot(cur, pkg, packageAuthority{}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -112,7 +112,7 @@ func TestMergeManagementPackageSnapshotRejectsUndecodableConfig(t *testing.T) {
 		"print format": configSnapshot(t, nil, nil, []json.RawMessage{bad}),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := mergeManagementPackageSnapshot(configSnapshot(t, nil, nil, nil), in); err == nil {
+			if _, err := mergeManagementPackageSnapshot(configSnapshot(t, nil, nil, nil), in, packageAuthority{}); err == nil {
 				t.Fatal("undecodable entry accepted")
 			}
 		})

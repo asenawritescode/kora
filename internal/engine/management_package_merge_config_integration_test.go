@@ -36,7 +36,7 @@ func TestMergedPackageKeepsCommandsQueriesAndPrintFormatsAcrossDialects(t *testi
 			pkg.Commands = append(pkg.Commands, cmdRaw("shop", "sell", 1))
 			pkg.Queries = append(pkg.Queries, queryRaw(t, "shop.core", "items", "name"))
 			pkg.PrintFormats = append(pkg.PrintFormats, printRaw("receipt", "r"))
-			merged, err := mergeManagementPackageSnapshot(configSnapshot(t, nil, nil, nil), pkg)
+			merged, err := mergeManagementPackageSnapshot(configSnapshot(t, nil, nil, nil), pkg, packageAuthority{})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
@@ -33,7 +35,7 @@ func mergeManagementPackageConstraints(existing []contract.InstalledPackage, inc
 // mergeManagementPackageSnapshot preserves tenant-owned configuration and
 // overlays only entities named by the package. Package import is additive and
 // upserting; omission from a package never means deletion from a tenant.
-func mergeManagementPackageSnapshot(current, incoming *doctype.ConfigSnapshot) (*doctype.ConfigSnapshot, error) {
+func mergeManagementPackageSnapshot(current, incoming *doctype.ConfigSnapshot, authority packageAuthority) (*doctype.ConfigSnapshot, error) {
 	if current == nil || incoming == nil {
 		return nil, fmt.Errorf("package activation requires current and incoming config snapshots")
 	}
@@ -48,15 +50,31 @@ func mergeManagementPackageSnapshot(current, incoming *doctype.ConfigSnapshot) (
 	merged.Views = mergeSnapshotItems(current.Views, incoming.Views, func(v *doctype.View) string { return v.Name })
 	merged.AnalyticsMetrics = mergeSnapshotItems(current.AnalyticsMetrics, incoming.AnalyticsMetrics, func(v *doctype.AnalyticsMetricConfig) string { return v.Name })
 	merged.Scripts = mergeSnapshotItems(current.Scripts, incoming.Scripts, func(v *doctype.ScriptSnapshot) string { return v.Name })
-	modules, err := mergeModuleDescriptors(current.Modules, incoming.Modules)
+	modules, err := mergeModuleDescriptors(current.Modules, incoming.Modules, authority)
 	if err != nil {
 		return nil, err
 	}
 	merged.Modules = modules
+	if err := mergeRawPackageItems(&merged, current, incoming); err != nil {
+		return nil, err
+	}
+	merged.Reports = append([]json.RawMessage(nil), current.Reports...)
+	merged.ScheduledJobs = mergeScheduledJobs(current.ScheduledJobs, incoming.ScheduledJobs)
+	if err := validateMergedViewRoutes(merged.Views); err != nil {
+		return nil, err
+	}
+	return &merged, nil
+}
+
+// mergeRawPackageItems merges the raw-encoded config (commands, queries, print
+// formats) and then drops what replaced modules owned that the package no
+// longer ships. Queries are parsed against the merged record types.
+func mergeRawPackageItems(merged *doctype.ConfigSnapshot, current, incoming *doctype.ConfigSnapshot) error {
 	registry := doctype.NewRegistry()
 	for _, dt := range merged.DocTypes {
 		registry.Register(dt)
 	}
+	var err error
 	if merged.Commands, err = mergeRawSnapshotItems(current.Commands, incoming.Commands, func(raw json.RawMessage) (string, error) {
 		def, err := kernel.ParseCommandResourceJSON(raw)
 		if err != nil {
@@ -64,7 +82,7 @@ func mergeManagementPackageSnapshot(current, incoming *doctype.ConfigSnapshot) (
 		}
 		return def.Namespace + "." + def.Name, nil
 	}); err != nil {
-		return nil, fmt.Errorf("merge package commands: %w", err)
+		return fmt.Errorf("merge package commands: %w", err)
 	}
 	if merged.Queries, err = mergeRawSnapshotItems(current.Queries, incoming.Queries, func(raw json.RawMessage) (string, error) {
 		def, err := query.Parse(raw, registry)
@@ -73,7 +91,7 @@ func mergeManagementPackageSnapshot(current, incoming *doctype.ConfigSnapshot) (
 		}
 		return def.ModuleOwnerID + "/" + def.Name, nil
 	}); err != nil {
-		return nil, fmt.Errorf("merge package queries: %w", err)
+		return fmt.Errorf("merge package queries: %w", err)
 	}
 	if merged.PrintFormats, err = mergeRawSnapshotItems(current.PrintFormats, incoming.PrintFormats, func(raw json.RawMessage) (string, error) {
 		def, err := print.Decode(raw)
@@ -82,14 +100,105 @@ func mergeManagementPackageSnapshot(current, incoming *doctype.ConfigSnapshot) (
 		}
 		return def.Name, nil
 	}); err != nil {
-		return nil, fmt.Errorf("merge package print formats: %w", err)
+		return fmt.Errorf("merge package print formats: %w", err)
 	}
-	merged.Reports = append([]json.RawMessage(nil), current.Reports...)
-	merged.ScheduledJobs = mergeScheduledJobs(current.ScheduledJobs, incoming.ScheduledJobs)
-	if err := validateMergedViewRoutes(merged.Views); err != nil {
-		return nil, err
+	return dropReplacedModuleItems(merged, incoming, replacedModuleIDs(current.Modules, incoming.Modules), registry)
+}
+
+// dropReplacedModuleItems removes the commands, queries and record types that a
+// replaced module owned in the tenant and the newer package no longer ships.
+// Tenant data in a dropped record type stays in its table, as with any package
+// that omits an entity.
+func dropReplacedModuleItems(merged *doctype.ConfigSnapshot, incoming *doctype.ConfigSnapshot, replaced map[contract.ModuleID]bool, registry *doctype.Registry) error {
+	if len(replaced) == 0 {
+		return nil
 	}
-	return &merged, nil
+	shippedDocTypes := make(map[string]bool, len(incoming.DocTypes))
+	for _, dt := range incoming.DocTypes {
+		if dt != nil {
+			shippedDocTypes[dt.Name] = true
+		}
+	}
+	merged.DocTypes = slices.DeleteFunc(merged.DocTypes, func(dt *doctype.DocType) bool {
+		return dt != nil && replaced[contract.ModuleID(dt.ModuleOwnerID)] && !shippedDocTypes[dt.Name]
+	})
+	shippedCommands, err := rawIdentities(incoming.Commands, commandIdentity)
+	if err != nil {
+		return err
+	}
+	if merged.Commands, err = dropRawItems(merged.Commands, replaced, shippedCommands, commandIdentity); err != nil {
+		return err
+	}
+	queryIdentity := func(raw json.RawMessage) (string, contract.ModuleID, error) { return queryIdentityIn(raw, registry) }
+	shippedQueries, err := rawIdentities(incoming.Queries, queryIdentity)
+	if err != nil {
+		return err
+	}
+	if merged.Queries, err = dropRawItems(merged.Queries, replaced, shippedQueries, queryIdentity); err != nil {
+		return err
+	}
+	return nil
+}
+
+// replacedModuleIDs lists the installed modules that the package replaces with a different version.
+func replacedModuleIDs(current, incoming []contract.ModuleDescriptor) map[contract.ModuleID]bool {
+	installed := make(map[contract.ModuleID]string, len(current))
+	for _, module := range current {
+		installed[module.ID] = module.Version
+	}
+	replaced := make(map[contract.ModuleID]bool)
+	for _, module := range incoming {
+		if version, ok := installed[module.ID]; ok && version != module.Version {
+			replaced[module.ID] = true
+		}
+	}
+	return replaced
+}
+
+// rawIdentity names a raw config entry and the module that owns it.
+type rawIdentity func(json.RawMessage) (string, contract.ModuleID, error)
+
+func commandIdentity(raw json.RawMessage) (string, contract.ModuleID, error) {
+	def, err := kernel.ParseCommandResourceJSON(raw)
+	if err != nil {
+		return "", "", err
+	}
+	return def.Namespace + "." + def.Name, def.ModuleOwnerID, nil
+}
+
+func queryIdentityIn(raw json.RawMessage, registry *doctype.Registry) (string, contract.ModuleID, error) {
+	def, err := query.Parse(raw, registry)
+	if err != nil {
+		return "", "", err
+	}
+	return def.ModuleOwnerID + "/" + def.Name, contract.ModuleID(def.ModuleOwnerID), nil
+}
+
+func rawIdentities(items []json.RawMessage, identify rawIdentity) (map[string]bool, error) {
+	keys := make(map[string]bool, len(items))
+	for _, raw := range items {
+		key, _, err := identify(raw)
+		if err != nil {
+			return nil, err
+		}
+		keys[key] = true
+	}
+	return keys, nil
+}
+
+// dropRawItems keeps every entry except those a replaced module owns that the package does not ship.
+func dropRawItems(items []json.RawMessage, replaced map[contract.ModuleID]bool, shipped map[string]bool, identify rawIdentity) ([]json.RawMessage, error) {
+	kept := make([]json.RawMessage, 0, len(items))
+	for _, raw := range items {
+		key, owner, err := identify(raw)
+		if err != nil {
+			return nil, err
+		}
+		if !(replaced[owner] && !shipped[key]) {
+			kept = append(kept, raw)
+		}
+	}
+	return kept, nil
 }
 
 func validateOwnedResourceReplacements(current, incoming *doctype.ConfigSnapshot) error {
@@ -206,7 +315,90 @@ func packageContainsResource(snapshot *doctype.ConfigSnapshot, namespace, name s
 	return false
 }
 
-func mergeModuleDescriptors(current, incoming []contract.ModuleDescriptor) ([]contract.ModuleDescriptor, error) {
+// packageAuthority is what a package activation may do to modules the tenant
+// already has: it names the package being activated and the package that
+// installed each current module. The zero value authorizes no replacement.
+type packageAuthority struct {
+	packageID   string
+	installedBy map[contract.ModuleID]string
+}
+
+// newPackageAuthority reads which installed package owns each module through
+// the artifact digest that recorded the module's installation.
+func newPackageAuthority(release contract.InstalledPackage, installed contract.ModuleSnapshot) packageAuthority {
+	packageByDigest := make(map[string]string, len(installed.Packages))
+	for _, pkg := range installed.Packages {
+		packageByDigest[pkg.Digest] = pkg.PackageID
+	}
+	installedBy := make(map[contract.ModuleID]string, len(installed.Installations))
+	for _, installation := range installed.Installations {
+		installedBy[installation.ModuleID] = packageByDigest[installation.ArtifactDigest]
+	}
+	return packageAuthority{packageID: release.PackageID, installedBy: installedBy}
+}
+
+// moduleVersion is a module version of one to three dot-separated decimal
+// numbers, such as "1", "1.2" or "1.2.3". Pack versions reach it as semver.
+type moduleVersion string
+
+func (v moduleVersion) parts() ([3]uint64, error) {
+	var out [3]uint64
+	pieces := strings.Split(string(v), ".")
+	if len(pieces) > len(out) {
+		return out, fmt.Errorf("module version %q has more than three components", v)
+	}
+	for i, piece := range pieces {
+		n, err := strconv.ParseUint(piece, 10, 64)
+		if err != nil {
+			return out, fmt.Errorf("module version %q is not dotted decimal numbers", v)
+		}
+		out[i] = n
+	}
+	return out, nil
+}
+
+// newerThan reports whether v is strictly greater than installed.
+func (v moduleVersion) newerThan(installed moduleVersion) (bool, error) {
+	next, err := v.parts()
+	if err != nil {
+		return false, err
+	}
+	current, err := installed.parts()
+	if err != nil {
+		return false, err
+	}
+	return slices.Compare(next[:], current[:]) > 0, nil
+}
+
+// authorizeModuleReplacement decides whether an incoming module may replace an
+// installed one. The same version must be identical. A different version must
+// be strictly newer and come from the package that installed the module.
+func authorizeModuleReplacement(authority packageAuthority, installed, next contract.ModuleDescriptor) error {
+	if installed.Version == next.Version {
+		previous, _ := json.Marshal(installed)
+		incoming, _ := json.Marshal(next)
+		if string(previous) != string(incoming) {
+			return fmt.Errorf("module %q content cannot change without an authorized version update", next.ID)
+		}
+		return nil
+	}
+	newer, err := moduleVersion(next.Version).newerThan(moduleVersion(installed.Version))
+	if err != nil {
+		return fmt.Errorf("module %q version %q is not a comparable version: %w", next.ID, next.Version, err)
+	}
+	if !newer {
+		return fmt.Errorf("module %q version %q does not replace installed version %q: downgrades are refused", next.ID, next.Version, installed.Version)
+	}
+	if authority.packageID == "" {
+		return fmt.Errorf("module %q update requires explicit authorized replacement", next.ID)
+	}
+	if owner := authority.installedBy[next.ID]; owner != authority.packageID {
+		return fmt.Errorf("module %q is installed by package %q, so package %q cannot replace it", next.ID, owner, authority.packageID)
+	}
+	return nil
+}
+
+func mergeModuleDescriptors(current, incoming []contract.ModuleDescriptor, authority packageAuthority) ([]contract.ModuleDescriptor, error) {
 	byID := make(map[contract.ModuleID]contract.ModuleDescriptor, len(current)+len(incoming))
 	owners := make(map[string]contract.ModuleID)
 	for _, module := range current {
@@ -217,13 +409,8 @@ func mergeModuleDescriptors(current, incoming []contract.ModuleDescriptor) ([]co
 	}
 	for _, module := range incoming {
 		if existing, ok := byID[module.ID]; ok {
-			if existing.Version != module.Version {
-				return nil, fmt.Errorf("module %q update requires explicit authorized replacement", module.ID)
-			}
-			previous, _ := json.Marshal(existing)
-			next, _ := json.Marshal(module)
-			if string(previous) != string(next) {
-				return nil, fmt.Errorf("module %q content cannot change without an authorized version update", module.ID)
+			if err := authorizeModuleReplacement(authority, existing, module); err != nil {
+				return nil, err
 			}
 		}
 		for _, resource := range module.Resources {
