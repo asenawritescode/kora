@@ -42,14 +42,14 @@ func TestExploreCatalogListsFactRecordTypes(t *testing.T) {
 	if expense.Measures[1].Format != "currency" || expense.Measures[1].Label != "Amount" {
 		t.Errorf("amount measure = %+v, want currency labelled Amount", expense.Measures[1])
 	}
-	// status is the status column, not a dimension: the fact table reserves that name.
-	if len(expense.Dimensions) != 1 || expense.Dimensions[0].Kind != "Link" {
+	// The status field is offered once, as the status dimension, after the declared dimensions.
+	if len(expense.Dimensions) != 2 || expense.Dimensions[0].Kind != "Link" || expense.Dimensions[1].Path != "status" {
 		t.Errorf("expense dimensions = %+v", expense.Dimensions)
 	}
-	// Sale's child-table dimension is left out; its header dimension and measure stay.
+	// Sale's child-table dimension is left out; its header dimension, status and measure stay.
 	sale := got[1]
-	if len(sale.Dimensions) != 1 || sale.Dimensions[0].Path != "register" {
-		t.Errorf("sale dimensions = %+v, want only register", sale.Dimensions)
+	if len(sale.Dimensions) != 2 || sale.Dimensions[0].Path != "register" || sale.Dimensions[1].Path != "status" {
+		t.Errorf("sale dimensions = %+v, want register and status", sale.Dimensions)
 	}
 	if sale.Description != "Till sales" || sale.TimeField != "creation" {
 		t.Errorf("sale = %+v", sale)
@@ -130,4 +130,39 @@ func readAll(docs []*doctype.DocType) map[string]bool {
 		out[dt.Name] = true
 	}
 	return out
+}
+
+// A status field adds a Status dimension to the catalog, whether or not the record type declares measures.
+func TestExploreCatalogOffersStatusWhenThereIsAStatusField(t *testing.T) {
+	cases := []struct {
+		name        string
+		statusField string
+		measures    []doctype.FactMeasure
+		want        bool
+	}{
+		{"status field and no measures", "status", nil, true},
+		{"status field and a measure", "status", []doctype.FactMeasure{{Field: "amount"}}, true},
+		{"no status field", "", []doctype.FactMeasure{{Field: "amount"}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dt := &doctype.DocType{Name: "Expense", Fields: []doctype.Field{
+				{Fieldname: "amount", Label: "Amount", Fieldtype: "Currency"},
+				{Fieldname: "status", Label: "Status", Fieldtype: "Select"},
+			}, Facts: &doctype.FactModel{Time: "creation", StatusField: tc.statusField, Measures: tc.measures}}
+			cat := ExploreCatalog([]*doctype.DocType{dt}, map[string]bool{"Expense": true}, nil)
+			if len(cat) != 1 {
+				t.Fatalf("catalog = %d record types, want 1", len(cat))
+			}
+			got := false
+			for _, d := range cat[0].Dimensions {
+				if d.Path == "status" {
+					got = d.Label == "Status" && d.Kind == "Select"
+				}
+			}
+			if got != tc.want {
+				t.Fatalf("status dimension offered = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }

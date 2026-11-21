@@ -81,6 +81,16 @@ func (m FactMeasure) ColumnName() string {
 // ColumnName is the dimension's output column: the leaf of Field.
 func (d FactDimension) ColumnName() string { return factPath(d.Field).leaf() }
 
+// StatusColumn is the fact column that holds the value of the status field. On a model with a status field
+// it is also a dimension every query can group by, without a declared dimension.
+const StatusColumn = "status"
+
+// GroupsByStatus reports whether column names the status dimension: the status field's value, on a model
+// that has a status field.
+func (f *FactModel) GroupsByStatus(column string) bool {
+	return f != nil && f.StatusField != "" && column == StatusColumn
+}
+
 // TableName is the fact table of a record type.
 func (f *FactModel) TableName(dt *DocType) string {
 	return "_kora_fact_" + strings.ToLower(strings.ReplaceAll(dt.Name, " ", "_"))
@@ -191,9 +201,6 @@ func (f *FactModel) checkLines(c *factChecks, reg map[string]*DocType) {
 }
 
 func (f *FactModel) checkMeasures(c *factChecks) {
-	if len(f.Measures) == 0 {
-		c.bad("facts.measures", "facts needs at least one measure")
-	}
 	for _, m := range f.Measures {
 		fld, why := f.column(c.dt, c.lines, factPath(m.Field))
 		if why != "" {

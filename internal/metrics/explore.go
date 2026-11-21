@@ -82,6 +82,9 @@ func exploreRecord(dt *doctype.DocType, links exploreLinks) contract.ExploreReco
 			Label: "Distinct " + fieldLabel(dt, col), Format: "number"})
 		rec.Dimensions = append(rec.Dimensions, linkedDimensions(dt, col, col, links)...)
 	}
+	if f.StatusField != "" {
+		rec.Dimensions = append(rec.Dimensions, contract.ExploreDimension{Path: doctype.StatusColumn, Label: "Status", Kind: "Select"})
+	}
 	return rec
 }
 

@@ -298,6 +298,9 @@ func (fl Filter) validate(f *doctype.FactModel) error {
 }
 
 func isDimension(f *doctype.FactModel, column string) bool {
+	if f.GroupsByStatus(column) {
+		return true
+	}
 	for _, d := range f.Dimensions {
 		if d.ColumnName() == column {
 			return true

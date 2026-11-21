@@ -294,7 +294,7 @@ func (p *plan) addGrouping(cat Catalog, q Query) error {
 // status, and per one declared dimension, and they carry no owner. Distinct counts and dimension paths
 // need the facts.
 func (p plan) fitsSummary() bool {
-	if p.scope.Owner != "" || len(p.dims) > 1 || p.hasJoins() || p.hasLineDim() {
+	if p.scope.Owner != "" || len(p.dims) > 1 || p.hasJoins() || p.hasLineDim() || p.groupsByStatus() {
 		return false
 	}
 	usable := func(field string) bool {
@@ -335,4 +335,14 @@ func (p plan) metricNames() []string {
 		names[i] = p.metrics[r].metric
 	}
 	return names
+}
+
+// groupsByStatus reports whether a dimension of the plan is the status field's value.
+func (p plan) groupsByStatus() bool {
+	for _, d := range p.dims {
+		if p.model.Facts.GroupsByStatus(d.name) {
+			return true
+		}
+	}
+	return false
 }

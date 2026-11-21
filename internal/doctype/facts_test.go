@@ -53,7 +53,7 @@ func TestFactModelValidate(t *testing.T) {
 		{"lines table has no record type", func(dt *DocType, reg map[string]*DocType, _ *FactModel) {
 			delete(reg, "Sale Item")
 		}, "has no record type"},
-		{"no measures", func(_ *DocType, _ map[string]*DocType, f *FactModel) { f.Measures = nil }, "at least one measure"},
+		{"no measures is valid", func(_ *DocType, _ map[string]*DocType, f *FactModel) { f.Measures = nil }, ""},
 		{"currency field is a dimension linked to Currency", func(dt *DocType, _ map[string]*DocType, f *FactModel) {
 			dt.Fields = append(dt.Fields, Field{Fieldname: "currency", Fieldtype: "Link", Options: "Currency"})
 			f.Dimensions = append(f.Dimensions, FactDimension{Field: "currency"})

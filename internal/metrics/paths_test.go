@@ -163,6 +163,7 @@ func TestExploreCatalogOffersLinkedDimensions(t *testing.T) {
 		"supplier.town|1|Supplier ›",
 		"supplier.region|1|Supplier ›",
 		"supplier.region.county|2|Supplier › Region ›",
+		"status|0|",
 	}
 	if strings.Join(expense, "\\n") != strings.Join(want, "\\n") {
 		t.Errorf("dimensions =\\n%s\\nwant\\n%s", strings.Join(expense, "\\n"), strings.Join(want, "\\n"))
@@ -271,7 +272,7 @@ func TestExploreCatalogOffersLineDimensions(t *testing.T) {
 			paths = append(paths, d.Path+"|"+itoa(d.Hops)+"|"+d.Group)
 		}
 	}
-	want := "items.product|0|,items.product.product_name|1|Product ›,items.product.category|1|Product ›"
+	want := "items.product|0|,items.product.product_name|1|Product ›,items.product.category|1|Product ›,status|0|"
 	if strings.Join(paths, ",") != want {
 		t.Errorf("dimensions = %v, want %s", paths, want)
 	}

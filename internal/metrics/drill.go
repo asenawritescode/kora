@@ -64,7 +64,11 @@ func (c Catalog) Drill(req DrillRequest, clock tenanttime.Clock) (Drill, error) 
 			out.ListOpenable = false
 			continue
 		}
-		out.Filters = append(out.Filters, Filter{Field: dim, Op: "=", Value: req.Group[dim]})
+		field := dim
+		if f.GroupsByStatus(dim) {
+			field = f.StatusField // the list filters on the status field, not the fact column
+		}
+		out.Filters = append(out.Filters, Filter{Field: field, Op: "=", Value: req.Group[dim]})
 	}
 	out.Filters = append(out.Filters, timeFilters(dt, f.Time, req.From, req.To, clock)...)
 	return out, nil
@@ -116,6 +120,9 @@ func (p fieldPath) isLine() bool {
 
 // headerDimension reports whether column is a dimension read from the record itself, not its lines.
 func headerDimension(f *doctype.FactModel, column string) bool {
+	if f.GroupsByStatus(column) {
+		return true
+	}
 	for _, d := range f.Dimensions {
 		if d.ColumnName() == column {
 			return !fieldPath(d.Field).isLine()

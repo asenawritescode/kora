@@ -60,6 +60,9 @@ func factDimOf(f *doctype.FactModel, name string) (doctype.FactDimension, int, b
 			return d, 1, true
 		}
 	}
+	if f.GroupsByStatus(parts[0]) {
+		return doctype.FactDimension{Field: doctype.StatusColumn}, 1, true
+	}
 	return doctype.FactDimension{}, 0, false
 }
 
