@@ -1,0 +1,10 @@
+name: properties_lease_monthly_rent
+label: "Lease monthly rent"
+type: simple
+model: "Lease"
+measure:
+  agg: sum
+  field: monthly_rent
+time: business_date
+format: currency
+description: "Lease monthly rent from the Lease records (sum)."

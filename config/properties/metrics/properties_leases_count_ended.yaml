@@ -1,0 +1,13 @@
+name: properties_leases_count_ended
+label: "Leases: Ended"
+type: simple
+model: "Lease"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Ended"
+time: business_date
+format: number
+description: "Leases: Ended from the Lease records (count)."

@@ -1,0 +1,13 @@
+name: properties_units_count_maintenance
+label: "Units: Maintenance"
+type: simple
+model: "Unit"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Maintenance"
+time: business_date
+format: number
+description: "Units: Maintenance from the Unit records (count)."

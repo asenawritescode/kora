@@ -1,0 +1,11 @@
+name: properties_insights
+label: "Properties insights"
+description: "Figures and charts that reproduce the properties overview report."
+default_range: last_30_days
+tiles:
+  - metric: properties_units_count_vacant
+  - metric: properties_units_count_occupied
+  - metric: properties_units_count_maintenance
+  - metric: properties_leases_count_active
+  - metric: properties_leases_count_ended
+charts:

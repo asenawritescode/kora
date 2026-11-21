@@ -1,0 +1,13 @@
+name: properties_units_count_occupied
+label: "Units: Occupied"
+type: simple
+model: "Unit"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Occupied"
+time: business_date
+format: number
+description: "Units: Occupied from the Unit records (count)."
