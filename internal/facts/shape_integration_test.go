@@ -114,9 +114,18 @@ func TestModelSyncEvolvesAndQueuesOneRebuild(t *testing.T) {
 			exec(t, database.DB, dialect, fmt.Sprintf("UPDATE %s SET lease_started = %s WHERE model = 'Sale'",
 				dialect.QuoteIdent(shapeTable), dialect.NowMinusSeconds()), 300)
 
+			// The first rebuild is done and its guard points at it, so only a changed shape may queue another.
+			if n := countRows(t, database.DB, dialect, "SELECT COUNT(*) FROM "+dialect.QuoteIdent(guardTable)+" WHERE model = 'Sale' AND job_id = ?", job.ID); n != 1 {
+				t.Fatalf("guard of Sale does not point at the finished rebuild (%d rows)", n)
+			}
+
 			// The measure removed again: its column is gone, so the tables are recreated and the rebuild refills them.
+			// The guard was done, yet the change queues one rebuild, and a backfill queue meanwhile adds none.
 			mustSync(t, syncWith(v1, "worker-4"))
 			assertOpenJobs(t, database.DB, dialect, 1)
+			if queued, err := store.EnqueueOnce(ctx, "Sale"); err != nil || queued != nil {
+				t.Fatalf("EnqueueOnce while a rebuild is queued = %+v, %v; want nil", queued, err)
+			}
 			if err := probeColumn(database.DB, dialect, factHeader, "line_copy"); err == nil {
 				t.Fatal("removed column still present after recreate")
 			}
