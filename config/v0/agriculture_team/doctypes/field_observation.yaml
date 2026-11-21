@@ -79,3 +79,9 @@ fields:
       Resolved
     default: Open
     in_list_view: true
+facts:
+  time: observed_on
+  status_field: status
+  dimensions:
+    - field: severity
+    - field: observation_type

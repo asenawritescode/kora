@@ -1,0 +1,11 @@
+name: farm_crop_costs
+label: Crop-cycle costs
+type: simple
+model: Farm Cost Entry
+measure:
+  agg: sum
+  field: amount
+time: business_date
+good: down
+format: currency
+description: Amounts on the farm cost entries by incurred date (sum).

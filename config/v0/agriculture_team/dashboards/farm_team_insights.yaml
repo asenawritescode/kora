@@ -1,0 +1,27 @@
+name: farm_team_insights
+label: "Farm team insights"
+description: "Figures and charts that reproduce the farm team and crop-cycle report."
+default_range: last_30_days
+tiles:
+  - metric: farm_labor_hours
+  - metric: farm_crop_costs
+charts:
+  - id: labor_by_day
+    title: "Hours recorded by day"
+    kind: bar
+    metrics: [farm_labor_hours]
+    by: time
+    grain: day
+    compare: none
+  - id: cost_by_day
+    title: "Crop-cycle costs by day"
+    kind: line
+    metrics: [farm_crop_costs]
+    by: time
+    grain: day
+    compare: none
+  - id: open_observations
+    title: "Observations by severity"
+    kind: bar
+    metrics: [field_observations_count]
+    by: severity
