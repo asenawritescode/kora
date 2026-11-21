@@ -1,0 +1,28 @@
+name: pos_insights
+label: Insights
+description: Sales and receipts at the till.
+default_range: last_30_days
+tiles:
+  - metric: sales
+    compare: previous_period
+  - metric: receipts
+    compare: previous_period
+  - metric: average_sale
+    compare: previous_period
+charts:
+  - id: sales_by_day
+    title: Sales by day
+    kind: bar
+    metrics: [sales]
+    by: time
+    grain: day
+    compare: none
+    drill: true
+  - id: best_sellers
+    title: Best sellers
+    kind: bar
+    metrics: [items_sold]
+    by: item
+    top: 10
+    compare: none
+    drill: true

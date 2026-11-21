@@ -1,0 +1,9 @@
+name: average_sale
+label: Average sale
+type: ratio
+numerator: sales
+denominator: receipts
+time: business_date
+good: up
+format: currency
+description: Sales divided by receipts.
