@@ -17,6 +17,7 @@ var reportMetricPacks = []string{
 	"people", "projects", "properties", "rooms-bookings", "shipments", "students", "subscriptions",
 	"_parked/batch-expiry", "_parked/farm-produce", "_parked/job-cards", "_parked/manufacturing",
 	"_parked/menu-tables",
+	"_parked/erpsell",
 }
 
 // packFilesAt reads a pack's doctype, metric and dashboard files from its directory under config/.
@@ -62,7 +63,8 @@ func TestReportMetricPacksValidate(t *testing.T) {
 					dashboardCount++
 				}
 			}
-			if metricCount == 0 || dashboardCount != 1 {
+			// erpsell keeps its two selling dashboards, so a pack may ship more than one.
+			if metricCount == 0 || dashboardCount == 0 {
 				t.Fatalf("%s: got %d metrics and %d dashboards, want at least one metric and one dashboard", pack, metricCount, dashboardCount)
 			}
 			requireValidPack(t, filepath.Base(pack), files)

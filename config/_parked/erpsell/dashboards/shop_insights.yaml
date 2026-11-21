@@ -36,3 +36,34 @@ charts:
     top: 10
     compare: none
     drill: true
+  - id: sales_by_status
+    title: Sales by status
+    kind: bar
+    metrics: [sales_base_total]
+    by: status
+    compare: none
+  - id: sales_by_currency
+    title: Sales by currency
+    kind: bar
+    metrics: [sales_base_total]
+    by: currency
+    compare: none
+  - id: expenses_by_day
+    title: Expenses by day
+    kind: line
+    metrics: [expenses_base_amount]
+    by: time
+    grain: day
+    compare: none
+  - id: expenses_by_category
+    title: Expenses by category
+    kind: bar
+    metrics: [expenses_base_amount]
+    by: category
+    compare: none
+  - id: payments_by_method
+    title: Payments received by method
+    kind: bar
+    metrics: [payments_received_base]
+    by: method
+    compare: none

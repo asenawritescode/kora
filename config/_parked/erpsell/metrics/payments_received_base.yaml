@@ -1,0 +1,15 @@
+name: payments_received_base
+label: Payments received in base currency
+type: simple
+model: Payment
+measure:
+  agg: sum
+  field: base_amount
+filters:
+  - field: status
+    op: "="
+    value: Received
+time: business_date
+good: up
+format: currency
+description: Payments with status Received, in base currency (sum).

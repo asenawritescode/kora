@@ -1,0 +1,10 @@
+name: expenses_count
+label: Expenses
+type: simple
+model: Expense
+measure:
+  agg: count
+time: business_date
+good: down
+format: number
+description: Expense records (count).
