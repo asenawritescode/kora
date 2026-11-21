@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -438,12 +439,18 @@ func (m *mutation) persistItem(ctx context.Context, b *bundle, i int) (string, *
 func (m *mutation) auditItem(recordDT *doctype.DocType, doc, oldDoc *doctype.Document, beforeHash string) (string, *contract.Error) {
 	row := m.k.buildAuditRow(m.op, m.def, m.run.OpID, auditOutcome{Doctype: recordDT.Name, DocName: doc.Name, Status: contract.StatusCompleted})
 	row.BeforeHash = beforeHash
+	return m.k.writeRecordAudit(m.run.Tx, row, recordDT, oldDoc, doc)
+}
+
+// writeRecordAudit writes the audit row and the history of one written record,
+// in tx. The caller sets the row's before hash; the after hash is taken here.
+func (k *Kernel) writeRecordAudit(tx *sql.Tx, row AuditRow, recordDT *doctype.DocType, oldDoc, doc *doctype.Document) (string, *contract.Error) {
 	row.AfterHash = CanonicalDocHash(doc.Fields)
-	auditID, auditErr := m.k.writeAudit(m.run.Tx, row)
+	auditID, auditErr := k.writeAudit(tx, row)
 	if auditErr != nil {
 		return "", contract.NewError(contract.CodeInternal, "audit write failed")
 	}
-	if historyErr := m.k.writeRecordHistory(m.run.Tx, row, recordDT, oldDoc, doc); historyErr != nil {
+	if historyErr := k.writeRecordHistory(tx, row, recordDT, oldDoc, doc); historyErr != nil {
 		return "", contract.NewError(contract.CodeInternal, "record history write failed")
 	}
 	return auditID, nil
