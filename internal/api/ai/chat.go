@@ -605,12 +605,6 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 				continue
 			}
 
-			// --- Clarifying question: the turn ends here, with the choices shown to the person. ---
-			if answers.choice != nil {
-				writeChatResponse(c, endWithChoice(requestCtx, tx, answers.choice, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, Model: model, Provider: providerKey}))
-				return
-			}
-
 			// --- Stall detection ---
 			sigs := toolCallSignatures(toolCalls)
 			if stringSlicesEqual(sigs, lastSigs) {
@@ -659,6 +653,13 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 				}
 				// Cap result size.
 				toolResults[i]["content"] = capResultSize(raw, cfg.MaxToolResultChars)
+			}
+
+			// --- Clarifying question: the turn ends here, with the choices shown to the person. The question is
+			// only known once its tool has run, so the check follows the execution, before the model is asked again. ---
+			if answers.choice != nil {
+				writeChatResponse(c, endWithChoice(requestCtx, tx, answers.choice, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, Model: model, Provider: providerKey}))
+				return
 			}
 
 			// --- Error circuit breaker ---
