@@ -91,6 +91,7 @@ type Job struct {
 	StartSequence int64 // newest outbox sequence the rebuild covers; fixed at enqueue
 	Checkpoint    string
 	Processed     int64
+	Total         int64 // source records in scope, counted when the job first runs
 	Error         string
 	owner         string
 	token         int64
@@ -133,8 +134,8 @@ func (s *JobStore) insertQueued(ctx context.Context, tx *sql.Tx, id, model strin
 	}
 	job := &Job{ID: id, Model: model, Status: JobQueued, StartSequence: start, Window: window}
 	now := time.Now().UTC()
-	insert := fmt.Sprintf(`INSERT INTO %s (id, model, status, start_sequence, checkpoint, processed, error, lease_owner, fencing_token, lease_until, created_at, updated_at, scope_from, scope_to)
-		VALUES (?, ?, ?, ?, '', 0, '', '', 0, %s, ?, ?, ?, ?)`, s.table(), s.Dialect.NowTimestamp())
+	insert := fmt.Sprintf(`INSERT INTO %s (id, model, status, start_sequence, checkpoint, processed, total, error, lease_owner, fencing_token, lease_until, created_at, updated_at, scope_from, scope_to)
+		VALUES (?, ?, ?, ?, '', 0, 0, '', '', 0, %s, ?, ?, ?, ?)`, s.table(), s.Dialect.NowTimestamp())
 	args := []any{job.ID, model, string(job.Status), start, now, now, scopeValue(window, window.From), scopeValue(window, window.To)}
 	if _, err = tx.ExecContext(ctx, db.Rebind(s.Dialect, insert), args...); err != nil {
 		return nil, fmt.Errorf("facts: insert rebuild job: %w", err)
@@ -261,6 +262,98 @@ func (s *JobStore) EnqueueOnce(ctx context.Context, model string) (*Job, error) 
 	return job, nil
 }
 
+// ReplaceWhole queues a new whole-model rebuild of model after cancelling the queued and running ones, in one
+// transaction under the outbox sequence lock. It is the path for a changed fact model: the open job was built
+// for the old shape, and a stale worker's next guarded write fails. The guard then points at the new job, so
+// a backfill that finished earlier does not block the rebuild the change needs.
+func (s *JobStore) ReplaceWhole(ctx context.Context, model string) (*Job, error) {
+	if err := s.ensure(ctx); err != nil {
+		return nil, err
+	}
+	// The guard row may be created by a concurrent caller first; the update below needs it to exist either way.
+	_, _ = s.DB.ExecContext(ctx, db.Rebind(s.Dialect, "INSERT INTO "+s.guardTable()+" (model, job_id) VALUES (?, '')"), model)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("facts: begin rebuild replace: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	job, err := s.insertQueued(ctx, tx, contract.NewEventID(), model, Window{})
+	if err != nil {
+		return nil, err
+	}
+	err = s.cancelWhole(ctx, tx, model, job.ID)
+	if err != nil {
+		return nil, err
+	}
+	guard := "UPDATE " + s.guardTable() + " SET job_id = ? WHERE model = ?"
+	if _, err = tx.ExecContext(ctx, db.Rebind(s.Dialect, guard), job.ID, model); err != nil {
+		return nil, fmt.Errorf("facts: point backfill guard of %s at its rebuild: %w", model, err)
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("facts: commit rebuild replace: %w", err)
+	}
+	return job, nil
+}
+
+// cancelWhole cancels the queued or running whole-model jobs of model inside tx, except keep.
+func (s *JobStore) cancelWhole(ctx context.Context, tx *sql.Tx, model, keep string) error {
+	marks, from := inList([]JobStatus{JobQueued, JobRunning})
+	query := fmt.Sprintf("UPDATE %s SET status = ?, updated_at = ? WHERE model = ? AND scope_from IS NULL AND id <> ? AND status IN (%s)", s.table(), marks)
+	args := append([]any{string(JobCancelled), time.Now().UTC(), model, keep}, from...)
+	if _, err := tx.ExecContext(ctx, db.Rebind(s.Dialect, query), args...); err != nil {
+		return fmt.Errorf("facts: cancel queued rebuilds of %s: %w", model, err)
+	}
+	return nil
+}
+
+// Progress is how far a model's rebuild has got. Building is true while a job of the model is queued or
+// running; Fraction is processed over total across those jobs, 0 until a job has counted its source.
+type Progress struct {
+	Building bool
+	Fraction float64
+}
+
+// Progress reports every model in models. A model with no open job is ready, at Fraction 1. The job table
+// exists once a tenant's fact models have synced, so Progress runs no DDL: it is read on every query.
+func (s *JobStore) Progress(ctx context.Context, models []string) (map[string]Progress, error) {
+	out := make(map[string]Progress, len(models))
+	for _, m := range models {
+		out[m] = Progress{Fraction: 1}
+	}
+	if len(models) == 0 {
+		return out, nil
+	}
+	modelMarks, args := inList(models)
+	statusMarks, statuses := inList([]JobStatus{JobQueued, JobRunning})
+	query := fmt.Sprintf("SELECT model, total, processed FROM %s WHERE model IN (%s) AND status IN (%s)", s.table(), modelMarks, statusMarks)
+	rows, err := s.DB.QueryContext(ctx, db.Rebind(s.Dialect, query), append(args, statuses...)...)
+	if err != nil {
+		return nil, fmt.Errorf("facts: read rebuild progress: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	sums := map[string][2]int64{}
+	for rows.Next() {
+		var model string
+		var total, processed int64
+		if err = rows.Scan(&model, &total, &processed); err != nil {
+			return nil, fmt.Errorf("facts: scan rebuild progress: %w", err)
+		}
+		sum := sums[model]
+		sums[model] = [2]int64{sum[0] + total, sum[1] + processed}
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("facts: read rebuild progress: %w", err)
+	}
+	for model, sum := range sums {
+		p := Progress{Building: true}
+		if sum[0] > 0 {
+			p.Fraction = min(float64(sum[1])/float64(sum[0]), 1)
+		}
+		out[model] = p
+	}
+	return out, nil
+}
+
 // Cancel moves a queued or running job to cancelled; a running worker stops on its next write.
 func (s *JobStore) Cancel(ctx context.Context, id string) error {
 	if err := s.ensure(ctx); err != nil {
@@ -346,17 +439,24 @@ func (s *JobStore) ensure(ctx context.Context) error {
 	if _, err := s.DB.ExecContext(ctx, guardDDL(s.Dialect)); err != nil {
 		return fmt.Errorf("facts: create rebuild guard table: %w", err)
 	}
-	for _, col := range []string{"scope_from", "scope_to"} {
-		probe := fmt.Sprintf("SELECT %s FROM %s WHERE 1 = 0", s.Dialect.QuoteIdent(col), s.table()) //nolint:gosec // identifiers only, quoted by the dialect
+	for _, f := range jobColumnsAdded {
+		probe := fmt.Sprintf("SELECT %s FROM %s WHERE 1 = 0", s.Dialect.QuoteIdent(f.Fieldname), s.table()) //nolint:gosec // identifiers only, quoted by the dialect
 		if _, err := s.DB.ExecContext(ctx, probe); err == nil {
 			continue
 		}
-		if _, err := s.DB.ExecContext(ctx, s.Dialect.AddColumn(jobTable, &doctype.Field{Fieldname: col, Fieldtype: "Data"})); err != nil {
-			return fmt.Errorf("facts: add rebuild job column %s: %w", col, err)
+		if _, err := s.DB.ExecContext(ctx, s.Dialect.AddColumn(jobTable, &f)); err != nil {
+			return fmt.Errorf("facts: add rebuild job column %s: %w", f.Fieldname, err)
 		}
 	}
 	s.ready = true
 	return nil
+}
+
+// jobColumnsAdded are columns added to job tables created before they existed. The scope bounds stay NULL
+// for a whole model; total is NOT NULL and defaults to 0 until the job first runs and counts its source.
+var jobColumnsAdded = []doctype.Field{
+	{Fieldname: "scope_from", Fieldtype: "Data"}, {Fieldname: "scope_to", Fieldtype: "Data"},
+	{Fieldname: "total", Fieldtype: "Int", Reqd: true, Default: "0"},
 }
 
 // jobDDL creates the job table. IF NOT EXISTS keeps a second process's start harmless.
@@ -364,7 +464,7 @@ func jobDDL(dialect db.Dialect) string {
 	cols := []string{
 		columnDef(dialect, "id", "Data"), columnDef(dialect, "model", "Data"), columnDef(dialect, "status", "Data"),
 		columnDef(dialect, "start_sequence", "Int"), columnDef(dialect, "checkpoint", "Data"),
-		columnDef(dialect, "processed", "Int"), columnDef(dialect, "error", "Text"),
+		columnDef(dialect, "processed", "Int"), columnDef(dialect, "total", "Int"), columnDef(dialect, "error", "Text"),
 		columnDef(dialect, "lease_owner", "Data"), columnDef(dialect, "fencing_token", "Int"),
 		columnDef(dialect, "lease_until", "Datetime"), columnDef(dialect, "created_at", "Datetime"),
 		columnDef(dialect, "updated_at", "Datetime"),
@@ -391,14 +491,14 @@ func guardDDL(dialect db.Dialect) string {
 	return ddl
 }
 
-const jobColumns = "id, model, status, start_sequence, checkpoint, processed, error, fencing_token, scope_from, scope_to"
+const jobColumns = "id, model, status, start_sequence, checkpoint, processed, total, error, fencing_token, scope_from, scope_to"
 
 // scanJob reads one row selected with jobColumns.
 func scanJob(row *sql.Row) (*Job, error) {
 	var job Job
 	var status string
 	var from, to sql.NullString
-	if err := row.Scan(&job.ID, &job.Model, &status, &job.StartSequence, &job.Checkpoint, &job.Processed, &job.Error, &job.token, &from, &to); err != nil {
+	if err := row.Scan(&job.ID, &job.Model, &status, &job.StartSequence, &job.Checkpoint, &job.Processed, &job.Total, &job.Error, &job.token, &from, &to); err != nil {
 		return nil, err
 	}
 	job.Status = JobStatus(status)

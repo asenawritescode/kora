@@ -145,9 +145,18 @@ type MetricRow struct {
 //
 //contract:wire
 type MetricsMeta struct {
-	AsOf           string `json:"as_of"`
-	Tier           string `json:"tier"`
-	SourceSequence int64  `json:"source_sequence"`
+	AsOf           string          `json:"as_of"`
+	Tier           string          `json:"tier"`
+	SourceSequence int64           `json:"source_sequence"`
+	History        *MetricsHistory `json:"history,omitempty"`
+}
+
+// MetricsHistory says whether the history a query reads is still being rebuilt from source records.
+//
+//contract:wire
+type MetricsHistory struct {
+	State    string  `json:"state"`    // "building" while a rebuild of any model read is queued or running, else "ready"
+	Progress float64 `json:"progress"` // 0 to 1: the least progress across the models being rebuilt; 1 when ready
 }
 
 // MetricDrillRequest names one simple metric and the group and business days to list records for.

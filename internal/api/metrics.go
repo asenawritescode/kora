@@ -19,6 +19,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/facts"
 	"github.com/asenawritescode/kora/internal/metrics"
 	"github.com/asenawritescode/kora/internal/tenanttime"
 )
@@ -298,17 +299,46 @@ func (m metricsAPI) query(c *gin.Context) {
 		metricsRunError(c, "running metric query", err)
 		return
 	}
-	seq, err := engine.SourceSequence(ctx, modelDocs(cat, metrics.Models(ms)))
+	models := metrics.Models(ms)
+	seq, err := engine.SourceSequence(ctx, modelDocs(cat, models))
 	if err != nil {
 		metricsRunError(c, "reading metric source sequence", err)
+		return
+	}
+	history, err := queryHistory(ctx, database, siteDialectFromContext(c, m.dialect), models)
+	if err != nil {
+		metricsRunError(c, "reading metric history progress", err)
 		return
 	}
 	out := resultOf(res)
 	out.Labels = adHocLabels(cat, adHoc)
 	c.JSON(http.StatusOK, metricsEnvelope{
 		Data: out,
-		Meta: contract.MetricsMeta{AsOf: time.Now().UTC().Format(time.RFC3339), Tier: "S", SourceSequence: seq},
+		Meta: contract.MetricsMeta{AsOf: time.Now().UTC().Format(time.RFC3339), Tier: "S", SourceSequence: seq, History: history},
 	})
+}
+
+// queryHistory reads the rebuild progress of the models a query reads and summarises it.
+func queryHistory(ctx context.Context, database *sql.DB, dialect db.Dialect, models []string) (*contract.MetricsHistory, error) {
+	progress, err := (&facts.JobStore{DB: database, Dialect: dialect}).Progress(ctx, models)
+	if err != nil {
+		return nil, err
+	}
+	return summariseHistory(progress), nil
+}
+
+// summariseHistory is building while any model is rebuilding, and its progress is the least of theirs.
+// No rebuilding model, or none read, is ready.
+func summariseHistory(progress map[string]facts.Progress) *contract.MetricsHistory {
+	h := &contract.MetricsHistory{State: "ready", Progress: 1}
+	for _, p := range progress {
+		if !p.Building {
+			continue
+		}
+		h.State = "building"
+		h.Progress = min(h.Progress, p.Fraction)
+	}
+	return h
 }
 
 // queryRefusal is a query the caller may not run or that does not compile, with its response.

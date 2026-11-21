@@ -39,6 +39,9 @@ func (r *Rebuilder) Run(ctx context.Context, job *Job) error {
 	if err := r.builder().ensure(ctx, dt); err != nil {
 		return r.fail(ctx, job, err)
 	}
+	if err := r.size(ctx, job, dt); err != nil {
+		return r.fail(ctx, job, err)
+	}
 	for {
 		more, err := r.chunk(ctx, job, dt)
 		if err != nil {
@@ -52,6 +55,24 @@ func (r *Rebuilder) Run(ctx context.Context, job *Job) error {
 		}
 	}
 	return r.Store.Finish(ctx, job, JobDone, "")
+}
+
+// size counts the source records the job covers and stores the count as its total, so progress has a
+// denominator. A resumed job counts again: the total then reflects the source as it is now.
+func (r *Rebuilder) size(ctx context.Context, job *Job, dt *doctype.DocType) error {
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", r.Dialect.QuoteIdent(dt.RawTableName())) //nolint:gosec // identifiers only, quoted by the dialect
+	var args []any
+	if !job.Window.isZero() {
+		axis := r.Dialect.QuoteIdent(dt.Facts.Time)
+		start, end := windowBounds(job.Window)
+		query += fmt.Sprintf(" WHERE %s >= ? AND %s < ?", axis, axis) //nolint:gosec // identifiers only, quoted by the dialect
+		args = []any{start, end}
+	}
+	var total int64
+	if err := r.DB.QueryRowContext(ctx, db.Rebind(r.Dialect, query), args...).Scan(&total); err != nil {
+		return fmt.Errorf("facts: count rebuild source: %w", err)
+	}
+	return r.Store.setTotal(ctx, job, total)
 }
 
 // fail marks job failed unless the cause is a lost lease or a cancelled context.
@@ -244,4 +265,15 @@ func (s *JobStore) advance(ctx context.Context, tx *sql.Tx, job *Job, checkpoint
 		return ErrLeaseLost
 	}
 	return nil
+}
+
+// setTotal stores the source count of the job the caller holds. updated_at always changes, so a resumed
+// job with the same count still reports one changed row.
+func (s *JobStore) setTotal(ctx context.Context, job *Job, total int64) error {
+	nowExpr, nowArg := dbClock(s.Dialect, 0)
+	query := fmt.Sprintf(`UPDATE %s SET total = ?, updated_at = ? WHERE id = ? AND status = ? AND lease_owner = ?
+		AND fencing_token = ? AND lease_until > %s`, s.table(), nowExpr)
+	args := []any{total, time.Now().UTC(), job.ID, string(JobRunning), job.owner, job.token, nowArg}
+	job.Total = total
+	return s.leased(ctx, query, args, "set total of")
 }

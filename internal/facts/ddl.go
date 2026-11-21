@@ -39,11 +39,7 @@ func createTable(dialect db.Dialect, table string, cols []doctype.FactColumn) []
 		defs = append(defs, columnDef(dialect, c.name, c.fieldtype))
 	}
 	for _, c := range cols {
-		fieldtype := "Currency"
-		if c.Type == doctype.FactColumnText {
-			fieldtype = "Data"
-		}
-		defs = append(defs, columnDef(dialect, c.Name, fieldtype))
+		defs = append(defs, columnDef(dialect, c.Name, factFieldtype(c)))
 	}
 	defs = append(defs, fmt.Sprintf("PRIMARY KEY (%s, %s)", dialect.QuoteIdent("record_id"), dialect.QuoteIdent("line_id")))
 	ddl := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n  %s\n)",
@@ -52,6 +48,14 @@ func createTable(dialect db.Dialect, table string, cols []doctype.FactColumn) []
 		ddl += " " + suffix
 	}
 	return []string{ddl, dialect.CreateIndex(table, "business_date", false), dialect.CreateIndex(table, sequenceColumn, false)}
+}
+
+// factFieldtype is the logical field type a fact column is stored with.
+func factFieldtype(c doctype.FactColumn) string {
+	if c.Type == doctype.FactColumnText {
+		return "Data"
+	}
+	return "Currency"
 }
 
 // sequenceColumn is the fact column whose index lets the metrics freshness query read the newest applied
