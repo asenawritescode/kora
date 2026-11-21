@@ -127,6 +127,8 @@ type ErrorDialect interface {
 	// IsUniqueViolation reports a unique-key conflict on insert, so a caller that
 	// raced another writer can read the row the winner stored.
 	IsUniqueViolation(err error) bool
+	// IsDuplicateIndex reports that CREATE INDEX named an index the table already has.
+	IsDuplicateIndex(err error) bool
 }
 
 // Dialect abstracts database-specific SQL generation, schema introspection,

@@ -25,6 +25,12 @@ func (d *MySQLDialect) IsUniqueViolation(err error) bool {
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }
 
+// IsDuplicateIndex reports MySQL error 1061 (duplicate key name): MySQL has no CREATE INDEX IF NOT EXISTS.
+func (d *MySQLDialect) IsDuplicateIndex(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1061
+}
+
 func (d *MySQLDialect) IsWriteConflict(err error) bool {
 	var mysqlErr *mysql.MySQLError
 	if !errors.As(err, &mysqlErr) {
