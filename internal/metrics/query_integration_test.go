@@ -118,6 +118,9 @@ func seed(t *testing.T, conn *sql.DB, dialect db.Dialect) Engine {
 	}
 	// Net sales is a test-only derived metric: the pack keeps its four metrics.
 	defs = append(defs, Metric{Name: "net_sales", Label: "Net sales", Type: KindDerived, Formula: "sales - refunds"})
+	// Sales to date is a test-only cumulative: paid totals from the start of the range.
+	defs = append(defs, Metric{Name: "sales_to_date", Label: "Sales to date", Type: KindCumulative, Model: "Sale",
+		Measure: &Measure{Agg: aggSum, Field: "total"}, Filters: []Filter{{Field: "status", Op: "=", Value: "Paid"}}})
 	if err := Validate(defs, []*doctype.DocType{dt}); err != nil {
 		t.Fatalf("pack does not validate: %v", err)
 	}
@@ -249,6 +252,12 @@ func queries() []expectation {
 			"2026-11-18||120.00,75.00",
 			"2026-11-19||-25.00,null",
 			"2026-11-20||200.00,200.00",
+		}, nil},
+		// Sales to date: 18 Nov 150, 19 Nov nothing new, 20 Nov 200 more.
+		{"cumulative starts at zero on the first day", Query{Metrics: []string{"sales_to_date"}, From: day(18), To: day(20), Grain: GrainDay}, []string{
+			"2026-11-18||150.00",
+			"2026-11-19||150.00",
+			"2026-11-20||350.00",
 		}, nil},
 	}
 }
