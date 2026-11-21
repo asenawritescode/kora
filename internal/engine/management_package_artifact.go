@@ -156,7 +156,7 @@ func bindOwnedPackageResource(snapshot *doctype.ConfigSnapshot, owner contract.M
 				return true, setDocTypeOwner(dt)
 			}
 		}
-	case "role", "permission", "workflow", "view", "metric", "script", "job", "report", "metric_definition":
+	case "role", "permission", "workflow", "view", "metric", "script", "job", "report":
 		return packageContainsResource(snapshot, resource.Ref.Namespace, resource.Ref.Name), nil
 	case "query":
 		for _, module := range snapshot.Modules {

@@ -282,12 +282,6 @@ var packageResourceLookups = map[string]func(*doctype.ConfigSnapshot, string) bo
 			return json.Unmarshal(raw, &report) == nil && report.Name == name
 		})
 	},
-	"metric_definition": func(s *doctype.ConfigSnapshot, name string) bool {
-		return containsMatch(s.Metrics, func(raw json.RawMessage) bool {
-			n, err := metricName(raw)
-			return err == nil && n == name
-		})
-	},
 }
 
 // packageContainsResource reports whether the package snapshot carries a resource of the kind and name.

@@ -44,17 +44,6 @@ func TestMergeManagementPackageSnapshotMergesMetrics(t *testing.T) {
 	}
 }
 
-// The metric_definition resource kind is satisfied by a metric the snapshot carries.
-func TestPackageContainsMetricDefinitionResource(t *testing.T) {
-	snap := &doctype.ConfigSnapshot{Metrics: []json.RawMessage{metricDef("sales", "Sales")}}
-	if !packageContainsResource(snap, "metric_definition", "sales") {
-		t.Fatal("snapshot with sales should contain metric_definition sales")
-	}
-	if packageContainsResource(snap, "metric_definition", "refunds") {
-		t.Fatal("snapshot without refunds should not contain metric_definition refunds")
-	}
-}
-
 // A management merge carries the POS metric definitions a directory install parsed, unchanged.
 func TestMergeManagementPackageSnapshotCarriesPOSMetricsUnchanged(t *testing.T) {
 	var dts []*doctype.DocType
