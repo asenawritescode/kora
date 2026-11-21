@@ -1,0 +1,10 @@
+name: invoices_total
+label: "Invoiced"
+type: simple
+model: "Recurring Invoice"
+measure:
+  agg: sum
+  field: total
+time: business_date
+format: currency
+description: "Invoiced from the Recurring Invoice records (sum)."

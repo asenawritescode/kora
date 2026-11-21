@@ -1,0 +1,14 @@
+name: invoices_balance_draft
+label: "Balance due: Draft"
+type: simple
+model: "Recurring Invoice"
+measure:
+  agg: sum
+  field: balance
+filters:
+  - field: status
+    op: "="
+    value: "Draft"
+time: business_date
+format: currency
+description: "Balance due: Draft from the Recurring Invoice records (sum)."

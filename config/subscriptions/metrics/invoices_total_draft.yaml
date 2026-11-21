@@ -1,0 +1,14 @@
+name: invoices_total_draft
+label: "Invoiced: Draft"
+type: simple
+model: "Recurring Invoice"
+measure:
+  agg: sum
+  field: total
+filters:
+  - field: status
+    op: "="
+    value: "Draft"
+time: business_date
+format: currency
+description: "Invoiced: Draft from the Recurring Invoice records (sum)."

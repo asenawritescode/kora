@@ -1,0 +1,13 @@
+name: subscriptions_active_count
+label: "Active subscriptions"
+type: simple
+model: "Subscription"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "in"
+    value: ["Active"]
+time: business_date
+format: number
+description: "Active subscriptions from the Subscription records (count)."

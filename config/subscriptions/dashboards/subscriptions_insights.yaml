@@ -1,0 +1,19 @@
+name: subscriptions_insights
+label: "Subscriptions insights"
+description: "Figures and charts that reproduce the subscriptions overview report."
+default_range: last_30_days
+tiles:
+  - metric: invoices_total_draft
+  - metric: invoices_total_issued
+  - metric: invoices_total_overdue
+  - metric: invoices_total_void
+  - metric: invoices_balance_draft
+  - metric: invoices_balance_issued
+  - metric: invoices_balance_overdue
+  - metric: invoices_balance_void
+charts:
+  - id: subscriptions_by_plan
+    title: "Active subscriptions by plan"
+    kind: bar
+    metrics: [subscriptions_active_count]
+    by: plan

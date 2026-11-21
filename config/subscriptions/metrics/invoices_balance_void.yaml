@@ -1,0 +1,14 @@
+name: invoices_balance_void
+label: "Balance due: Void"
+type: simple
+model: "Recurring Invoice"
+measure:
+  agg: sum
+  field: balance
+filters:
+  - field: status
+    op: "="
+    value: "Void"
+time: business_date
+format: currency
+description: "Balance due: Void from the Recurring Invoice records (sum)."

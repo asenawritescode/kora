@@ -1,0 +1,14 @@
+name: subscriptions_active_recurring
+label: "Active recurring amount"
+type: simple
+model: "Subscription"
+measure:
+  agg: sum
+  field: recurring_amount
+filters:
+  - field: status
+    op: "in"
+    value: ["Active"]
+time: business_date
+format: currency
+description: "Active recurring amount from the Subscription records (sum)."
