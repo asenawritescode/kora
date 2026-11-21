@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -34,10 +35,66 @@ type metricsAPI struct {
 
 // registerMetricsRoutes mounts GET /metrics, GET /metrics/:name, POST /metrics/query and POST /metrics/drill.
 func registerMetricsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, dialect db.Dialect) {
+	cache := &metricDefsCache{entries: map[string]metricDefsEntry{}}
 	api := metricsAPI{registry: registry, siteDB: siteDB, dialect: dialect, defs: func(c *gin.Context) ([]metrics.Metric, error) {
-		return loadActiveMetricDefs(c, getSiteDB(c, siteDB), siteDialectFromContext(c, dialect))
+		return cachedMetricDefs(c, cache, getSiteDB(c, siteDB), siteDialectFromContext(c, dialect))
 	}}
 	api.mount(apiGroup.Group("/metrics"))
+}
+
+// metricDefsCache keeps each site's parsed metric definitions, with the configuration version they came
+// from. A request reads only the active version number; the definitions are reparsed when it changes.
+type metricDefsCache struct {
+	mu      sync.Mutex
+	entries map[string]metricDefsEntry
+}
+
+// metricDefsEntry is one site's parsed definitions and the active version they were parsed from.
+type metricDefsEntry struct {
+	version int64
+	defs    []metrics.Metric
+}
+
+// load returns site's definitions for version, parsing them with parse only when the cache does not
+// hold that version. A failed parse is not cached.
+func (c *metricDefsCache) load(site string, version int64, parse func() ([]metrics.Metric, error)) ([]metrics.Metric, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e, ok := c.entries[site]; ok && e.version == version {
+		return e.defs, nil
+	}
+	defs, err := parse()
+	if err != nil {
+		return nil, err
+	}
+	c.entries[site] = metricDefsEntry{version: version, defs: defs}
+	return defs, nil
+}
+
+// cachedMetricDefs returns the site's metric definitions of its active configuration version, parsed
+// once per version.
+func cachedMetricDefs(c *gin.Context, cache *metricDefsCache, database *sql.DB, dialect db.Dialect) ([]metrics.Metric, error) {
+	if database == nil {
+		return nil, nil
+	}
+	site := c.GetString("site_name")
+	version, err := activeConfigVersion(database, dialect, site)
+	if err != nil {
+		return nil, err
+	}
+	return cache.load(site, version, func() ([]metrics.Metric, error) {
+		return readMetricDefs(database, dialect, site, version)
+	})
+}
+
+// activeConfigVersion is the site's active configuration version, zero when it has none.
+func activeConfigVersion(database *sql.DB, dialect db.Dialect, site string) (int64, error) {
+	var version int64
+	err := database.QueryRow(db.Rebind(dialect, `SELECT version FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1`), site).Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return version, err
 }
 
 // mount binds the metric routes under group.
@@ -69,17 +126,14 @@ func (m metricsAPI) catalog(c *gin.Context) (metrics.Catalog, error) {
 	return metrics.NewCatalog(defs, docs), nil
 }
 
-// loadActiveMetricDefs reads the metric definitions of the site's active configuration version.
-func loadActiveMetricDefs(c *gin.Context, database *sql.DB, dialect db.Dialect) ([]metrics.Metric, error) {
-	if database == nil {
+// readMetricDefs parses the metric definitions of one configuration version of a site. Version zero
+// has none.
+func readMetricDefs(database *sql.DB, dialect db.Dialect, site string, version int64) ([]metrics.Metric, error) {
+	if version == 0 {
 		return nil, nil
 	}
 	var configJSON string
-	err := database.QueryRow(db.Rebind(dialect, `SELECT config FROM _kora_config_version WHERE site = ? AND status = 'Active' ORDER BY version DESC LIMIT 1`), c.GetString("site_name")).Scan(&configJSON)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
+	if err := database.QueryRow(db.Rebind(dialect, `SELECT config FROM _kora_config_version WHERE site = ? AND version = ?`), site, version).Scan(&configJSON); err != nil {
 		return nil, err
 	}
 	snapshot, err := doctype.ParseConfig(configJSON)

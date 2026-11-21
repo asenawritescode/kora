@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -175,4 +176,49 @@ func TestMetricRowsEncodeNullAndExactDecimals(t *testing.T) {
 // dayOf is the business date at UTC midnight, the form metric results carry.
 func dayOf(y int, m time.Month, d int) tenanttime.Date {
 	return dateOf(time.Date(y, m, d, 0, 0, 0, 0, time.UTC))
+}
+
+func TestMetricDefsCacheParsesOncePerVersion(t *testing.T) {
+	type step struct {
+		site    string
+		version int64
+		wantHit bool
+	}
+	tests := []struct {
+		name  string
+		steps []step
+	}{
+		{"same site and version reuse the parse", []step{{"a", 1, false}, {"a", 1, true}, {"a", 1, true}}},
+		{"a new version reparses", []step{{"a", 1, false}, {"a", 2, false}, {"a", 2, true}}},
+		{"another site parses on its own", []step{{"a", 1, false}, {"b", 1, false}, {"a", 1, true}, {"b", 1, true}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := &metricDefsCache{entries: map[string]metricDefsEntry{}}
+			for i, s := range tc.steps {
+				parses := 0
+				_, err := cache.load(s.site, s.version, func() ([]metrics.Metric, error) {
+					parses++
+					return []metrics.Metric{{Name: "m"}}, nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if hit := parses == 0; hit != s.wantHit {
+					t.Fatalf("step %d (%s v%d): cache hit = %v, want %v", i, s.site, s.version, hit, s.wantHit)
+				}
+			}
+		})
+	}
+}
+
+func TestMetricDefsCacheDoesNotKeepFailedParse(t *testing.T) {
+	cache := &metricDefsCache{entries: map[string]metricDefsEntry{}}
+	if _, err := cache.load("a", 1, func() ([]metrics.Metric, error) { return nil, errors.New("bad config") }); err == nil {
+		t.Fatal("failed parse returned no error")
+	}
+	parsed := false
+	if _, err := cache.load("a", 1, func() ([]metrics.Metric, error) { parsed = true; return nil, nil }); err != nil || !parsed {
+		t.Fatalf("after a failed parse the next load must parse again: parsed=%v err=%v", parsed, err)
+	}
 }
