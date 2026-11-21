@@ -1,0 +1,218 @@
+//go:build integration
+
+package metrics
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/disposabledb"
+	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/eventstream"
+	"github.com/asenawritescode/kora/internal/facts"
+	"github.com/asenawritescode/kora/internal/outbox"
+	"github.com/asenawritescode/kora/internal/tenanttime"
+)
+
+// openLane admits every summary refresh.
+type openLane struct{}
+
+func (openLane) AcquireMaintenance(context.Context) (func(), error) { return func() {}, nil }
+
+// sale is one POS sale as the seed writes it. Creation is UTC; the business date is Nairobi.
+type sale struct {
+	record, owner, created, status, total, register, entity string
+}
+
+// seedSales: SAL-4 is held, so it has no facts. SAL-5 is created 22:30 UTC on 19 November,
+// which is 01:30 on 20 November in Nairobi, so its business date is 20 November.
+var seedSales = []sale{
+	{"SAL-1", "u1", "2026-11-18 09:00:00", "Paid", "100.00", "R1", "E1"},
+	{"SAL-2", "u2", "2026-11-18 10:00:00", "Paid", "50.00", "R2", "E2"},
+	{"SAL-3", "u1", "2026-11-18 11:00:00", "Return", "30.00", "R1", "E1"},
+	{"SAL-4", "u2", "2026-11-18 12:00:00", "Held", "999.00", "R1", "E1"},
+	{"SAL-5", "u2", "2026-11-19 22:30:00", "Paid", "200.00", "R1", "E1"},
+}
+
+// TestMetricsQueryAcrossDialects seeds POS sales through the real fact consumer, refreshes the
+// summaries, and checks the pack's Sales, Receipts and Average sale against a hand computation.
+func TestMetricsQueryAcrossDialects(t *testing.T) {
+	tests := []struct {
+		driver, dialect, envVar string
+	}{
+		{"mysql", "mysql", "KORA_METRICS_DISPOSABLE_MYSQL_DSN"},
+		{"postgres", "postgres", "KORA_METRICS_DISPOSABLE_POSTGRES_DSN"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.driver, func(t *testing.T) {
+			dsn := os.Getenv(tc.envVar)
+			if dsn == "" {
+				t.Skipf("set %s to run", tc.envVar)
+			}
+			database := disposabledb.Open(t, tc.driver, dsn)
+			dialect := db.Resolve(tc.dialect)
+			engine := seed(t, database.DB, dialect)
+			for _, q := range queries() {
+				t.Run(q.name, func(t *testing.T) {
+					res, err := engine.Query(context.Background(), q.query)
+					if err != nil {
+						t.Fatalf("query: %v", err)
+					}
+					if got := render(res); strings.Join(got, "\n") != strings.Join(q.want, "\n") {
+						t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(q.want, "\n"))
+					}
+				})
+			}
+		})
+	}
+}
+
+// seed creates the sales table, the site settings, and the fact tables through the consumer, then
+// refreshes the summaries. It returns an engine over the seeded database.
+func seed(t *testing.T, conn *sql.DB, dialect db.Dialect) Engine {
+	t.Helper()
+	ctx := context.Background()
+	q := dialect.QuoteIdent
+	setup := []string{
+		fmt.Sprintf("CREATE TABLE %s (name VARCHAR(140) NOT NULL PRIMARY KEY, owner VARCHAR(140) NOT NULL, creation TIMESTAMP NOT NULL)", q("tabSale")),
+		"CREATE TABLE _kora_site_setting (site VARCHAR(140) NOT NULL, setting_key VARCHAR(140) NOT NULL, setting_value VARCHAR(140) NOT NULL, PRIMARY KEY (site, setting_key))",
+		db.Rebind(dialect, "INSERT INTO _kora_site_setting (site, setting_key, setting_value) VALUES (?, ?, ?)"),
+	}
+	for _, stmt := range setup {
+		var args []any
+		if strings.HasPrefix(stmt, "INSERT") {
+			args = []any{"test", tenanttime.KeyTimeZone, "Africa/Nairobi"}
+		}
+		if _, err := conn.ExecContext(ctx, stmt, args...); err != nil {
+			t.Fatalf("setup %q: %v", stmt, err)
+		}
+	}
+	dt, err := doctype.ParseFile("../../config/pos/doctypes/sale.yaml")
+	if err != nil {
+		t.Fatalf("parse sale: %v", err)
+	}
+	// The seed is entity-owned so the entity scope has a column to read.
+	dt.BusinessScopeField = "legal_entity"
+	dt.Fields = append(dt.Fields, doctype.Field{Fieldname: "legal_entity", Fieldtype: "Link"})
+	defs, err := ParseDirectory("../../config/pos/metrics")
+	if err != nil {
+		t.Fatalf("parse metrics: %v", err)
+	}
+	if err := Validate(defs, []*doctype.DocType{dt}); err != nil {
+		t.Fatalf("pack does not validate: %v", err)
+	}
+	reg := doctype.NewRegistry()
+	reg.Register(dt)
+	builder := &facts.Builder{DB: conn, Dialect: dialect, Registry: reg}
+	for i, s := range seedSales {
+		insert := db.Rebind(dialect, fmt.Sprintf("INSERT INTO %s (name, owner, creation) VALUES (?, ?, ?)", q("tabSale")))
+		if _, err := conn.ExecContext(ctx, insert, s.record, s.owner, s.created); err != nil {
+			t.Fatalf("insert %s: %v", s.record, err)
+		}
+		consume(ctx, t, conn, builder, int64(i+1), s)
+	}
+	refresher := &facts.Refresher{DB: conn, Dialect: dialect, Registry: reg, Admission: openLane{}, Owner: "metrics-test"}
+	if _, err := refresher.RefreshDue(ctx); err != nil {
+		t.Fatalf("refresh summaries: %v", err)
+	}
+	return Engine{DB: conn, Dialect: dialect, Catalog: NewCatalog(defs, []*doctype.DocType{dt})}
+}
+
+// consume delivers one sale's insert to the fact consumer in its own transaction.
+func consume(ctx context.Context, t *testing.T, conn *sql.DB, b *facts.Builder, seq int64, s sale) {
+	t.Helper()
+	payload := map[string]any{
+		"table": "Sale", "record_id": s.record,
+		"data": map[string]any{
+			"status": s.status, "total": s.total, "register": s.register, "legal_entity": s.entity,
+			"items": []any{map[string]any{"name": s.record + "-L1", "item": "I1", "amount": s.total, "quantity": "1"}},
+		},
+	}
+	event := contract.EventEnvelope{
+		ID: fmt.Sprintf("evt-%d", seq), Type: outbox.EventTypeName("Sale", eventstream.EventInsert),
+		Sequence: contract.Revision(strconv.FormatInt(seq, 10)), Site: "test",
+		OccurredAt: time.Date(2026, 11, 18, 9, 0, 0, 0, time.UTC),
+		Data:       contract.MustEncodeData(payload),
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Consume(ctx, tx, event); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("consume %s: %v", s.record, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// expectation is one query and the rows a hand computation gives for it.
+type expectation struct {
+	name  string
+	query Query
+	want  []string
+}
+
+// queries holds the hand computation. Sales is Paid totals; Receipts counts Paid sales; Average
+// sale is Sales over Receipts. Day 18 Nov: Paid 100 (SAL-1) and 50 (SAL-2), Return 30 (SAL-3)
+// excluded, Held 999 (SAL-4) excluded. Day 20 Nov: Paid 200 (SAL-5). Week of 16 Nov: 350 and 3.
+func queries() []expectation {
+	day := func(d int) tenanttime.Date { return tenanttime.Date{Year: 2026, Month: 11, Day: d} }
+	all := []string{"sales", "receipts", "average_sale"}
+	span := func(grain Grain, metrics []string) Query {
+		return Query{Metrics: metrics, From: day(18), To: day(20), Grain: grain}
+	}
+	return []expectation{
+		{"daily totals fill empty days with zero", span(GrainDay, all), []string{
+			"2026-11-18||150.00,2.00,75.00",
+			"2026-11-19||0.00,0.00,0.00",
+			"2026-11-20||200.00,1.00,200.00",
+		}},
+		{"weekly bucket starts on Monday and divides totals", span(GrainWeek, all), []string{
+			"2026-11-16||350.00,3.00,116.67",
+		}},
+		{"monthly bucket", span(GrainMonth, all), []string{
+			"2026-11-01||350.00,3.00,116.67",
+		}},
+		{"owner scope reads the facts", Query{Metrics: all, From: day(18), To: day(20), Grain: GrainDay, Scope: Scope{Owner: "u1"}}, []string{
+			"2026-11-18||100.00,1.00,100.00",
+			"2026-11-19||0.00,0.00,0.00",
+			"2026-11-20||0.00,0.00,0.00",
+		}},
+		{"entity scope reads the summary", Query{Metrics: all, From: day(18), To: day(20), Grain: GrainDay, Scope: Scope{LegalEntity: "E1"}}, []string{
+			"2026-11-18||100.00,1.00,100.00",
+			"2026-11-19||0.00,0.00,0.00",
+			"2026-11-20||200.00,1.00,200.00",
+		}},
+		{"one dimension groups the summary", Query{Metrics: []string{"sales"}, Dimensions: []string{"register"}, From: day(18), To: day(20), Grain: GrainDay}, []string{
+			"2026-11-18|R1|100.00",
+			"2026-11-19|R1|0.00",
+			"2026-11-20|R1|200.00",
+			"2026-11-18|R2|50.00",
+			"2026-11-19|R2|0.00",
+			"2026-11-20|R2|0.00",
+		}},
+	}
+}
+
+// render prints each row as period|group|values with two decimals, one line per row.
+func render(res Result) []string {
+	var out []string
+	for _, r := range res.Rows {
+		vals := make([]string, len(r.Values))
+		for i, v := range r.Values {
+			vals[i] = v.StringFixed(2)
+		}
+		out = append(out, r.Period.String()+"|"+strings.Join(r.Group, "/")+"|"+strings.Join(vals, ","))
+	}
+	return out
+}
