@@ -16,6 +16,8 @@ func weekFake() *fakeMetrics {
 		`"previous":[{"bucket":"2026-11-02","group":[],"values":["103700.00"]}]},` +
 		`"meta":{"period":{"preset":"last_week","from":"2026-11-09","to":"2026-11-15"},` +
 		`"previous":{"from":"2026-11-02","to":"2026-11-08"},"time_zone":"Africa/Nairobi","day_ends":"04:00","as_of":"2026-11-21T16:14:00Z"}}`)}
+	fake.answers[MetricsRouteDescribe] = MetricsResponse{Status: 200, Body: []byte(`{"data":{"name":"sales_total","label":"Sales","type":"simple",` +
+		`"model":"Sale","measure":{"agg":"sum","field":"base_total"},"filters":[{"field":"status","op":"=","value":"Paid"}]}}`)}
 	return fake
 }
 

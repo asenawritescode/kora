@@ -20,11 +20,12 @@ type MetricsRoute string
 
 // The metrics routes the chat reads through.
 const (
-	MetricsRouteMetrics MetricsRoute = "metrics" // GET /metrics: the metrics the caller may read
-	MetricsRouteExplore MetricsRoute = "explore" // GET /explore/catalog: the record types the caller may question
-	MetricsRouteReports MetricsRoute = "reports" // GET /explore/reports: the saved reports the caller may read
-	MetricsRouteQuery   MetricsRoute = "query"   // POST /metrics/query
-	MetricsRouteDrill   MetricsRoute = "drill"   // POST /metrics/drill
+	MetricsRouteMetrics  MetricsRoute = "metrics"  // GET /metrics: the metrics the caller may read
+	MetricsRouteExplore  MetricsRoute = "explore"  // GET /explore/catalog: the record types the caller may question
+	MetricsRouteReports  MetricsRoute = "reports"  // GET /explore/reports: the saved reports the caller may read
+	MetricsRouteQuery    MetricsRoute = "query"    // POST /metrics/query
+	MetricsRouteDrill    MetricsRoute = "drill"    // POST /metrics/drill
+	MetricsRouteDescribe MetricsRoute = "describe" // GET /metrics/:name: one metric's definition; the body is its name
 )
 
 // MetricsResponse is the API's answer to one metrics read: its HTTP status and its JSON body.

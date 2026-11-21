@@ -38,6 +38,9 @@ func serveMetricsRoutes(m metricsAPI, keys map[any]any, base *http.Request) ai.M
 		if route == ai.MetricsRouteQuery || route == ai.MetricsRouteDrill {
 			sub.Request.Method = http.MethodPost
 		}
+		if route == ai.MetricsRouteDescribe {
+			sub.Params = gin.Params{{Key: "name", Value: string(body)}}
+		}
 		dispatchMetricsRoute(m, sub, route)
 		return ai.MetricsResponse{Status: rec.Code, Body: rec.Body.Bytes()}
 	}
@@ -56,6 +59,8 @@ func dispatchMetricsRoute(m metricsAPI, c *gin.Context, route ai.MetricsRoute) {
 		m.query(c)
 	case ai.MetricsRouteDrill:
 		m.drill(c)
+	case ai.MetricsRouteDescribe:
+		m.describe(c)
 	default:
 		c.Status(http.StatusNotFound)
 	}

@@ -45,11 +45,13 @@ func (t *answerTurn) cards() []contract.AnswerCard {
 // buildingCard says that a figure is not ready: its history is still building, with the progress. It carries no
 // number of the figure.
 func buildingCard(b buildingRead) contract.AnswerCard {
+	progress := b.progress
 	return contract.AnswerCard{
-		Kind:   "building",
-		Label:  b.label,
-		Change: fmt.Sprintf("Still building history: %d%% done", int(b.progress*100)),
-		Meta:   metaOf(queryAnswer{meta: b.meta}),
+		Kind:     "building",
+		Label:    b.label,
+		Change:   fmt.Sprintf("Still building history: %d%% done", int(b.progress*100)),
+		Progress: &progress,
+		Meta:     metaOf(queryAnswer{meta: b.meta}),
 	}
 }
 
@@ -60,9 +62,15 @@ func (t *answerTurn) cardFor(q queryAnswer, page cardPage) contract.AnswerCard {
 		cat = &metricsCatalog{metrics: map[string]contract.MetricSummary{}, types: map[string]contract.ExploreRecordType{}}
 	}
 	card := contract.AnswerCard{
-		Label:    labelOf(q, cat),
-		Verified: q.verified,
-		Meta:     metaOf(q),
+		Label:           labelOf(q, cat),
+		Verified:        q.verified,
+		Meta:            metaOf(q),
+		RecordType:      recordTypeOf(q, cat),
+		RecordTypeLabel: recordLabelOf(q, cat),
+		Unit:            unitOf(formatOf(q, cat)),
+	}
+	if card.Unit == "currency" {
+		card.Currency = page.Currency
 	}
 	if q.meta.OwnerOnly {
 		card.ScopeNote = "Only your own records"
@@ -74,7 +82,7 @@ func (t *answerTurn) cardFor(q queryAnswer, page cardPage) contract.AnswerCard {
 		card.Kind = "table"
 		fillTable(&card, q, cat, page.Currency)
 	}
-	card.Actions = actionsOf(q, page, recordLabelOf(q, cat))
+	card.Actions = actionsOf(q, page, card.RecordTypeLabel, t.openQuestion(q))
 	return card
 }
 
@@ -105,18 +113,33 @@ func labelOf(q queryAnswer, cat *metricsCatalog) string {
 	return strings.Join(names, " and ")
 }
 
-// recordLabelOf names the record type a query reads: the first metric's, else the first measure's.
-func recordLabelOf(q queryAnswer, cat *metricsCatalog) string {
-	recordType := ""
+// recordTypeOf is the record type a query reads: the first metric's, else the first measure's.
+func recordTypeOf(q queryAnswer, cat *metricsCatalog) string {
 	if len(q.request.Metrics) > 0 {
-		recordType = cat.metrics[q.request.Metrics[0]].Model
-	} else if len(q.request.Measures) > 0 {
-		recordType = q.request.Measures[0].RecordType
+		return cat.metrics[q.request.Metrics[0]].Model
 	}
-	if rt, ok := cat.types[recordType]; ok && rt.Label != "" {
+	if len(q.request.Measures) > 0 {
+		return q.request.Measures[0].RecordType
+	}
+	return ""
+}
+
+// recordLabelOf names the record type a query reads, in its catalog label; "records" when the catalog has none.
+func recordLabelOf(q queryAnswer, cat *metricsCatalog) string {
+	if rt, ok := cat.types[recordTypeOf(q, cat)]; ok && rt.Label != "" {
 		return rt.Label
 	}
 	return "records"
+}
+
+// unitOf is the unit a card prints its numbers in, from the number format.
+func unitOf(format string) string {
+	switch format {
+	case "currency", "percent":
+		return format
+	default:
+		return "number"
+	}
 }
 
 // formatOf is the number format of the first metric of a query. An unsaved measure carries its format in the
@@ -261,10 +284,11 @@ func rowLabel(row contract.MetricRow) string {
 func metaOf(q queryAnswer) contract.AnswerMeta {
 	m := q.meta
 	out := contract.AnswerMeta{
-		Period:  spanText(m.Period.From, m.Period.To),
-		Zone:    path.Base(m.TimeZone) + " time",
-		DayEnds: "days end " + m.DayEnds,
-		AsOf:    "Data as of " + asOfClock(m.AsOf, m.TimeZone),
+		Period:   spanText(m.Period.From, m.Period.To),
+		Zone:     path.Base(m.TimeZone) + " time",
+		TimeZone: m.TimeZone,
+		DayEnds:  "days end " + m.DayEnds,
+		AsOf:     "Data as of " + asOfClock(m.AsOf, m.TimeZone),
 	}
 	if m.Previous != nil {
 		out.Compared = spanText(m.Previous.From, m.Previous.To)
@@ -294,10 +318,14 @@ func asOfClock(asOf, zone string) string {
 	return at.Format("15:04")
 }
 
-// actionsOf are the buttons of a card: the question in Explore, the records behind a number, and the save and pin
-// actions for a question a saved report can keep. A caller who may not use a button does not get it.
-func actionsOf(q queryAnswer, page cardPage, recordLabel string) []contract.AnswerAction {
-	actions := []contract.AnswerAction{{Kind: "open_in_insights", Label: "Open in Insights", Question: q.question}}
+// actionsOf are the buttons of a card: the question in Insights, the records behind a number, and the save and pin
+// actions for a question a saved report can keep. A caller who may not use a button does not get it, and a
+// question Insights cannot express (open is nil) gets no open button.
+func actionsOf(q queryAnswer, page cardPage, recordLabel string, open json.RawMessage) []contract.AnswerAction {
+	var actions []contract.AnswerAction
+	if open != nil {
+		actions = append(actions, contract.AnswerAction{Kind: "open_in_insights", Label: "Open in Insights", Question: open})
+	}
 	if isNumberResult(q.result) {
 		if drill, ok := drillRequestOf(q); ok {
 			actions = append(actions, contract.AnswerAction{Kind: "see_records", Label: "See the " + strings.ToLower(recordLabel), Question: drill})

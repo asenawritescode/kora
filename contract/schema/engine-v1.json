@@ -158,6 +158,9 @@
         "change": {
           "type": "string"
         },
+        "currency": {
+          "type": "string"
+        },
         "kind": {
           "type": "string"
         },
@@ -168,6 +171,16 @@
           "$ref": "#/$defs/AnswerMeta"
         },
         "previous": {
+          "type": "string"
+        },
+        "progress": {
+          "type": "number",
+          "x-optional-pointer": true
+        },
+        "record_type": {
+          "type": "string"
+        },
+        "record_type_label": {
           "type": "string"
         },
         "rows": {
@@ -184,6 +197,9 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "unit": {
+          "type": "string"
         },
         "value": {
           "type": "string"
@@ -217,6 +233,9 @@
         },
         "shown": {
           "type": "integer"
+        },
+        "time_zone": {
+          "type": "string"
         },
         "total": {
           "type": "integer"
@@ -3224,6 +3243,9 @@
         "change": {
           "type": "string"
         },
+        "currency": {
+          "type": "string"
+        },
         "kind": {
           "type": "string"
         },
@@ -3234,6 +3256,16 @@
           "$ref": "#/$defs/AnswerMeta"
         },
         "previous": {
+          "type": "string"
+        },
+        "progress": {
+          "type": "number",
+          "x-optional-pointer": true
+        },
+        "record_type": {
+          "type": "string"
+        },
+        "record_type_label": {
           "type": "string"
         },
         "rows": {
@@ -3250,6 +3282,9 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "unit": {
+          "type": "string"
         },
         "value": {
           "type": "string"
@@ -3283,6 +3318,9 @@
         },
         "shown": {
           "type": "integer"
+        },
+        "time_zone": {
+          "type": "string"
         },
         "total": {
           "type": "integer"

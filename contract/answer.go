@@ -27,6 +27,14 @@ type AnswerCard struct {
 	Kind     string `json:"kind"`
 	Label    string `json:"label"`
 	Verified bool   `json:"verified"`
+	// RecordType is the record type the question reads, and RecordTypeLabel its catalog label ("records" when unknown).
+	RecordType      string `json:"record_type,omitempty"`
+	RecordTypeLabel string `json:"record_type_label,omitempty"`
+	// Unit is how Value, Previous and Rows print: "currency" (with Currency, the site code), "percent" or "number".
+	Unit     string `json:"unit,omitempty"`
+	Currency string `json:"currency,omitempty"`
+	// Progress is set on a "building" card: the share of the history already built, from 0 to 1.
+	Progress *float64 `json:"progress,omitempty"`
 	// ScopeNote is set when the caller reads only their own records, for example "Only your own sales".
 	ScopeNote string `json:"scope_note,omitempty"`
 	// Value, Change and Previous are set on a number card; Change is "▲ 8.4% on the week before" or "—".
@@ -58,6 +66,8 @@ type AnswerMeta struct {
 	Period   string `json:"period"`
 	Compared string `json:"compared,omitempty"`
 	Zone     string `json:"zone"`
+	// TimeZone is the tenant's IANA zone name beside the display label in Zone.
+	TimeZone string `json:"time_zone,omitempty"`
 	DayEnds  string `json:"day_ends"`
 	AsOf     string `json:"as_of"`
 	// Shown and Total are set on a table that cuts its rows: "Top 5 of 12".

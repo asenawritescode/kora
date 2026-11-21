@@ -45,6 +45,8 @@ type ChatContext struct {
 type ChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+	// RunID is the run that wrote the message, so the workspace places its cards and choices under the right reply.
+	RunID string `json:"run_id"`
 }
 
 // ConversationSubjectKey scopes a durable chat thread to one user and UI context.

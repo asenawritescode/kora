@@ -481,7 +481,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 // ListConversationMessages returns the durable user-visible transcript in order.
 func ListConversationMessages(ctx context.Context, db *sql.DB, site, conversationID string) ([]ChatMessage, error) {
 	rows, err := (aiSQL{db}).QueryContext(ctx, `
-SELECT role, content
+SELECT role, content, run_id
 FROM _kora_ai_message
 WHERE site = ? AND conversation_id = ? AND message_kind IN ('message', 'summary')
 ORDER BY sequence, created_at, id`, site, conversationID)
@@ -492,7 +492,7 @@ ORDER BY sequence, created_at, id`, site, conversationID)
 	messages := make([]ChatMessage, 0)
 	for rows.Next() {
 		var message ChatMessage
-		if err := rows.Scan(&message.Role, &message.Content); err != nil {
+		if err := rows.Scan(&message.Role, &message.Content, &message.RunID); err != nil {
 			return nil, err
 		}
 		messages = append(messages, message)
