@@ -34,8 +34,8 @@ type metricsAPI struct {
 	defs func(*gin.Context) ([]metrics.Metric, error)
 }
 
-// registerMetricsRoutes mounts GET /metrics, GET /metrics/:name, POST /metrics/query, POST /metrics/drill
-// and the dashboard routes, which read the same catalog.
+// registerMetricsRoutes mounts GET /metrics, GET /metrics/:name, POST /metrics/query, POST /metrics/drill,
+// the dashboard routes, which read the same catalog, and the saved Explore reports.
 func registerMetricsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, dialect db.Dialect) {
 	defs := newVersionCache[[]metrics.Metric]()
 	dashboardDefs := newVersionCache[[]metrics.Dashboard]()
@@ -47,6 +47,7 @@ func registerMetricsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry
 		return cachedConfigValue(c, dashboardDefs, getSiteDB(c, siteDB), siteDialectFromContext(c, dialect), readDashboardDefs)
 	}}.mount(apiGroup.Group("/dashboards"))
 	registerExploreRoutes(apiGroup, registry)
+	reportsAPI{metrics: api}.mount(apiGroup.Group("/explore/reports"))
 }
 
 // versionCache keeps each site's parsed configuration with the version it came from. A request reads only

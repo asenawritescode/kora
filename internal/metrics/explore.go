@@ -272,3 +272,13 @@ func slug(s string) string {
 	}
 	return strings.Trim(b.String(), "_")
 }
+
+// ExploreRecord returns the record type named name as the explore catalog describes it, and whether the
+// catalog offers it: a non-child record type with a fact model.
+func (c Catalog) ExploreRecord(name string) (contract.ExploreRecordType, bool) {
+	dt := c.Models[name]
+	if dt == nil || dt.Facts == nil || dt.IsChildTable {
+		return contract.ExploreRecordType{}, false
+	}
+	return exploreRecord(dt), true
+}

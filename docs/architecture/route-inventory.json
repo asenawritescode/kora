@@ -114,6 +114,36 @@
       "handler": "github.com/asenawritescode/kora/internal/api.registerExploreRoutes.func1"
     },
     {
+      "method": "GET",
+      "path": "/api/explore/reports",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.list-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/explore/reports",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.create-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/explore/reports/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.remove-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/explore/reports/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.get-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/explore/reports/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.update-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/explore/reports/:id/copy",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.copy-fm"
+    },
+    {
       "method": "DELETE",
       "path": "/api/files/*path",
       "handler": "github.com/asenawritescode/kora/internal/api.(*Handler).HandleFileDelete-fm"
@@ -867,6 +897,36 @@
       "method": "GET",
       "path": "/api/v1/explore/catalog",
       "handler": "github.com/asenawritescode/kora/internal/api.registerExploreRoutes.func1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/explore/reports",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.list-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/explore/reports",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.create-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/explore/reports/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.remove-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/explore/reports/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.get-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/explore/reports/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.update-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/explore/reports/:id/copy",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.copy-fm"
     },
     {
       "method": "DELETE",

@@ -1153,7 +1153,7 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 						existing[dt.Name] = true
 					}
 				}
-				configstore.ApplySnapshotToRegistry(recoveredSnapshot, reg)
+				applyActivatedConfig(c.Request.Context(), db, h.siteDialect(c), recoveredSnapshot, reg)
 				if worker := h.siteAnalyticsWorker(c); worker != nil {
 					worker.InvalidateAllMetrics()
 				}
@@ -1404,7 +1404,7 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 		internalError(c, "finalizing config activation journal", err)
 		return
 	}
-	configstore.ApplySnapshotToRegistry(snapshot, reg)
+	applyActivatedConfig(c.Request.Context(), db, h.siteDialect(c), snapshot, reg)
 
 	// Notify live Studio clients that the workspace shape changed. The normal
 	// document event path cannot see config-snapshot activation because the
