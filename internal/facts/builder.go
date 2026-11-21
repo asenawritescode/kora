@@ -237,6 +237,9 @@ func (b *Builder) ensure(ctx context.Context, dt *doctype.DocType) error {
 	if err := b.execDDL(ctx, stmts); err != nil {
 		return err
 	}
+	if err := b.ensureSequenceIndexes(ctx, dt); err != nil {
+		return err
+	}
 	if err := b.migrateSummary(ctx, dt); err != nil {
 		return err
 	}
@@ -251,6 +254,22 @@ func (b *Builder) execDDL(ctx context.Context, stmts []string) error {
 	for _, stmt := range stmts {
 		if _, err := b.DB.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("facts: create table: %w", err)
+		}
+	}
+	return nil
+}
+
+// ensureSequenceIndexes adds the source_sequence index to fact tables created before it was part of
+// the DDL. A table that already has it reports a duplicate index, which is the success case, so the
+// step runs on every start.
+func (b *Builder) ensureSequenceIndexes(ctx context.Context, dt *doctype.DocType) error {
+	tables := []string{dt.Facts.TableName(dt)}
+	if dt.Facts.Lines != "" {
+		tables = append(tables, dt.Facts.LineTableName(dt))
+	}
+	for _, table := range tables {
+		if _, err := b.DB.ExecContext(ctx, b.Dialect.CreateIndex(table, sequenceColumn, false)); err != nil && !b.Dialect.IsDuplicateIndex(err) {
+			return fmt.Errorf("facts: index %s of %s: %w", sequenceColumn, table, err)
 		}
 	}
 	return nil

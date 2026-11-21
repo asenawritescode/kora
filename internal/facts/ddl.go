@@ -51,8 +51,12 @@ func createTable(dialect db.Dialect, table string, cols []doctype.FactColumn) []
 	if suffix := dialect.TableSuffix(); suffix != "" {
 		ddl += " " + suffix
 	}
-	return []string{ddl, dialect.CreateIndex(table, "business_date", false)}
+	return []string{ddl, dialect.CreateIndex(table, "business_date", false), dialect.CreateIndex(table, sequenceColumn, false)}
 }
+
+// sequenceColumn is the fact column whose index lets the metrics freshness query read the newest applied
+// sequence without scanning the table.
+const sequenceColumn = "source_sequence"
 
 // columnDef is one NOT NULL column whose SQL type comes from the dialect for fieldtype.
 func columnDef(dialect db.Dialect, name, fieldtype string) string {

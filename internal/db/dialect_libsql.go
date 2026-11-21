@@ -27,6 +27,11 @@ func (d *LibSQLDialect) IsUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
+// IsDuplicateIndex reports SQLite's "index ... already exists" message.
+func (d *LibSQLDialect) IsDuplicateIndex(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "already exists")
+}
+
 func (d *LibSQLDialect) IsWriteConflict(err error) bool {
 	if err == nil {
 		return false

@@ -30,6 +30,12 @@ func (d *PostgresDialect) IsUniqueViolation(err error) bool {
 	return errors.As(err, &postgresErr) && postgresErr.Code == "23505"
 }
 
+// IsDuplicateIndex reports SQLSTATE 42P07. CreateIndex uses IF NOT EXISTS, so this is a fallback.
+func (d *PostgresDialect) IsDuplicateIndex(err error) bool {
+	var postgresErr *pq.Error
+	return errors.As(err, &postgresErr) && postgresErr.Code == "42P07"
+}
+
 func (d *PostgresDialect) IsWriteConflict(err error) bool {
 	var postgresErr *pq.Error
 	if !errors.As(err, &postgresErr) {
