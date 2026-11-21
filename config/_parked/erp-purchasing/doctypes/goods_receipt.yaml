@@ -8,6 +8,14 @@ quantity_effect:
   source_record_field: product
   delta_field: quantity
   direction: increase
+  ledger:
+    doctype: Stock Movement
+    target_field: product
+    change_field: change
+    balance_field: balance_after
+    source_doctype_field: source_doctype
+    source_name_field: source_name
+    reason_field: reason
 search_fields: reference, supplier
 title_field: reference
 sort_field: modified

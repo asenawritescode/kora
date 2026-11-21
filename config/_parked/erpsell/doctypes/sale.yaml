@@ -9,6 +9,14 @@ quantity_effect:
   direction: decrease
   status_field: status
   apply_in_statuses: [Awaiting Payment, Partially Paid, Paid]
+  ledger:
+    doctype: Stock Movement
+    target_field: product
+    change_field: change
+    balance_field: balance_after
+    source_doctype_field: source_doctype
+    source_name_field: source_name
+    reason_field: reason
 title_field: reference
 search_fields: reference, status
 sort_field: modified

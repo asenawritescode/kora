@@ -470,3 +470,21 @@
   role: Cashier
   read: true
   if_owner: true
+- doctype: Stock Movement
+  role: Manager
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Stock Movement
+  role: Cashier
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Stock Movement
+  role: Owner
+  read: true
+  write: false
+  create: false
+  delete: false

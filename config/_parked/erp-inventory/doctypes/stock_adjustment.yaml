@@ -21,6 +21,14 @@ quantity_effect:
     Found: increase
     Damaged: decrease
     Lost or stolen: decrease
+  ledger:
+    doctype: Stock Movement
+    target_field: product
+    change_field: change
+    balance_field: balance_after
+    source_doctype_field: source_doctype
+    source_name_field: source_name
+    reason_field: reason
 
 fields:
   - fieldname: reference
