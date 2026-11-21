@@ -489,6 +489,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 		user = "system"
 	}
 	txMgr.CurrentUser = user
+	writes := commandWriter{k: k, run: run, op: op, def: def, user: user}
 
 	outcomes := make([]stepOutcome, 0, len(cmd.Steps))
 	lastRecord, lastName := "", ""
@@ -554,11 +555,8 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			if cerr := k.claimFirstWriteReceipt(dbTx, op, def, opID, len(outcomes)); cerr != nil {
 				return nil, cerr
 			}
-			if err := txMgr.InsertInTx(dbTx, dt, doc, commandOwner(op, user), user); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
-				return nil, wrapORMError(err, k.dialect())
-			}
-			if hookErr := captureInsertHooks(ctx, txMgr, dbTx, dt, doc); hookErr != nil {
-				return nil, hookErr
+			if cerr := writes.insert(ctx, dt, doc); cerr != nil {
+				return nil, cerr
 			}
 			doc.IsNew = false
 			completeTx := postCommitCopy(txMgr)
@@ -623,11 +621,8 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			if cerr := k.claimFirstWriteReceipt(dbTx, op, def, opID, len(outcomes)); cerr != nil {
 				return nil, cerr
 			}
-			if err := txMgr.SaveInTxWithScope(dbTx, dt, doc, user, scope, oldDoc); err != nil {
-				return nil, wrapExpectedVersionORMError(err, op, k.dialect())
-			}
-			if hookErr := captureLifecycleHooks(ctx, txMgr, dbTx, dt, lifecycleEvent{script.EventAfterSave, doc, oldDoc}); hookErr != nil {
-				return nil, hookErr
+			if cerr := writes.save(ctx, dt, doc, oldDoc, scope); cerr != nil {
+				return nil, cerr
 			}
 			completeTx := postCommitCopy(txMgr)
 			txMgr.PostCommitHooks = append(txMgr.PostCommitHooks, func() { completeTx.CompleteSave(dt, doc, oldDoc) })
