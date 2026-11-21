@@ -225,7 +225,11 @@ func (s *ModelSync) ensure(ctx context.Context) error {
 	if suffix := d.TableSuffix(); suffix != "" {
 		ddl += " " + suffix
 	}
-	return s.execAll(ctx, []string{ddl})
+	if err := s.execAll(ctx, []string{ddl}); err != nil {
+		return err
+	}
+	// The refresher and the drift check read the dirty table before any event has reached the builder.
+	return ensureDirtyTable(ctx, s.DB, d)
 }
 
 // claim takes the model's shape lease, creating its row first. A lease older than shapeLeaseSeconds is taken over.

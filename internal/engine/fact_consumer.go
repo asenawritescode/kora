@@ -47,6 +47,17 @@ func syncFactModels(ctx context.Context, tenant string, modelSync *facts.ModelSy
 	}
 }
 
+// afterSync runs run once synced is closed, or returns when ctx ends first.
+func afterSync(synced <-chan struct{}, run func(context.Context)) func(context.Context) {
+	return func(ctx context.Context) {
+		select {
+		case <-synced:
+			run(ctx)
+		case <-ctx.Done():
+		}
+	}
+}
+
 // registerFactConsumer keeps fact tables current from record events of doctypes with a fact model.
 func registerFactConsumer(config TenantServiceConfig, loaded *knet.LoadedSite, services *tenantruntime.Services, dialect kdb.Dialect) error {
 	types := facts.EventTypes(loaded.Registry)
@@ -72,12 +83,15 @@ func registerFactConsumer(config TenantServiceConfig, loaded *knet.LoadedSite, s
 	modelSync := &facts.ModelSync{DB: loaded.DB, Dialect: dialect, Registry: loaded.Registry, Owner: contract.NewEventID()}
 	return registerTenantWorkerStart(config, func() error {
 		// The sync, the event dispatcher and the rebuild runner share one worker: the runner starts only after
-		// the sync, and the dispatcher only after the runner's first pass has been started.
+		// the sync, and the dispatcher only after the runner's first pass has been started. The refresher and the
+		// drift check read fact tables, so they wait for the sync too.
 		runner := &facts.RebuildRunner{DB: loaded.DB, Dialect: dialect, Registry: loaded.Registry, Site: loaded.Name, Owner: contract.NewEventID()}
+		synced := make(chan struct{})
 		if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
 			if !syncFactModels(ctx, loaded.Name, modelSync) {
 				return
 			}
+			close(synced)
 			dispatched := make(chan struct{})
 			go func() {
 				defer close(dispatched)
@@ -88,10 +102,10 @@ func registerFactConsumer(config TenantServiceConfig, loaded *knet.LoadedSite, s
 		}) {
 			return errors.New("tenant runtime is stopping")
 		}
-		if !loaded.StartWorker(config.ProcessContext, refresher.Run) {
+		if !loaded.StartWorker(config.ProcessContext, afterSync(synced, refresher.Run)) {
 			return errors.New("tenant runtime is stopping")
 		}
-		if !loaded.StartWorker(config.ProcessContext, drift.Run) {
+		if !loaded.StartWorker(config.ProcessContext, afterSync(synced, drift.Run)) {
 			return errors.New("tenant runtime is stopping")
 		}
 		return nil

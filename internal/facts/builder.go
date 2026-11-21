@@ -221,10 +221,10 @@ func (b *Builder) ensure(ctx context.Context, dt *doctype.DocType) error {
 	if b.ready[dt] {
 		return nil
 	}
-	if err := b.execDDL(ctx, []string{dirtyDDL(b.Dialect), summaryDDL(b.Dialect, dt)}); err != nil {
+	if err := b.execDDL(ctx, []string{summaryDDL(b.Dialect, dt)}); err != nil {
 		return err
 	}
-	if err := b.migrateDirty(ctx); err != nil {
+	if err := ensureDirtyTable(ctx, b.DB, b.Dialect); err != nil {
 		return err
 	}
 	var stmts []string
@@ -294,18 +294,39 @@ func dirtyDDL(dialect db.Dialect) string {
 // dirtyColumns are added with the dialect's AddColumn when an existing table lacks them.
 var dirtyColumns = []doctype.Field{{Fieldname: "version", Fieldtype: "Int", Reqd: true, Default: "0"}, {Fieldname: "lease_owner", Fieldtype: "Data"}, {Fieldname: "lease_at", Fieldtype: "Datetime"}}
 
-// migrateDirty adds each dirty column the table lacks. The probe is dialect-neutral; LoadSchema skips _kora_ tables.
-func (b *Builder) migrateDirty(ctx context.Context) error {
-	for _, f := range dirtyColumns {
-		probe := fmt.Sprintf("SELECT %s FROM %s WHERE 1 = 0", b.Dialect.QuoteIdent(f.Fieldname), b.Dialect.QuoteIdent(dirtyTable)) //nolint:gosec // identifiers only, quoted by the dialect
-		if _, err := b.DB.ExecContext(ctx, probe); err == nil {
-			continue
-		}
-		if err := b.execDDL(ctx, []string{b.Dialect.AddColumn(dirtyTable, &f)}); err != nil {
+// ensureDirtyTable creates the dirty-partition table and adds each dirty column the table lacks. Every
+// process that starts a tenant runs it, so it is safe to repeat.
+func ensureDirtyTable(ctx context.Context, conn *sql.DB, dialect db.Dialect) error {
+	if _, err := conn.ExecContext(ctx, dirtyDDL(dialect)); err != nil {
+		return fmt.Errorf("facts: create dirty table: %w", err)
+	}
+	for i := range dirtyColumns {
+		if err := ensureColumn(ctx, conn, dialect, dirtyTable, &dirtyColumns[i]); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// ensureColumn adds f to table unless the table already has it. Two processes can probe the same missing
+// column at once and both try to add it, so a failed add is probed again: a column the other process added
+// is the success case.
+func ensureColumn(ctx context.Context, conn *sql.DB, dialect db.Dialect, table string, f *doctype.Field) error {
+	if hasColumn(ctx, conn, dialect, table, f.Fieldname) {
+		return nil
+	}
+	_, err := conn.ExecContext(ctx, dialect.AddColumn(table, f))
+	if err == nil || hasColumn(ctx, conn, dialect, table, f.Fieldname) {
+		return nil
+	}
+	return fmt.Errorf("facts: add column %s to %s: %w", f.Fieldname, table, err)
+}
+
+// hasColumn reports whether table has column name. The probe reads no rows.
+func hasColumn(ctx context.Context, conn *sql.DB, dialect db.Dialect, table, name string) bool {
+	probe := fmt.Sprintf("SELECT %s FROM %s WHERE 1 = 0", dialect.QuoteIdent(name), dialect.QuoteIdent(table)) //nolint:gosec // identifiers only, quoted by the dialect
+	_, err := conn.ExecContext(ctx, probe)
+	return err == nil
 }
 
 // rowColumns returns every column of row with its value, sorted by column name.

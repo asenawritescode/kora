@@ -64,9 +64,10 @@ func TestRecordConsumersRegisterFactConsumerOnlyWithFactDoctypes(t *testing.T) {
 	}
 }
 
-// TestFactConsumerStartsDriftCheck checks that starting the fact workers starts the drift check, which is the
-// first statement to touch its lease table. The lease DDL fails on purpose, so the check stops after one call.
-func TestFactConsumerStartsDriftCheck(t *testing.T) {
+// TestFactConsumerWaitsForSyncBeforeDriftCheck checks that the drift check does not touch the fact tables before the
+// first model sync has succeeded. The sync cannot succeed here (its first statement is not expected), so the drift
+// check's lease table must stay untouched.
+func TestFactConsumerWaitsForSyncBeforeDriftCheck(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal("create tenant DB:", err)
@@ -93,13 +94,9 @@ func TestFactConsumerStartsDriftCheck(t *testing.T) {
 	if err := registerRecordConsumers(config, loaded, services, nil, kdb.Resolve("mysql")); err != nil {
 		t.Fatalf("registerRecordConsumers: %v", err)
 	}
-	deadline := time.After(5 * time.Second)
-	for mock.ExpectationsWereMet() != nil {
-		select {
-		case <-deadline:
-			t.Fatalf("drift check did not touch its lease table: %v", mock.ExpectationsWereMet())
-		case <-time.After(10 * time.Millisecond):
-		}
+	time.Sleep(300 * time.Millisecond)
+	if mock.ExpectationsWereMet() == nil {
+		t.Fatal("drift check touched its lease table before the fact model sync succeeded")
 	}
 }
 

@@ -439,13 +439,9 @@ func (s *JobStore) ensure(ctx context.Context) error {
 	if _, err := s.DB.ExecContext(ctx, guardDDL(s.Dialect)); err != nil {
 		return fmt.Errorf("facts: create rebuild guard table: %w", err)
 	}
-	for _, f := range jobColumnsAdded {
-		probe := fmt.Sprintf("SELECT %s FROM %s WHERE 1 = 0", s.Dialect.QuoteIdent(f.Fieldname), s.table()) //nolint:gosec // identifiers only, quoted by the dialect
-		if _, err := s.DB.ExecContext(ctx, probe); err == nil {
-			continue
-		}
-		if _, err := s.DB.ExecContext(ctx, s.Dialect.AddColumn(jobTable, &f)); err != nil {
-			return fmt.Errorf("facts: add rebuild job column %s: %w", f.Fieldname, err)
+	for i := range jobColumnsAdded {
+		if err := ensureColumn(ctx, s.DB, s.Dialect, jobTable, &jobColumnsAdded[i]); err != nil {
+			return err
 		}
 	}
 	s.ready = true
