@@ -692,6 +692,16 @@ func ImportConfigFromPackForTenant(db *sql.DB, registry *doctype.Registry, dbNam
 		fmt.Sprintf("Template pack %q import", packName), snapshot, dialect, scriptBodyByHash)
 }
 
+// packFileLabel is the display label of the pack whose files these are, from its root pack.yaml; empty when it has none.
+func packFileLabel(files []PackFile) (string, error) {
+	for _, f := range files {
+		if f.Path == packFileName {
+			return metrics.PackLabel([]byte(f.Content))
+		}
+	}
+	return "", nil
+}
+
 // parsePackPart parses one pack's files and adds its metric and dashboard definitions to the snapshot.
 func parsePackPart(packName string, files []PackFile) (*doctype.ConfigSnapshot, map[string]string, error) {
 	snapshot, scripts, err := parseConfigPack(packName, files)
@@ -971,6 +981,10 @@ func parsePackTail(doctypes []*doctype.DocType, cmds []*kernel.CommandResource, 
 func parsePackDefinitions(files []PackFile, doctypes []*doctype.DocType) ([]json.RawMessage, []json.RawMessage, error) {
 	var defs []metrics.Metric
 	var dashboards []metrics.Dashboard
+	label, err := packFileLabel(files)
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, f := range files {
 		switch f.ContentType {
 		case "metric":
@@ -984,6 +998,7 @@ func parsePackDefinitions(files []PackFile, doctypes []*doctype.DocType) ([]json
 			if err != nil {
 				return nil, nil, err
 			}
+			d.Pack = label
 			dashboards = append(dashboards, d)
 		}
 	}

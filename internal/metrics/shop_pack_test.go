@@ -57,3 +57,18 @@ func TestPOSInsightsDashboardValidates(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Each pack's dashboards carry the pack's display label from its pack.yaml; the POS pack is Till.
+func TestPackDashboardsCarryPackLabel(t *testing.T) {
+	for dir, want := range map[string]string{erpsellPackDir: "Selling", posPackDir: "Till"} {
+		dashboards, err := ParsePackDashboards(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range dashboards {
+			if d.Pack != want {
+				t.Fatalf("%s dashboard %s pack = %q; want %q", dir, d.Name, d.Pack, want)
+			}
+		}
+	}
+}

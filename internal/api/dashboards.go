@@ -111,7 +111,7 @@ func (d dashboardsAPI) view(c *gin.Context, cat metrics.Catalog, dash metrics.Da
 		return contract.DashboardDefinition{}, false
 	}
 	def := contract.DashboardDefinition{
-		Name: dash.Name, Label: dash.Label, Description: dash.Description, DefaultRange: dash.DefaultRange,
+		Name: dash.Name, Label: dash.Label, Pack: dash.Pack, Description: dash.Description, DefaultRange: dash.DefaultRange,
 		Pinned: pinned, Tiles: tiles, Charts: charts,
 	}
 	return applyDashboardOverride(def, layout.override), true

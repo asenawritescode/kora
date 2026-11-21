@@ -135,7 +135,7 @@ func LoadPack(packDir string, doctypes []*doctype.DocType) ([]json.RawMessage, [
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing metrics: %w", err)
 	}
-	dashboards, err := ParseDashboardDirectory(filepath.Join(packDir, "dashboards"))
+	dashboards, err := ParsePackDashboards(packDir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing dashboards: %w", err)
 	}

@@ -33,6 +33,7 @@ func ParsePackFile(dir string) (contract.PackManifest, bool, error) {
 func parsePackManifest(body []byte, dirName string) (contract.PackManifest, bool, error) {
 	var raw struct {
 		Name     string                     `yaml:"name"`
+		Label    string                     `yaml:"label"` // display label, read by metrics.PackLabel
 		Version  string                     `yaml:"version"`
 		Requires []contract.ManifestPackRef `yaml:"requires"`
 	}

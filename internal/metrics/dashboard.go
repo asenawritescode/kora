@@ -3,6 +3,8 @@ package metrics
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -14,8 +16,10 @@ import (
 // Dashboard lays out metrics by name: tiles for single values and charts over time or a dimension.
 // It never names SQL, models or fields. One dashboard is one YAML document in a pack's dashboards/ directory.
 type Dashboard struct {
-	Name         string  `yaml:"name" json:"name"`
-	Label        string  `yaml:"label" json:"label"`
+	Name  string `yaml:"name" json:"name"`
+	Label string `yaml:"label" json:"label"`
+	// Pack is the display label of the pack that ships the dashboard, set from its pack.yaml when the pack loads.
+	Pack         string  `yaml:"-" json:"pack,omitempty"`
 	Description  string  `yaml:"description,omitempty" json:"description,omitempty"`
 	DefaultRange string  `yaml:"default_range" json:"default_range"`
 	Tiles        []Tile  `yaml:"tiles,omitempty" json:"tiles,omitempty"`
@@ -65,6 +69,41 @@ func ValidDashboardRange(name string) bool {
 // ParseDashboardDirectory reads the dashboard documents of a pack's dashboards/ directory. A missing directory has none.
 func ParseDashboardDirectory(dir string) ([]Dashboard, error) {
 	return readYAMLDir(dir, ParseDashboardYAML)
+}
+
+// ParsePackDashboards reads a pack directory's dashboards and labels each with the pack's display label from its
+// pack.yaml. A pack without a label leaves Pack empty.
+func ParsePackDashboards(packDir string) ([]Dashboard, error) {
+	dashboards, err := ParseDashboardDirectory(filepath.Join(packDir, "dashboards"))
+	if err != nil {
+		return nil, err
+	}
+	body, err := os.ReadFile(filepath.Join(packDir, "pack.yaml"))
+	if errors.Is(err, os.ErrNotExist) {
+		return dashboards, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read pack.yaml: %w", err)
+	}
+	label, err := PackLabel(body)
+	if err != nil {
+		return nil, err
+	}
+	for i := range dashboards {
+		dashboards[i].Pack = label
+	}
+	return dashboards, nil
+}
+
+// PackLabel reads the optional display label of a pack from its pack.yaml bytes.
+func PackLabel(body []byte) (string, error) {
+	var head struct {
+		Label string `yaml:"label"`
+	}
+	if err := goyaml.Unmarshal(body, &head); err != nil {
+		return "", fmt.Errorf("pack.yaml: %w", err)
+	}
+	return head.Label, nil
 }
 
 // ParseDashboardYAML decodes one dashboard document; source names it in errors.

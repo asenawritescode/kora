@@ -608,6 +608,9 @@
         "name": {
           "type": "string"
         },
+        "pack": {
+          "type": "string"
+        },
         "pinned": {
           "items": {
             "$ref": "#/$defs/DashboardPin"
@@ -3440,6 +3443,9 @@
           "type": "string"
         },
         "name": {
+          "type": "string"
+        },
+        "pack": {
           "type": "string"
         },
         "pinned": {

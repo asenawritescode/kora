@@ -49,6 +49,13 @@ func TestDashboardDefinitionsAgreeAcrossInstallPaths(t *testing.T) {
 	// Directory: the POS metrics and a dashboards/ folder beside them.
 	packDir := t.TempDir()
 	copyPOSMetrics(t, packDir)
+	manifest, err := os.ReadFile(filepath.Join("..", "..", "config", "pos", "pack.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(packDir, "pack.yaml"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(packDir, "dashboards"), 0o755); err != nil {
 		t.Fatal(err)
 	}

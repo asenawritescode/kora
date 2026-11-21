@@ -7,6 +7,7 @@ package contract
 type DashboardDefinition struct {
 	Name         string           `json:"name"`
 	Label        string           `json:"label"`
+	Pack         string           `json:"pack,omitempty"`
 	Description  string           `json:"description,omitempty"`
 	DefaultRange string           `json:"default_range"`
 	Pinned       []DashboardPin   `json:"pinned"`
