@@ -19,6 +19,9 @@ type SavedQuestion struct {
 	Compare    string         `json:"compare,omitempty"`
 	Top        int            `json:"top,omitempty"`
 	View       string         `json:"view,omitempty"`
+	// AdHoc is an unsaved measure of a record type asked directly, with its own filters: a question that names
+	// neither a record type nor a metric. Set alone; it never carries RecordType, Metric or Measure.
+	AdHoc *MetricAdHocMeasure `json:"ad_hoc,omitempty"`
 }
 
 // SavedReportBroken says which piece of a report's question a configuration change removed. Kind is

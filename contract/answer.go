@@ -33,6 +33,9 @@ type AnswerCard struct {
 	Value    string `json:"value,omitempty"`
 	Change   string `json:"change,omitempty"`
 	Previous string `json:"previous,omitempty"`
+	// Sparkline is one value per day of the period on a number card, from a day-grain read of the same question.
+	// It is set only for periods of 31 days or fewer.
+	Sparkline []string `json:"sparkline,omitempty"`
 	// Rows are set on a table card: up to five rows.
 	Rows    []AnswerRow    `json:"rows,omitempty"`
 	Meta    AnswerMeta     `json:"meta"`

@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/shopspring/decimal"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/doctype"
@@ -76,6 +79,8 @@ type queryAnswer struct {
 	verified bool
 	// saved is the saved report the question came from, nil for a question the model asked itself.
 	saved *contract.SavedReport
+	// spark is the day-grain read of the same question, one value per day; empty when not drawn.
+	spark []string
 }
 
 // buildingRead is a read the server refused to answer as numbers because a fact model it reads is still rebuilding.
@@ -177,11 +182,16 @@ func (t *answerTurn) savedQuery(id string) string {
 
 // requestOfQuestion is the metrics query a saved question asks: its metric, grouping, period and filters.
 func requestOfQuestion(q contract.SavedQuestion) (contract.MetricQueryRequest, bool) {
-	if q.Metric == "" {
+	if q.Metric == "" && q.AdHoc == nil {
 		return contract.MetricQueryRequest{}, false
 	}
-	req := contract.MetricQueryRequest{Metrics: []string{q.Metric}, Dimensions: q.By, Filters: q.Filters,
+	req := contract.MetricQueryRequest{Dimensions: q.By, Filters: q.Filters,
 		From: q.From, To: q.To, Grain: q.Grain, Compare: q.Compare, Top: q.Top}
+	if q.AdHoc != nil {
+		req.Measures = []contract.MetricAdHocMeasure{*q.AdHoc}
+	} else {
+		req.Metrics = []string{q.Metric}
+	}
 	if q.Period != "" {
 		req.Period = &contract.MetricPeriod{Preset: q.Period}
 	}
@@ -215,7 +225,11 @@ func (t *answerTurn) answerQuery(body []byte, req contract.MetricQueryRequest, s
 			return toolError(err)
 		}
 	}
-	t.queries = append(t.queries, queryAnswer{question: body, request: req, result: env.Data, meta: env.Meta, verified: verified, saved: saved})
+	qa := queryAnswer{question: body, request: req, result: env.Data, meta: env.Meta, verified: verified, saved: saved}
+	if isNumberResult(env.Data) {
+		qa.spark = t.sparkline(req, env.Meta)
+	}
+	t.queries = append(t.queries, qa)
 	return string(resp.Body)
 }
 
@@ -446,4 +460,68 @@ func metricsToolDefs() []map[string]any {
 			},
 		},
 	}
+}
+
+// sparklineDays is the longest period a number card draws a sparkline for.
+const sparklineDays = 31
+
+// sparkline reads the same question day by day for a period of sparklineDays or fewer, and returns one printed value
+// per day in order. The values come from this read only. Any failure draws no sparkline; the card keeps its figure.
+func (t *answerTurn) sparkline(req contract.MetricQueryRequest, meta contract.MetricsMeta) []string {
+	from, errF := time.Parse(time.DateOnly, meta.Period.From)
+	to, errT := time.Parse(time.DateOnly, meta.Period.To)
+	if errF != nil || errT != nil || to.Sub(from).Hours()/24+1 > sparklineDays {
+		return nil
+	}
+	day := req
+	day.Grain, day.Period, day.Compare, day.Top = "day", nil, "", 0
+	day.From, day.To = meta.Period.From, meta.Period.To
+	body, err := json.Marshal(day)
+	if err != nil {
+		return nil
+	}
+	resp := t.run(MetricsRouteQuery, body)
+	if resp.Status != 200 {
+		return nil
+	}
+	var env struct {
+		Data contract.MetricQueryResult `json:"data"`
+	}
+	if json.Unmarshal(resp.Body, &env) != nil {
+		return nil
+	}
+	out := make([]string, 0, len(env.Data.Rows))
+	for _, row := range env.Data.Rows {
+		if len(row.Values) == 0 {
+			return nil
+		}
+		v, ok := valueOf(row.Values[0])
+		if !ok {
+			v = decimal.Zero
+		}
+		out = append(out, v.StringFixed(0))
+	}
+	return out
+}
+
+// RunMetricsTool runs one metrics read tool (list_metrics, query_metrics or drill_metrics) through run, the runner of
+// the person the call acts for, and returns the text a client reads. A refusal is an "Error:" text, as in the chat.
+func RunMetricsTool(run MetricsRunner, name string, args map[string]any) string {
+	return executeMetricsTool(&answerTurn{run: run}, name, args)
+}
+
+// MetricsToolDescriptors are the read metrics tools, for a client that projects them next to its other tools.
+func MetricsToolDescriptors() []ToolDescriptor {
+	var out []ToolDescriptor
+	for _, def := range metricsToolDefs() {
+		fn, _ := def["function"].(map[string]any)
+		name, _ := fn["name"].(string)
+		if name == toolAskChoice {
+			continue
+		}
+		desc, _ := fn["description"].(string)
+		params, _ := fn["parameters"].(map[string]any)
+		out = append(out, ToolDescriptor{Source: "metrics", Name: name, Description: desc, InputSchema: params})
+	}
+	return out
 }

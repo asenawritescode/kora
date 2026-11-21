@@ -471,6 +471,19 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 				if !card.Verified || card.ScopeNote != "" || card.Meta.Period != lastWeek || card.Meta.Compared != weekBefore {
 					t.Fatalf("card flags or dates = %+v", card)
 				}
+				// The sparkline is the day-by-day read: its days add back to the figure, and the sales of
+				// Monday 450, Tuesday 150, Wednesday 900 and Saturday 320 are among them.
+				sum := 0
+				for _, v := range card.Sparkline {
+					n, err := strconv.Atoi(v)
+					if err != nil {
+						t.Fatalf("sparkline value %q: %v", v, err)
+					}
+					sum += n
+				}
+				if sum != 1820 || !slices.Contains(card.Sparkline, "450") || !slices.Contains(card.Sparkline, "320") {
+					t.Fatalf("sparkline = %v; want the seven days adding to 1,820", card.Sparkline)
+				}
 			},
 		}}},
 		{name: "top five products", user: goldenAdminUser, roles: doctype.AdminRole, turns: []goldenTurn{{
@@ -604,6 +617,13 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 				if card.Verified || card.Value != "KES 1,670" {
 					t.Fatalf("card = %+v; want an unchecked 1,670", card)
 				}
+				// The question can be saved as a report in its ad-hoc form, so the save action carries it.
+				for _, a := range card.Actions {
+					if a.Kind == "save_as_report" && strings.Contains(string(a.Question), `"ad_hoc"`) {
+						return
+					}
+				}
+				t.Fatalf("actions = %+v; want save_as_report with the ad-hoc question", card.Actions)
 			},
 		}}},
 		{name: "follow-up moves the period and keeps the question", user: goldenAdminUser, roles: doctype.AdminRole, turns: []goldenTurn{

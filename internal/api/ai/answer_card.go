@@ -144,6 +144,7 @@ func fillNumber(card *contract.AnswerCard, q queryAnswer, cat *metricsCatalog, c
 	format := formatOf(q, cat)
 	cur, curOK := valueOf(q.result.Rows[0].Values[0])
 	card.Value = printAmount(cur, curOK, format, currency)
+	card.Sparkline = q.spark
 	if len(q.result.Previous) == 0 {
 		return
 	}
@@ -324,6 +325,12 @@ func drillRequestOf(q queryAnswer) (json.RawMessage, bool) {
 // measures has no saved form, so it offers no save or pin.
 func savedQuestionOf(q queryAnswer) (json.RawMessage, bool) {
 	r := q.request
+	if len(r.Metrics) == 0 && len(r.Measures) == 1 && len(r.Dimensions) <= 1 {
+		saved := contract.SavedQuestion{AdHoc: &r.Measures[0], By: r.Dimensions, Grain: r.Grain, Period: periodPreset(r),
+			From: r.From, To: r.To, Compare: r.Compare, Top: r.Top}
+		raw, err := json.Marshal(saved)
+		return raw, err == nil
+	}
 	if len(r.Metrics) != 1 || len(r.Measures) != 0 || len(r.Dimensions) > 1 {
 		return nil, false
 	}

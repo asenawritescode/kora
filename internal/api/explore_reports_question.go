@@ -59,8 +59,14 @@ func brokenOf(err error) *contract.SavedReportBroken {
 // the fact model accepts. A metric question names a defined metric whose record types have every "by"
 // dimension and filter field it uses.
 func checkSavedQuestion(cat metrics.Catalog, join map[string]bool, q contract.SavedQuestion) ([]string, error) {
-	if (q.RecordType == "") == (q.Metric == "") {
-		return nil, errors.New("a report names one record type or one metric")
+	forms := 0
+	for _, set := range []bool{q.RecordType != "", q.Metric != "", q.AdHoc != nil} {
+		if set {
+			forms++
+		}
+	}
+	if forms != 1 {
+		return nil, errors.New("a report names one record type, one metric or one ad-hoc measure")
 	}
 	if err := checkQuestionSettings(q); err != nil {
 		return nil, err
@@ -69,10 +75,34 @@ func checkSavedQuestion(cat metrics.Catalog, join map[string]bool, q contract.Sa
 	if err != nil {
 		return nil, err
 	}
+	if q.AdHoc != nil {
+		return checkAdHocQuestion(cat, join, q)
+	}
 	if q.Metric != "" {
 		return checkMetricQuestion(cat, join, q, filters)
 	}
 	return checkRecordQuestion(cat, join, q, filters)
+}
+
+// checkAdHocQuestion checks a question of one unsaved measure: the measure is checked the way a query's unsaved
+// measure is, its record type must offer the "by" dimensions, and the paths it groups by are read as for a record question.
+func checkAdHocQuestion(cat metrics.Catalog, join map[string]bool, q contract.SavedQuestion) ([]string, error) {
+	m := *q.AdHoc
+	rec, ok := cat.ExploreRecord(m.RecordType, join)
+	if !ok {
+		return nil, fmt.Errorf("record type %q is not in the explore catalog", m.RecordType)
+	}
+	filters, err := filtersFromContract(m.Filters)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkBy(rec, q.By); err != nil {
+		return nil, err
+	}
+	if _, _, err := cat.WithAdHoc([]metrics.AdHoc{{Model: m.RecordType, Agg: m.Agg, Field: m.Field, Filters: filters}}); err != nil {
+		return nil, err
+	}
+	return withHops(cat, m.RecordType, questionPaths(q), []string{m.RecordType}), nil
 }
 
 // checkPresetPeriod checks the named period of a question: a preset takes no From or To; custom keeps them.

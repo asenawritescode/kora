@@ -179,6 +179,12 @@
         "scope_note": {
           "type": "string"
         },
+        "sparkline": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "value": {
           "type": "string"
         },
@@ -2624,6 +2630,10 @@
     "SavedQuestion": {
       "additionalProperties": false,
       "properties": {
+        "ad_hoc": {
+          "$ref": "#/$defs/MetricAdHocMeasure",
+          "x-optional-pointer": true
+        },
         "by": {
           "items": {
             "type": "string"
@@ -3234,6 +3244,12 @@
         },
         "scope_note": {
           "type": "string"
+        },
+        "sparkline": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "value": {
           "type": "string"
@@ -5637,6 +5653,10 @@
     "SavedQuestion": {
       "additionalProperties": false,
       "properties": {
+        "ad_hoc": {
+          "$ref": "#/$defs/MetricAdHocMeasure",
+          "x-optional-pointer": true
+        },
         "by": {
           "items": {
             "type": "string"
