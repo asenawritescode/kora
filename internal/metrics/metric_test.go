@@ -41,6 +41,8 @@ func TestValidateRules(t *testing.T) {
 		{"in needs a list", []Metric{{Name: "x", Label: "X", Type: KindSimple, Model: "Sale", Measure: &Measure{Agg: "count"}, Filters: []Filter{{Field: "status", Op: "in", Value: "Paid"}}}}, "non-empty list"},
 		{"ratio of a missing metric", []Metric{sales, {Name: "r", Label: "R", Type: KindRatio, Numerator: "sales", Denominator: "missing"}}, "unknown metric \"missing\""},
 		{"derived formula of a missing metric", []Metric{sales, {Name: "d", Label: "D", Type: KindDerived, Formula: "sales + ghost"}}, "unknown metric \"ghost\""},
+		{"derived formula with a syntax error", []Metric{sales, {Name: "d", Label: "D", Type: KindDerived, Formula: "sales +"}}, "ends early"},
+		{"derived formula with unsupported text", []Metric{sales, {Name: "d", Label: "D", Type: KindDerived, Formula: "sales ^ 2"}}, "unsupported text"},
 		{"derived cycle", []Metric{{Name: "a", Label: "A", Type: KindDerived, Formula: "b"}, {Name: "b", Label: "B", Type: KindDerived, Formula: "a"}}, "part of a cycle"},
 		{"ratio of itself", []Metric{{Name: "a", Label: "A", Type: KindRatio, Numerator: "a", Denominator: "a"}}, "part of a cycle"},
 		{"duplicate name", []Metric{sales, sales}, "declared more than once"},

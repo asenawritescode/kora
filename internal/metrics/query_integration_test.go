@@ -34,7 +34,9 @@ type sale struct {
 
 // seedSales: SAL-4 is held, so it has no facts. SAL-5 is created 22:30 UTC on 19 November,
 // which is 01:30 on 20 November in Nairobi, so its business date is 20 November. SAL-6 is a
-// return on 19 November only, so that day has facts but no receipts.
+// return on 19 November only, so that day has facts but no receipts. SAL-7 is on 17 November
+// at register R3, outside the 18-20 range of most queries; it is the third group for top-N and
+// the previous period of the compare query.
 var seedSales = []sale{
 	{"SAL-1", "u1", "2026-11-18 09:00:00", "Paid", "100.00", "R1", "E1"},
 	{"SAL-2", "u2", "2026-11-18 10:00:00", "Paid", "50.00", "R2", "E2"},
@@ -42,6 +44,7 @@ var seedSales = []sale{
 	{"SAL-4", "u2", "2026-11-18 12:00:00", "Held", "999.00", "R1", "E1"},
 	{"SAL-5", "u2", "2026-11-19 22:30:00", "Paid", "200.00", "R1", "E1"},
 	{"SAL-6", "u2", "2026-11-19 10:00:00", "Return", "25.00", "R1", "E1"},
+	{"SAL-7", "u3", "2026-11-17 10:00:00", "Paid", "40.00", "R3", "E1"},
 }
 
 // TestMetricsQueryAcrossDialects seeds POS sales through the real fact consumer, refreshes the
@@ -68,8 +71,13 @@ func TestMetricsQueryAcrossDialects(t *testing.T) {
 					if err != nil {
 						t.Fatalf("query: %v", err)
 					}
-					if got := render(res); strings.Join(got, "\n") != strings.Join(q.want, "\n") {
+					if got := render(res.Rows); strings.Join(got, "\n") != strings.Join(q.want, "\n") {
 						t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(q.want, "\n"))
+					}
+					if q.wantPrevious != nil {
+						if got := render(res.Previous); strings.Join(got, "\n") != strings.Join(q.wantPrevious, "\n") {
+							t.Fatalf("previous:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(q.wantPrevious, "\n"))
+						}
 					}
 				})
 			}
@@ -108,6 +116,8 @@ func seed(t *testing.T, conn *sql.DB, dialect db.Dialect) Engine {
 	if err != nil {
 		t.Fatalf("parse metrics: %v", err)
 	}
+	// Net sales is a test-only derived metric: the pack keeps its four metrics.
+	defs = append(defs, Metric{Name: "net_sales", Label: "Net sales", Type: KindDerived, Formula: "sales - refunds"})
 	if err := Validate(defs, []*doctype.DocType{dt}); err != nil {
 		t.Fatalf("pack does not validate: %v", err)
 	}
@@ -157,11 +167,13 @@ func consume(ctx context.Context, t *testing.T, conn *sql.DB, b *facts.Builder, 
 	}
 }
 
-// expectation is one query and the rows a hand computation gives for it.
+// expectation is one query and the rows a hand computation gives for it. wantPrevious is set
+// only for a query that compares.
 type expectation struct {
-	name  string
-	query Query
-	want  []string
+	name         string
+	query        Query
+	want         []string
+	wantPrevious []string
 }
 
 // queries holds the hand computation. Sales is Paid totals; Receipts counts Paid sales; Average
@@ -180,23 +192,23 @@ func queries() []expectation {
 			"2026-11-18||150.00,2.00,75.00",
 			"2026-11-19||0.00,0.00,null",
 			"2026-11-20||200.00,1.00,200.00",
-		}},
+		}, nil},
 		{"weekly bucket starts on Monday and divides totals", span(GrainWeek, all), []string{
 			"2026-11-16||350.00,3.00,116.67",
-		}},
+		}, nil},
 		{"monthly bucket", span(GrainMonth, all), []string{
 			"2026-11-01||350.00,3.00,116.67",
-		}},
+		}, nil},
 		{"owner scope reads the facts", Query{Metrics: all, From: day(18), To: day(20), Grain: GrainDay, Scope: Scope{Owner: "u1"}}, []string{
 			"2026-11-18||100.00,1.00,100.00",
 			"2026-11-19||0.00,0.00,null",
 			"2026-11-20||0.00,0.00,null",
-		}},
+		}, nil},
 		{"entity scope reads the summary", Query{Metrics: all, From: day(18), To: day(20), Grain: GrainDay, Scope: Scope{LegalEntity: "E1"}}, []string{
 			"2026-11-18||100.00,1.00,100.00",
 			"2026-11-19||0.00,0.00,null",
 			"2026-11-20||200.00,1.00,200.00",
-		}},
+		}, nil},
 		{"one dimension groups the summary", Query{Metrics: []string{"sales"}, Dimensions: []string{"register"}, From: day(18), To: day(20), Grain: GrainDay}, []string{
 			"2026-11-18|R1|100.00",
 			"2026-11-19|R1|0.00",
@@ -204,14 +216,47 @@ func queries() []expectation {
 			"2026-11-18|R2|50.00",
 			"2026-11-19|R2|0.00",
 			"2026-11-20|R2|0.00",
+		}, nil},
+		// Previous period of 18-20 Nov is 15-17 Nov: SAL-7 (40, one receipt) is on 17 Nov, so it is
+		// the last previous bucket, paired with 20 Nov.
+		{"previous period pairs buckets by position", Query{Metrics: all, From: day(18), To: day(20), Grain: GrainDay, Compare: ComparePreviousPeriod}, []string{
+			"2026-11-18||150.00,2.00,75.00",
+			"2026-11-19||0.00,0.00,null",
+			"2026-11-20||200.00,1.00,200.00",
+		}, []string{
+			"2026-11-15||0.00,0.00,null",
+			"2026-11-16||0.00,0.00,null",
+			"2026-11-17||40.00,1.00,40.00",
 		}},
+		// Register totals over 17-20 Nov: R1 300, R2 50, R3 40. Top two keep R1 and R2; R3 folds into Other.
+		{"top two folds the rest into Other", Query{Metrics: []string{"sales"}, Dimensions: []string{"register"}, From: day(17), To: day(20), Grain: GrainDay, Top: 2}, []string{
+			"2026-11-17|R1|0.00",
+			"2026-11-18|R1|100.00",
+			"2026-11-19|R1|0.00",
+			"2026-11-20|R1|200.00",
+			"2026-11-17|R2|0.00",
+			"2026-11-18|R2|50.00",
+			"2026-11-19|R2|0.00",
+			"2026-11-20|R2|0.00",
+			"2026-11-17|__other__|40.00",
+			"2026-11-18|__other__|0.00",
+			"2026-11-19|__other__|0.00",
+			"2026-11-20|__other__|0.00",
+		}, nil},
+		// Net sales is sales minus refunds per day: 18 Nov 150 - 30, 19 Nov 0 - 25, 20 Nov 200 - 0.
+		// Average sale is null on 19 Nov, so the derived metric is null only when it reads it.
+		{"derived metric over simple metrics", Query{Metrics: []string{"net_sales", "average_sale"}, From: day(18), To: day(20), Grain: GrainDay}, []string{
+			"2026-11-18||120.00,75.00",
+			"2026-11-19||-25.00,null",
+			"2026-11-20||200.00,200.00",
+		}, nil},
 	}
 }
 
 // render prints each row as period|group|values with two decimals, or null, one line per row.
-func render(res Result) []string {
+func render(rows []Row) []string {
 	var out []string
-	for _, r := range res.Rows {
+	for _, r := range rows {
 		vals := make([]string, len(r.Values))
 		for i, v := range r.Values {
 			vals[i] = "null"

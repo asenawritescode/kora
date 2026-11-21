@@ -30,15 +30,17 @@ func posCatalog(t *testing.T) Catalog {
 		Metric{Name: "stock_qty", Label: "Stock", Type: KindSimple, Model: "Stock", Measure: &Measure{Agg: aggSum, Field: "qty"}},
 		Metric{Name: "balance_sales", Label: "Balance", Type: KindBalance, Model: "Sale", Measure: &Measure{Agg: aggSum, Field: "total"}},
 		Metric{Name: "ratio_of_ratio", Label: "Nested", Type: KindRatio, Numerator: "average_sale", Denominator: "receipts"},
+		Metric{Name: "net_sales", Label: "Net", Type: KindDerived, Formula: "sales - refunds"},
+		Metric{Name: "average_plus_one", Label: "Plus", Type: KindDerived, Formula: "average_sale + 1"},
 	)
 	return NewCatalog(defs, []*doctype.DocType{sale, other})
 }
 
 func TestRatioValuesNullOnZeroDenominator(t *testing.T) {
-	p := plan{series: make([]series, 2), outputs: []output{
+	p := plan{series: make([]series, 2), metrics: []output{
 		{metric: "sales", kind: KindSimple, num: 0, den: -1},
 		{metric: "average_sale", kind: KindRatio, num: 0, den: 1},
-	}}
+	}, requested: []int{0, 1}}
 	tests := []struct {
 		name   string
 		bucket []decimal.Decimal
@@ -99,6 +101,15 @@ func TestPlanQueryRoutesAndRefuses(t *testing.T) {
 			q.Filters = []Filter{{Field: "register", Op: "in", Value: []any{"R1", "R2"}}}
 		}), summary: true, series: 1},
 		{name: "count_distinct reads the facts", query: with(func(q *Query) { q.Metrics = []string{"distinct_registers"} }), summary: false, series: 1},
+		{name: "derived over simple metrics reads the summary", query: with(func(q *Query) { q.Metrics = []string{"net_sales"} }), summary: true, series: 2, table: "_kora_fact_summary_sale"},
+		{name: "derived over a ratio shares its components", query: with(func(q *Query) { q.Metrics = []string{"average_plus_one"} }), summary: true, series: 2},
+		{name: "derived with owner scope reads the facts", query: with(func(q *Query) { q.Metrics = []string{"net_sales"}; q.Scope.Owner = "u1" }), summary: false, series: 2},
+		{name: "top with one dimension reads the summary", query: with(func(q *Query) { q.Dimensions = []string{"register"}; q.Top = 2 }), summary: true, series: 1},
+		{name: "top without a dimension", query: with(func(q *Query) { q.Top = 2 }), invalid: true},
+		{name: "top with two dimensions", query: with(func(q *Query) { q.Dimensions = []string{"register", "item"}; q.Top = 2 }), invalid: true},
+		{name: "negative top", query: with(func(q *Query) { q.Top = -1 }), invalid: true},
+		{name: "unknown compare window", query: with(func(q *Query) { q.Compare = "last_year" }), invalid: true},
+		{name: "compare previous period is accepted", query: with(func(q *Query) { q.Compare = ComparePreviousPeriod }), summary: true, series: 1},
 		{name: "balance metric is not supported yet", query: with(func(q *Query) { q.Metrics = []string{"balance_sales"} }), unsupported: true},
 		{name: "ratio of a ratio is not supported yet", query: with(func(q *Query) { q.Metrics = []string{"ratio_of_ratio"} }), unsupported: true},
 		{name: "metrics of two models are not supported yet", query: with(func(q *Query) { q.Metrics = []string{"sales", "stock_qty"} }), unsupported: true},

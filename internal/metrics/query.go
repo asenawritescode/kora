@@ -29,7 +29,18 @@ type Scope struct {
 	Owner       string
 }
 
+// Compare names the window a result is compared with.
+type Compare string
+
+// Comparison windows. An empty Compare is CompareNone.
+const (
+	CompareNone           Compare = "none"
+	ComparePreviousPeriod Compare = "previous_period"
+)
+
 // Query asks for metrics over a business-date range. From and To are both inclusive.
+// Top keeps the best Top groups by the first metric and folds the rest into the Other group; zero
+// turns it off, and it needs exactly one dimension. Compare adds the previous period as Result.Previous.
 type Query struct {
 	Metrics    []string
 	Dimensions []string
@@ -37,6 +48,8 @@ type Query struct {
 	From, To   tenanttime.Date
 	Grain      Grain
 	Scope      Scope
+	Compare    Compare
+	Top        int
 }
 
 // Catalog is what queries compile against: the metric definitions and the record types they read.
@@ -58,18 +71,23 @@ func NewCatalog(defs []Metric, doctypes []*doctype.DocType) Catalog {
 }
 
 // Row is one bucket of one group. Values follow Result.Metrics; Group follows Result.Dimensions.
-// A value is null (Valid false) when a ratio's denominator is zero; sums and counts are never null.
+// A value is null (Valid false) when a ratio's or derived metric's divisor is zero or an operand is
+// null; sums and counts are never null. Label is set only on the Other group, whose Group is "__other__".
 type Row struct {
 	Period tenanttime.Date
 	Group  []string
+	Label  string
 	Values []decimal.NullDecimal
 }
 
-// Result holds every bucket of every group in order. Empty buckets are zero.
+// Result holds every bucket of every group in order. Empty buckets are zero. Previous, when the
+// query compares, pairs with Rows by position: Previous[i] is the previous-period bucket of Rows[i]
+// for the same group.
 type Result struct {
 	Metrics    []string
 	Dimensions []string
 	Rows       []Row
+	Previous   []Row
 }
 
 // periodStart is the first day of the bucket that contains t.
@@ -85,17 +103,25 @@ func periodStart(t time.Time, g Grain) time.Time {
 	return t
 }
 
-// nextPeriod is the first day of the bucket after the one starting at t.
-func nextPeriod(t time.Time, g Grain) time.Time {
+// stepPeriod moves a bucket start by n buckets; a negative n moves back.
+func stepPeriod(t time.Time, g Grain, n int) time.Time {
 	switch g {
-	case GrainDay:
-		return t.AddDate(0, 0, 1)
 	case GrainWeek:
-		return t.AddDate(0, 0, 7)
+		return t.AddDate(0, 0, 7*n)
 	case GrainMonth:
-		return t.AddDate(0, 1, 0)
+		return t.AddDate(0, n, 0)
 	}
-	return t.AddDate(0, 0, 1)
+	return t.AddDate(0, 0, n)
+}
+
+// bucketStarts lists the start of every bucket that touches [from, to], in order.
+func bucketStarts(from, to tenanttime.Date, g Grain) []time.Time {
+	var starts []time.Time
+	end := toTime(to)
+	for b := periodStart(toTime(from), g); !b.After(end); b = stepPeriod(b, g, 1) {
+		starts = append(starts, b)
+	}
+	return starts
 }
 
 // toTime places a business date at midnight UTC, so calendar arithmetic never meets a zone.
