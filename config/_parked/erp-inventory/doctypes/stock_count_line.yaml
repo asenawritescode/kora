@@ -1,0 +1,29 @@
+name: Stock Count Line
+module: Stock
+is_child_table: true
+title_field: product
+description: One product in a stock count.
+fields:
+  - fieldname: product
+    fieldtype: Link
+    options: Product
+    label: Product
+    reqd: true
+    in_list_view: true
+  - fieldname: system_qty
+    fieldtype: Float
+    label: System says
+    linked_field: "product.stock_qty"
+    read_only: true
+    in_list_view: true
+  - fieldname: counted_qty
+    fieldtype: Float
+    label: Counted
+    reqd: true
+    in_list_view: true
+  - fieldname: difference
+    fieldtype: Float
+    label: Difference
+    computed: "(- counted_qty system_qty)"
+    read_only: true
+    in_list_view: true

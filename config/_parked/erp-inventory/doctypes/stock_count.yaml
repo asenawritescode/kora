@@ -1,0 +1,52 @@
+name: Stock Count
+module: Stock
+title_field: name
+search_fields: note
+sort_field: creation
+sort_order: DESC
+description: >-
+  A stocktake. Count what is on the shelf, compare it with what the system
+  expects, and submit once: each product's stock is set to the counted number
+  and the stock ledger records the difference.
+quantity_effect:
+  target_doctype: Product
+  target_quantity_field: stock_qty
+  lines_field: items
+  source_record_field: product
+  delta_field: difference
+  direction: increase
+  status_field: status
+  apply_in_statuses: [Submitted]
+  ledger:
+    doctype: Stock Movement
+    target_field: product
+    change_field: quantity_change
+    balance_field: balance_after
+    source_doctype_field: source_doctype
+    source_name_field: source_name
+    reason_field: reason
+fields:
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Submitted
+    default: Draft
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: note
+    fieldtype: Data
+    label: Note
+    in_list_view: true
+  - fieldname: items
+    fieldtype: Table
+    label: Counted products
+    options: Stock Count Line
+    reqd: true
+doc_constraints:
+  - type: immutable_after
+    status_field: status
+    status_values: [Submitted]
+    immutable_fields: [status, note]
+    message: "A submitted stock count cannot be changed. Start a new count to correct it."
