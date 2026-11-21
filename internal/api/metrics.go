@@ -300,22 +300,27 @@ func (m metricsAPI) query(c *gin.Context) {
 		return
 	}
 	models := metrics.Models(ms)
-	seq, err := engine.SourceSequence(ctx, modelDocs(cat, models))
+	meta, err := queryMeta(ctx, engine, models)
 	if err != nil {
-		metricsRunError(c, "reading metric source sequence", err)
-		return
-	}
-	history, err := queryHistory(ctx, database, siteDialectFromContext(c, m.dialect), models)
-	if err != nil {
-		metricsRunError(c, "reading metric history progress", err)
+		metricsRunError(c, "reading query metadata", err)
 		return
 	}
 	out := resultOf(res)
 	out.Labels = adHocLabels(cat, adHoc)
-	c.JSON(http.StatusOK, metricsEnvelope{
-		Data: out,
-		Meta: contract.MetricsMeta{AsOf: time.Now().UTC().Format(time.RFC3339), Tier: "S", SourceSequence: seq, History: history},
-	})
+	c.JSON(http.StatusOK, metricsEnvelope{Data: out, Meta: meta})
+}
+
+// queryMeta is the freshness and rebuild state a query result carries.
+func queryMeta(ctx context.Context, engine metrics.Engine, models []string) (contract.MetricsMeta, error) {
+	seq, err := engine.SourceSequence(ctx, modelDocs(engine.Catalog, models))
+	if err != nil {
+		return contract.MetricsMeta{}, fmt.Errorf("reading metric source sequence: %w", err)
+	}
+	history, err := queryHistory(ctx, engine.DB, engine.Dialect, models)
+	if err != nil {
+		return contract.MetricsMeta{}, fmt.Errorf("reading metric history progress: %w", err)
+	}
+	return contract.MetricsMeta{AsOf: time.Now().UTC().Format(time.RFC3339), Tier: "S", SourceSequence: seq, History: history}, nil
 }
 
 // queryHistory reads the rebuild progress of the models a query reads and summarises it.

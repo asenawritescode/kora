@@ -1472,11 +1472,31 @@
       ],
       "type": "object"
     },
+    "MetricsHistory": {
+      "additionalProperties": false,
+      "properties": {
+        "progress": {
+          "type": "number"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "progress",
+        "state"
+      ],
+      "type": "object"
+    },
     "MetricsMeta": {
       "additionalProperties": false,
       "properties": {
         "as_of": {
           "type": "string"
+        },
+        "history": {
+          "$ref": "#/$defs/MetricsHistory",
+          "x-optional-pointer": true
         },
         "source_sequence": {
           "type": "integer"
@@ -3957,11 +3977,31 @@
       ],
       "type": "object"
     },
+    "MetricsHistory": {
+      "additionalProperties": false,
+      "properties": {
+        "progress": {
+          "type": "number"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "progress",
+        "state"
+      ],
+      "type": "object"
+    },
     "MetricsMeta": {
       "additionalProperties": false,
       "properties": {
         "as_of": {
           "type": "string"
+        },
+        "history": {
+          "$ref": "#/$defs/MetricsHistory",
+          "x-optional-pointer": true
         },
         "source_sequence": {
           "type": "integer"
