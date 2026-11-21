@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -96,15 +97,13 @@ func (g rankedGroup) compare(h rankedGroup) int {
 	return strings.Compare(g.key, h.key)
 }
 
-// topKeys ranks the groups by the first requested metric over the whole range and keeps the first n.
+// topKeys ranks the groups by the first requested metric and keeps the first n. A metric that
+// depends on a running series ranks by its value in the last bucket; any other sums its buckets.
 func (p plan) topKeys(agg aggregate, n int) map[string]bool {
-	totals := map[string]bucketSums{}
-	for bk, vals := range agg.sums {
-		totals[bk.group] = totals[bk.group].add(vals)
-	}
-	ranked := make([]rankedGroup, 0, len(totals))
-	for key, total := range totals {
-		ranked = append(ranked, rankedGroup{key: key, value: p.values(total)[0]})
+	starts := bucketStarts(p.from, p.to, p.grain)
+	ranked := make([]rankedGroup, 0, len(agg.groups))
+	for key := range agg.groups {
+		ranked = append(ranked, rankedGroup{key: key, value: p.rankValue(agg, key, starts)})
 	}
 	slices.SortFunc(ranked, rankedGroup.compare)
 	keep := make(map[string]bool, n)
@@ -112,4 +111,18 @@ func (p plan) topKeys(agg aggregate, n int) map[string]bool {
 		keep[r.key] = true
 	}
 	return keep
+}
+
+// rankValue is the first requested metric of one group over the range: its last bucket when the
+// metric is running, otherwise the sum of its buckets. The opening bucket is never summed.
+func (p plan) rankValue(agg aggregate, key string, starts []time.Time) decimal.NullDecimal {
+	if p.metrics[p.requested[0]].running {
+		settled := p.settle(agg, key, starts)
+		return p.values(settled[len(settled)-1])[0]
+	}
+	total := make(bucketSums, len(p.series))
+	for _, start := range starts {
+		total = total.add(agg.sums[bucketKey{period: toDate(start), group: key}])
+	}
+	return p.values(total)[0]
 }

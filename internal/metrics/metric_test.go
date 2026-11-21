@@ -51,6 +51,13 @@ func TestValidateRules(t *testing.T) {
 		{"bad name", []Metric{{Name: "Sales", Label: "S", Type: KindSimple, Model: "Sale", Measure: &Measure{Agg: "count"}}}, "snake_case"},
 		{"missing label", []Metric{{Name: "sales", Type: KindSimple, Model: "Sale", Measure: &Measure{Agg: "count"}}}, "label is required"},
 		{"unknown type", []Metric{{Name: "x", Label: "X", Type: "stock"}}, "must be simple"},
+		{"valid balance and cumulative", []Metric{
+			{Name: "on_hand", Label: "On hand", Type: KindBalance, Model: "Sale", Measure: &Measure{Agg: "sum", Field: "total"}},
+			{Name: "to_date", Label: "To date", Type: KindCumulative, Model: "Sale", Measure: &Measure{Agg: "count"}},
+			{Name: "d", Label: "D", Type: KindDerived, Formula: "on_hand * 2 + to_date"},
+		}, ""},
+		{"balance of count_distinct", []Metric{{Name: "x", Label: "X", Type: KindBalance, Model: "Sale", Measure: &Measure{Agg: "count_distinct", Field: "register"}}}, "not count_distinct"},
+		{"ratio of a balance", []Metric{{Name: "b", Label: "B", Type: KindBalance, Model: "Sale", Measure: &Measure{Agg: "sum", Field: "total"}}, receipts, {Name: "r", Label: "R", Type: KindRatio, Numerator: "b", Denominator: "receipts"}}, "ratio components must be simple"},
 	}
 	dts := posDoctypes(t)
 	for _, tc := range tests {

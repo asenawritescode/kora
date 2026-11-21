@@ -20,6 +20,10 @@ const defaultTimeout = 10 * time.Second
 // groupSep joins dimension values into a map key. Dimension values do not contain NUL.
 const groupSep = "\x00"
 
+// openingPeriod keys the one bucket that holds every day before a range, the opening of a balance.
+// It is the zero date, which no bucket start is.
+var openingPeriod = tenanttime.Date{}
+
 // Engine runs metric queries against one tenant's database.
 type Engine struct {
 	DB      *sql.DB
@@ -46,6 +50,14 @@ func (b bucketSums) add(other bucketSums) bucketSums {
 		b[i] = b[i].Add(v)
 	}
 	return b
+}
+
+// at returns the sum of series j, zero when the bucket is missing.
+func (b bucketSums) at(j int) decimal.Decimal {
+	if j < len(b) {
+		return b[j]
+	}
+	return decimal.Decimal{}
 }
 
 // aggregate is the summed series of one run. Groups maps each group key to its dimension values.
@@ -85,8 +97,30 @@ func (e Engine) Query(ctx context.Context, q Query) (Result, error) {
 	return res, nil
 }
 
-// run sends the plan's statement and sums the rows it returns.
+// run sums the plan's range. A plan with a balance also sums the days before the range, as the
+// opening bucket, so the balance can start from it.
 func (e Engine) run(ctx context.Context, p plan) (aggregate, error) {
+	agg, err := e.sumRows(ctx, p)
+	if err != nil || !p.needsOpening() {
+		return agg, err
+	}
+	opening := p
+	opening.opening = true
+	before, err := e.sumRows(ctx, opening)
+	if err != nil {
+		return aggregate{}, err
+	}
+	for bk, sums := range before.sums {
+		agg.sums[bk] = sums
+	}
+	for key, group := range before.groups {
+		agg.groups[key] = group
+	}
+	return agg, nil
+}
+
+// sumRows sends the plan's statement and sums the rows it returns.
+func (e Engine) sumRows(ctx context.Context, p plan) (aggregate, error) {
 	stmt, args := p.build(e.Dialect)
 	rows, err := e.DB.QueryContext(ctx, db.Rebind(e.Dialect, stmt), args...)
 	if err != nil {
@@ -138,7 +172,11 @@ func (p plan) addRow(rows *sql.Rows, agg aggregate) error {
 	}
 	key := strings.Join(group, groupSep)
 	agg.groups[key] = group
-	bk := bucketKey{period: toDate(periodStart(t, p.grain)), group: key}
+	period := openingPeriod
+	if !p.opening {
+		period = toDate(periodStart(t, p.grain))
+	}
+	bk := bucketKey{period: period, group: key}
 	if agg.sums[bk] == nil {
 		agg.sums[bk] = make(bucketSums, len(p.series))
 	}
@@ -190,17 +228,42 @@ func (p plan) rows(agg aggregate, keys []string, from, to tenanttime.Date) []Row
 	starts := bucketStarts(from, to, p.grain)
 	out := make([]Row, 0, len(keys)*len(starts))
 	for _, key := range keys {
-		for _, start := range starts {
+		settled := p.settle(agg, key, starts)
+		for i, start := range starts {
 			period := toDate(start)
-			bucket := agg.sums[bucketKey{period: period, group: key}]
-			if bucket == nil {
-				bucket = make(bucketSums, len(p.series))
-			}
-			row := Row{Period: period, Group: agg.groups[key], Values: p.values(bucket)}
+			row := Row{Period: period, Group: agg.groups[key], Values: p.values(settled[i])}
 			if key == otherGroup {
 				row.Label = otherLabel
 			}
 			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// settle returns the bucket sums of one group, one entry per start. A balance starts from its
+// opening and adds each bucket; a cumulative starts from zero at the range's first day. Every other
+// series is the bucket's own sum. A running series' bucket is its value as of the bucket's end; the
+// sums hold facts only through To, so a bucket that runs past To reads as of To.
+func (p plan) settle(agg aggregate, key string, starts []time.Time) []bucketSums {
+	opening := agg.sums[bucketKey{period: openingPeriod, group: key}]
+	acc := make(bucketSums, len(p.series))
+	for j, s := range p.series {
+		if s.kind == KindBalance {
+			acc[j] = opening.at(j)
+		}
+	}
+	out := make([]bucketSums, len(starts))
+	for i, start := range starts {
+		raw := agg.sums[bucketKey{period: toDate(start), group: key}]
+		out[i] = make(bucketSums, len(p.series))
+		for j, s := range p.series {
+			if !s.running() {
+				out[i][j] = raw.at(j)
+				continue
+			}
+			acc[j] = acc[j].Add(raw.at(j))
+			out[i][j] = acc[j]
 		}
 	}
 	return out

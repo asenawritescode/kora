@@ -28,6 +28,10 @@ const (
 	KindCumulative Kind = "cumulative"
 )
 
+// running reports whether a kind accumulates over the buckets of its range: a balance is the value
+// as of each bucket's end, a cumulative the total so far. Both are additive, so neither takes count_distinct.
+func (k Kind) running() bool { return k == KindBalance || k == KindCumulative }
+
 // Measure aggregates one fact column: sum of a measure, count of rows, or count_distinct of a dimension.
 type Measure struct {
 	Agg   string `yaml:"agg" json:"agg"`
@@ -139,6 +143,9 @@ func (m Metric) validateFact(c catalog) error {
 	if err := m.Measure.validate(dt.Facts); err != nil {
 		return err
 	}
+	if err := m.checkAdditive(); err != nil {
+		return err
+	}
 	for _, f := range m.Filters {
 		if err := f.validate(dt.Facts); err != nil {
 			return err
@@ -153,9 +160,21 @@ func (m Metric) validateRefs(c catalog) error {
 		return err
 	}
 	for _, ref := range m.refs() {
-		if _, ok := c.metrics[ref]; !ok {
+		target, ok := c.metrics[ref]
+		if !ok {
 			return fmt.Errorf("refers to unknown metric %q", ref)
 		}
+		if m.Type == KindRatio && target.Type.running() {
+			return fmt.Errorf("ratio components must be simple, but %q is %s", ref, target.Type)
+		}
+	}
+	return nil
+}
+
+// checkAdditive rejects a count_distinct on a balance or cumulative: distinct counts of each day do not add up.
+func (m Metric) checkAdditive() error {
+	if m.Type.running() && m.Measure != nil && m.Measure.Agg == aggCountDistinct {
+		return fmt.Errorf("a %s metric takes sum or count, not count_distinct", m.Type)
 	}
 	return nil
 }

@@ -41,9 +41,10 @@ func TestPreviousRange(t *testing.T) {
 	}
 }
 
-// sumsPlan is a plan whose first requested metric is a simple sum over one series.
+// sumsPlan is a plan over the single day 18 Nov whose first requested metric is a simple sum over one series.
 func sumsPlan() plan {
-	return plan{series: make([]series, 2), metrics: []output{{metric: "sales", kind: KindSimple, num: 0, den: -1}}, requested: []int{0}}
+	return plan{from: day(2026, 11, 18), to: day(2026, 11, 18), grain: GrainDay,
+		series: make([]series, 2), metrics: []output{{metric: "sales", kind: KindSimple, num: 0, den: -1}}, requested: []int{0}}
 }
 
 // groupAgg builds one bucket per (group, total) pair on a single day.
