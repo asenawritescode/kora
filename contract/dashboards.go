@@ -9,8 +9,27 @@ type DashboardDefinition struct {
 	Label        string           `json:"label"`
 	Description  string           `json:"description,omitempty"`
 	DefaultRange string           `json:"default_range"`
+	Pinned       []DashboardPin   `json:"pinned"`
 	Tiles        []DashboardTile  `json:"tiles"`
 	Charts       []DashboardChart `json:"charts"`
+}
+
+// DashboardPin is a tenant's pinned tile on one dashboard: a label and the saved question it reruns. Pins
+// are shown first, to every caller who can read every record type the question uses.
+//
+//contract:wire
+type DashboardPin struct {
+	ID       string        `json:"id"`
+	Label    string        `json:"label"`
+	Question SavedQuestion `json:"question"`
+}
+
+// DashboardPinRequest pins a question to a dashboard under a label.
+//
+//contract:wire
+type DashboardPinRequest struct {
+	Label    string        `json:"label"`
+	Question SavedQuestion `json:"question"`
 }
 
 // DashboardTile shows one metric's value for the dashboard range.

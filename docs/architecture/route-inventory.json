@@ -109,6 +109,16 @@
       "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.saveOverride-fm"
     },
     {
+      "method": "POST",
+      "path": "/api/dashboards/:name/pins",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.addPin-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/dashboards/:name/pins/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.removePin-fm"
+    },
+    {
       "method": "GET",
       "path": "/api/explore/catalog",
       "handler": "github.com/asenawritescode/kora/internal/api.registerExploreRoutes.func1"
@@ -892,6 +902,16 @@
       "method": "PUT",
       "path": "/api/v1/dashboards/:name/override",
       "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.saveOverride-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboards/:name/pins",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.addPin-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/dashboards/:name/pins/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.removePin-fm"
     },
     {
       "method": "GET",

@@ -608,6 +608,12 @@
         "name": {
           "type": "string"
         },
+        "pinned": {
+          "items": {
+            "$ref": "#/$defs/DashboardPin"
+          },
+          "type": "array"
+        },
         "tiles": {
           "items": {
             "$ref": "#/$defs/DashboardTile"
@@ -620,6 +626,7 @@
         "default_range",
         "label",
         "name",
+        "pinned",
         "tiles"
       ],
       "type": "object"
@@ -646,6 +653,42 @@
       "required": [
         "hidden",
         "order"
+      ],
+      "type": "object"
+    },
+    "DashboardPin": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "question"
+      ],
+      "type": "object"
+    },
+    "DashboardPinRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        }
+      },
+      "required": [
+        "label",
+        "question"
       ],
       "type": "object"
     },
@@ -3276,6 +3319,12 @@
         "name": {
           "type": "string"
         },
+        "pinned": {
+          "items": {
+            "$ref": "#/$defs/DashboardPin"
+          },
+          "type": "array"
+        },
         "tiles": {
           "items": {
             "$ref": "#/$defs/DashboardTile"
@@ -3288,6 +3337,7 @@
         "default_range",
         "label",
         "name",
+        "pinned",
         "tiles"
       ],
       "type": "object"
@@ -3314,6 +3364,42 @@
       "required": [
         "hidden",
         "order"
+      ],
+      "type": "object"
+    },
+    "DashboardPin": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "question"
+      ],
+      "type": "object"
+    },
+    "DashboardPinRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        }
+      },
+      "required": [
+        "label",
+        "question"
       ],
       "type": "object"
     },

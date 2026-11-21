@@ -13,6 +13,8 @@ func DashboardOverrideTablesMySQL() []string {
 			modified DATETIME(6) NOT NULL,
 			modified_by VARCHAR(140) NOT NULL DEFAULT ''
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		// Pins arrived after the table; existing sites get the column here, fresh ones see a duplicate-column no-op.
+		`ALTER TABLE _kora_dashboard_override ADD COLUMN pinned TEXT NOT NULL`,
 	}
 }
 
@@ -28,5 +30,6 @@ func DashboardOverrideTablesPostgres() []string {
 			"modified" TIMESTAMP NOT NULL,
 			"modified_by" VARCHAR(140) NOT NULL DEFAULT ''
 		)`,
+		`ALTER TABLE "_kora_dashboard_override" ADD COLUMN "pinned" TEXT NOT NULL DEFAULT '[]'`,
 	}
 }

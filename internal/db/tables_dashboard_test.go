@@ -14,8 +14,8 @@ func TestSystemTableSQLIncludesDashboardOverride(t *testing.T) {
 					ddl++
 				}
 			}
-			if ddl != 1 {
-				t.Fatalf("dashboard override ddl statements = %d, want 1", ddl)
+			if ddl != 2 {
+				t.Fatalf("dashboard override ddl statements = %d, want 2 (create, then the pinned column)", ddl)
 			}
 		})
 	}
