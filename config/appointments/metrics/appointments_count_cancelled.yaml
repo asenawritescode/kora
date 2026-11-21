@@ -1,0 +1,13 @@
+name: appointments_count_cancelled
+label: "Appointments: Cancelled"
+type: simple
+model: "Appointment"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Cancelled"
+time: business_date
+format: number
+description: "Appointments: Cancelled from the Appointment records (count)."

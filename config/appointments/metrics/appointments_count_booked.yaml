@@ -1,0 +1,13 @@
+name: appointments_count_booked
+label: "Appointments: Booked"
+type: simple
+model: "Appointment"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Booked"
+time: business_date
+format: number
+description: "Appointments: Booked from the Appointment records (count)."

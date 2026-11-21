@@ -1,0 +1,13 @@
+name: appointments_count_no_show
+label: "Appointments: No show"
+type: simple
+model: "Appointment"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "No show"
+time: business_date
+format: number
+description: "Appointments: No show from the Appointment records (count)."
