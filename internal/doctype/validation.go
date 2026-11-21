@@ -555,8 +555,9 @@ func validateDocConstraint(dc *DocConstraint, dt *DocType, doc *Document, oldDoc
 		if oldDoc == nil {
 			break
 		}
-		statusVal := doc.Get(dc.StatusField)
-		statusStr := fmt.Sprintf("%v", statusVal)
+		// "After" a status means the stored record has reached it: the write
+		// that moves a record into the status is still allowed.
+		statusStr := fmt.Sprintf("%v", oldDoc.Get(dc.StatusField))
 		for _, s := range dc.StatusValues {
 			if statusStr == s {
 				for _, fieldName := range dc.ImmutableFields {
