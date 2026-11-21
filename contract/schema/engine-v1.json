@@ -2282,6 +2282,132 @@
       ],
       "type": "object"
     },
+    "SavedQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "by": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "compare": {
+          "type": "string"
+        },
+        "filters": {
+          "items": {
+            "$ref": "#/$defs/MetricFilter"
+          },
+          "type": "array"
+        },
+        "from": {
+          "type": "string"
+        },
+        "grain": {
+          "type": "string"
+        },
+        "measure": {
+          "type": "string"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "record_type": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "top": {
+          "type": "integer"
+        },
+        "view": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SavedReport": {
+      "additionalProperties": false,
+      "properties": {
+        "broken_at": {
+          "type": "string"
+        },
+        "broken_reason": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "modified": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        },
+        "record_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "modified",
+        "name",
+        "owner",
+        "question",
+        "record_types",
+        "visibility"
+      ],
+      "type": "object"
+    },
+    "SavedReportCopyRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "visibility"
+      ],
+      "type": "object"
+    },
+    "SavedReportRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "question",
+        "visibility"
+      ],
+      "type": "object"
+    },
     "SiteAggregateKey": {
       "additionalProperties": false,
       "properties": {
@@ -4797,6 +4923,132 @@
         "name",
         "namespace",
         "version"
+      ],
+      "type": "object"
+    },
+    "SavedQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "by": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "compare": {
+          "type": "string"
+        },
+        "filters": {
+          "items": {
+            "$ref": "#/$defs/MetricFilter"
+          },
+          "type": "array"
+        },
+        "from": {
+          "type": "string"
+        },
+        "grain": {
+          "type": "string"
+        },
+        "measure": {
+          "type": "string"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "record_type": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "top": {
+          "type": "integer"
+        },
+        "view": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SavedReport": {
+      "additionalProperties": false,
+      "properties": {
+        "broken_at": {
+          "type": "string"
+        },
+        "broken_reason": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "modified": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        },
+        "record_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "modified",
+        "name",
+        "owner",
+        "question",
+        "record_types",
+        "visibility"
+      ],
+      "type": "object"
+    },
+    "SavedReportCopyRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "visibility"
+      ],
+      "type": "object"
+    },
+    "SavedReportRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "question",
+        "visibility"
       ],
       "type": "object"
     },
