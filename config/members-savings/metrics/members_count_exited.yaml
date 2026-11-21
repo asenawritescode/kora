@@ -1,0 +1,13 @@
+name: members_count_exited
+label: "Members: Exited"
+type: simple
+model: "Member"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Exited"
+time: business_date
+format: number
+description: "Members: Exited from the Member records (count)."

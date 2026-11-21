@@ -1,0 +1,14 @@
+name: loans_amount_disbursed
+label: "Loan amount: Disbursed"
+type: simple
+model: "Loan"
+measure:
+  agg: sum
+  field: amount
+filters:
+  - field: status
+    op: "="
+    value: "Disbursed"
+time: business_date
+format: currency
+description: "Loan amount: Disbursed from the Loan records (sum)."

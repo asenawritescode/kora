@@ -1,0 +1,14 @@
+name: loans_amount_applied
+label: "Loan amount: Applied"
+type: simple
+model: "Loan"
+measure:
+  agg: sum
+  field: amount
+filters:
+  - field: status
+    op: "="
+    value: "Applied"
+time: business_date
+format: currency
+description: "Loan amount: Applied from the Loan records (sum)."

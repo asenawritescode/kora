@@ -1,0 +1,14 @@
+name: loans_amount_repaid
+label: "Loan amount: Repaid"
+type: simple
+model: "Loan"
+measure:
+  agg: sum
+  field: amount
+filters:
+  - field: status
+    op: "="
+    value: "Repaid"
+time: business_date
+format: currency
+description: "Loan amount: Repaid from the Loan records (sum)."

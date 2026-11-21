@@ -1,0 +1,14 @@
+name: members_savings_insights
+label: "Members and savings insights"
+description: "Figures and charts that reproduce the members and savings overview report."
+default_range: last_30_days
+tiles:
+  - metric: members_count_active
+  - metric: members_count_dormant
+  - metric: members_count_exited
+  - metric: loans_amount_applied
+  - metric: loans_amount_approved
+  - metric: loans_amount_disbursed
+  - metric: loans_amount_repaid
+  - metric: loans_amount_rejected
+charts:

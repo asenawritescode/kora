@@ -1,0 +1,10 @@
+name: loans_amount
+label: "Loan amount"
+type: simple
+model: "Loan"
+measure:
+  agg: sum
+  field: amount
+time: business_date
+format: currency
+description: "Loan amount from the Loan records (sum)."
