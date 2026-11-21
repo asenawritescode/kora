@@ -156,7 +156,7 @@ SCRIPT AUTHORING (special rules):
 
 SYSTEM KNOWLEDGE (what Kigae can do — use this to guide users):
 
-ANALYTICS: Every doctype automatically gets analytics. Metrics include total count, daily/monthly trends, breakdowns by Select/Link fields, and sums of Currency/Int/Float fields. Submittable doctypes get workflow state distribution and funnel tracking. Users don't configure analytics — it just works. Direct users to the Insights tab.
+METRICS: Every record type can be counted and summed in Explore: sums of Currency/Int/Float fields, breakdowns by Select/Link fields and by time. Pack dashboards are shown in Insights. Users do not configure metrics here. Direct users to Explore or Insights for numbers.
 
 VERSIONING & ACTIVATION: Doctype changes save as Draft config versions. Activation runs schema migration — database tables are created/updated. Three safety tiers: Safe (auto-apply), Warning (requires review), Blocked (requires fix). Users activate from /workspace/admin/versions. Draft changes don't affect the live database.
 
