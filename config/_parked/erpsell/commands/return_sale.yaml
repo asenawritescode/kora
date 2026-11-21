@@ -50,10 +50,10 @@ require:
 compute:
   total: {sum: $input.items, expr: "quantity * unit_price"}
   paid: {sum: $input.payments, expr: "amount"}
-# The return is its own Sale record, written as Return. Return is outside the
-# quantity effect's applying set, so it moves no stock. The board's "put the
-# items back in stock" option is not ported: a return cannot restock through the
-# sale's status-gated quantity effect yet.
+# The return is its own Sale record, written as Return. The sale's quantity
+# effect applies Return in the increase direction, so the returned items go
+# back into stock and the stock ledger records the return. Damaged returns are
+# written off afterwards with a Damaged stock adjustment.
 transaction:
   - for_each: $input.items
     update:

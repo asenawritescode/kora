@@ -8,7 +8,9 @@ quantity_effect:
   delta_field: quantity
   direction: decrease
   status_field: status
-  apply_in_statuses: [Awaiting Payment, Partially Paid, Paid]
+  apply_in_statuses: [Awaiting Payment, Partially Paid, Paid, Return]
+  status_directions:
+    Return: increase
   ledger:
     doctype: Stock Movement
     target_field: product
