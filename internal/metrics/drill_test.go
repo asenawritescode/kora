@@ -3,7 +3,9 @@ package metrics
 import (
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/tenanttime"
 )
 
@@ -79,4 +81,39 @@ func TestDrillTurnsNumberIntoRecordFilters(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDrillDateFieldFiltersByDay checks the two kinds of time field: a Date field is bounded by the
+// days themselves, inclusive, and a Datetime field such as creation by the zone's instants.
+func TestDrillDateFieldFiltersByDay(t *testing.T) {
+	cat := posCatalog(t)
+	day := &doctype.DocType{Name: "Day", Fields: []doctype.Field{{Fieldname: "sale_date", Fieldtype: "Date"}, {Fieldname: "status", Fieldtype: "Data"}, {Fieldname: "total", Fieldtype: "Currency"}},
+		Facts: &doctype.FactModel{Time: "sale_date", StatusField: "status", Measures: []doctype.FactMeasure{{Field: "total"}}}}
+	cat.Models["Day"] = day
+	cat.Metrics["day_sales"] = Metric{Name: "day_sales", Label: "Day sales", Type: KindSimple, Model: "Day",
+		Measure: &Measure{Agg: aggSum, Field: "total"}, Filters: []Filter{{Field: "status", Op: "=", Value: "Paid"}}}
+	nairobi := tenanttime.Clock{Location: mustLoadZone(t, "Africa/Nairobi")}
+	from, to := tenanttime.Date{Year: 2026, Month: 11, Day: 19}, tenanttime.Date{Year: 2026, Month: 11, Day: 20}
+	got, err := cat.Drill(DrillRequest{Metric: "day_sales", From: from, To: to}, nairobi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Filter{
+		{Field: "status", Op: "=", Value: "Paid"},
+		{Field: "sale_date", Op: ">=", Value: "2026-11-19"},
+		{Field: "sale_date", Op: "<=", Value: "2026-11-20"},
+	}
+	if got.Doctype != "Day" || !reflect.DeepEqual(got.Filters, want) {
+		t.Fatalf("drill = %s %v, want Day %v", got.Doctype, got.Filters, want)
+	}
+}
+
+// mustLoadZone loads an IANA zone for a test.
+func mustLoadZone(t *testing.T, name string) *time.Location {
+	t.Helper()
+	loc, err := tenanttime.ParseZone(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loc
 }

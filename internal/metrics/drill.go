@@ -59,11 +59,22 @@ func (c Catalog) Drill(req DrillRequest, clock tenanttime.Clock) (Drill, error) 
 		}
 		out.Filters = append(out.Filters, Filter{Field: dim, Op: "=", Value: req.Group[dim]})
 	}
-	lo, hi := instants(req.From, req.To, clock)
-	out.Filters = append(out.Filters,
-		Filter{Field: f.Time, Op: ">=", Value: lo.UTC().Format(drillTimeLayout)},
-		Filter{Field: f.Time, Op: "<", Value: hi.UTC().Format(drillTimeLayout)})
+	out.Filters = append(out.Filters, timeFilters(dt, f.Time, req.From, req.To, clock)...)
 	return out, nil
+}
+
+// timeFilters bounds the record time field to the days From through To. A Date field is compared with
+// the days themselves, inclusive. Any other time field (creation, a Datetime) is compared with the
+// instants the tenant's days start and end at, in UTC.
+func timeFilters(dt *doctype.DocType, field string, from, to tenanttime.Date, clock tenanttime.Clock) []Filter {
+	if tf := dt.GetField(field); tf != nil && tf.Fieldtype == "Date" {
+		return []Filter{{Field: field, Op: ">=", Value: from.String()}, {Field: field, Op: "<=", Value: to.String()}}
+	}
+	lo, hi := instants(from, to, clock)
+	return []Filter{
+		{Field: field, Op: ">=", Value: lo.UTC().Format(drillTimeLayout)},
+		{Field: field, Op: "<", Value: hi.UTC().Format(drillTimeLayout)},
+	}
 }
 
 // instants is the first instant of the day From and the first instant after the day To, in the
