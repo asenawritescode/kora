@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/asenawritescode/kora/internal/eventstream"
-	"regexp"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/eventstream"
 
 	"github.com/DATA-DOG/go-sqlmock"
 
@@ -245,35 +245,6 @@ func TestWorker_InsertIncrementsCount(t *testing.T) {
 		t.Error("expected count delta after insert")
 	} else if delta != 1.0 {
 		t.Errorf("expected count delta 1, got %f", delta)
-	}
-}
-
-func TestWorkerPartitionsEntityFactsAndQueryByExactScope(t *testing.T) {
-	dt := buildTestDocType("Invoice", false, field("name", "Data", "Name", true))
-	worker := testWorker(testRegistry(dt), "tenant-a")
-	entityA := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-a"}
-	entityB := contract.BusinessScope{TenantID: "tenant-a", Kind: contract.ScopeKindLegalEntity, LegalEntityID: "entity-b"}
-	date := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	for _, scope := range []contract.BusinessScope{entityA, entityB} {
-		worker.process(eventstream.ChangeEvent{Site: "tenant-a", BusinessScope: scope, Doctype: "Invoice", Operation: eventstream.EventInsert, Timestamp: date})
-	}
-	keyA := deltaKey{BusinessScope: entityA, Doctype: "Invoice", Metric: "invoice_count", Date: "2026-10-01"}
-	keyB := deltaKey{BusinessScope: entityB, Doctype: "Invoice", Metric: "invoice_count", Date: "2026-10-01"}
-	if worker.deltas[keyA] != 1 || worker.deltas[keyB] != 1 || len(worker.deltas) != 4 {
-		t.Fatalf("entity facts are not partitioned: %#v", worker.deltas)
-	}
-	database, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT dimension, SUM(value) AS value FROM _kora_analytics_daily WHERE site = ? AND scope_kind = ? AND legal_entity_id = ? AND doctype = ? AND metric = ? AND date >= ? AND date <= ? GROUP BY dimension ORDER BY value DESC LIMIT ?")).WithArgs("tenant-a", "legal_entity", "entity-a", "Invoice", "invoice_count", "2026-10-01", "2026-10-01", 200).WillReturnRows(sqlmock.NewRows([]string{"dimension", "value"}).AddRow("", 1))
-	queryEngine := &QueryEngine{DB: database, SiteName: "tenant-a", Dialect: db.Resolve("mysql"), BusinessScope: entityA}
-	if _, err := queryEngine.Resolve(&Metric{Name: "invoice_count", DocType: "Invoice", Type: MetricCount}, QueryRequest{From: "2026-10-01", To: "2026-10-01"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
 	}
 }
 

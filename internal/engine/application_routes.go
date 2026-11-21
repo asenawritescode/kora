@@ -44,7 +44,6 @@ type ApplicationRouteConfig struct {
 	PublicAppBaseURL    string
 	CloudIdentityURL    string
 	CloudIdentityToken  string
-	AnalyticsCache      *api.AnalyticsQueryCache
 	RealtimeConnections *api.RealtimeConnectionOwner
 
 	// ExtensionTokenCacheTTL caches extension token verification per process;
@@ -152,7 +151,6 @@ func apiRouteOptions(config ApplicationRouteConfig) api.RouteOptions {
 		HTTPAllowlist:       config.HTTPAllowlist,
 		AsyncHookSink:       config.AsyncHookSink,
 		KernelCommands:      config.KernelCommands,
-		AnalyticsCache:      config.AnalyticsCache,
 		RealtimeConnections: config.RealtimeConnections,
 	}
 }

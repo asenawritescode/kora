@@ -147,41 +147,9 @@
   "contract::validateLocalSchemaReferences": {
    "cognitive": 31
   },
-  "internal/analytics::(*QueryEngine).Resolve": {
-   "cognitive": 23,
-   "cyclomatic": 22
-  },
-  "internal/analytics::(*QueryEngine).ResolveInsights": {
-   "cognitive": 45,
-   "cyclomatic": 20
-  },
-  "internal/analytics::(*QueryEngine).resolveModelQuery": {
-   "cognitive": 25,
-   "cyclomatic": 23
-  },
-  "internal/analytics::(*QueryEngine).resolvePublishedProjection": {
-   "cognitive": 110,
-   "cyclomatic": 67
-  },
-  "internal/analytics::(*QueryEngine).resolveRelatedMeasure": {
-   "cognitive": 81,
-   "cyclomatic": 54
-  },
   "internal/analytics::(*RebuildRunner).process": {
    "cognitive": 51,
    "cyclomatic": 28
-  },
-  "internal/analytics::(*ReportDefinition).Validate": {
-   "cognitive": 32,
-   "cyclomatic": 21
-  },
-  "internal/analytics::(*SemanticModel).Validate": {
-   "cognitive": 80,
-   "cyclomatic": 58
-  },
-  "internal/analytics::(*SemanticRequest).Validate": {
-   "cognitive": 66,
-   "cyclomatic": 42
   },
   "internal/analytics::(*Worker).flush": {
    "cognitive": 51,
@@ -194,10 +162,6 @@
   "internal/analytics::(*Worker).run": {
    "cognitive": 20
   },
-  "internal/analytics::(QueryRequest).Validate": {
-   "cognitive": 26,
-   "cyclomatic": 28
-  },
   "internal/analytics::Backfill": {
    "cognitive": 59,
    "cyclomatic": 39,
@@ -205,10 +169,6 @@
   },
   "internal/analytics::BootstrapTables": {
    "cognitive": 21,
-   "cyclomatic": 17
-  },
-  "internal/analytics::BuildSemanticModel": {
-   "cognitive": 19,
    "cyclomatic": 17
   },
   "internal/analytics::ClaimNextRebuildJob": {
@@ -224,20 +184,6 @@
    "cognitive": 26,
    "cyclomatic": 23
   },
-  "internal/analytics::Resolve": {
-   "statements": 49
-  },
-  "internal/analytics::Validate": {
-   "statements": 65
-  },
-  "internal/analytics::ValidateReportModels": {
-   "cognitive": 83,
-   "cyclomatic": 36,
-   "statements": 50
-  },
-  "internal/analytics::analyticsPeriodExpression": {
-   "cyclomatic": 19
-  },
   "internal/analytics::backfillMetricWithExec": {
    "statements": 41
   },
@@ -249,15 +195,6 @@
   },
   "internal/analytics::process": {
    "statements": 79
-  },
-  "internal/analytics::resolveModelQuery": {
-   "statements": 42
-  },
-  "internal/analytics::resolvePublishedProjection": {
-   "statements": 132
-  },
-  "internal/analytics::resolveRelatedMeasure": {
-   "statements": 138
   },
   "internal/analytics::rollupTableDDL": {
    "lines": 154
@@ -345,15 +282,15 @@
    "cognitive": 29
   },
   "internal/api::(*Handler).HandleConfigVersionActivate": {
-   "cognitive": 134,
-   "cyclomatic": 72
+   "cognitive": 117,
+   "cyclomatic": 66
   },
   "internal/api::(*Handler).HandleConfigVersionPreview": {
    "cognitive": 19
   },
   "internal/api::(*Handler).HandleConfigVersionRollback": {
-   "cognitive": 85,
-   "cyclomatic": 55
+   "cognitive": 68,
+   "cyclomatic": 49
   },
   "internal/api::(*Handler).HandleConfigVersionSnapshot": {
    "cognitive": 17
@@ -414,8 +351,8 @@
    "cyclomatic": 23
   },
   "internal/api::(*Handler).HandleSystemDoctypeDelete": {
-   "cognitive": 35,
-   "cyclomatic": 27
+   "cognitive": 30,
+   "cyclomatic": 25
   },
   "internal/api::(*Handler).HandleSystemDoctypeUpdate": {
    "cognitive": 19
@@ -538,13 +475,13 @@
    "statements": 57
   },
   "internal/api::HandleConfigVersionActivate": {
-   "statements": 172
+   "statements": 162
   },
   "internal/api::HandleConfigVersionPreview": {
    "statements": 42
   },
   "internal/api::HandleConfigVersionRollback": {
-   "statements": 149
+   "statements": 138
   },
   "internal/api::HandleConfigVersionSnapshot": {
    "statements": 42
@@ -613,13 +550,13 @@
    "statements": 60
   },
   "internal/api::HandleSystemDoctypeCreate": {
-   "statements": 63
+   "statements": 62
   },
   "internal/api::HandleSystemDoctypeDelete": {
-   "statements": 64
+   "statements": 60
   },
   "internal/api::HandleSystemDoctypeUpdate": {
-   "statements": 52
+   "statements": 51
   },
   "internal/api::HandleSystemNavigation": {
    "statements": 76
@@ -637,16 +574,11 @@
    "cognitive": 41,
    "cyclomatic": 22
   },
-  "internal/api::RegisterAnalyticsRoutes": {
-   "cognitive": 143,
-   "cyclomatic": 76,
-   "lines": 370
-  },
   "internal/api::RegisterOperations": {
    "statements": 78
   },
   "internal/api::RegisterRoutesOnGroup": {
-   "statements": 73
+   "statements": 72
   },
   "internal/api::RegisterSystemRoutes": {
    "statements": 41
@@ -658,10 +590,6 @@
    "cognitive": 44,
    "cyclomatic": 22,
    "statements": 46
-  },
-  "internal/api::analyticsModelSourcesReadable": {
-   "cognitive": 26,
-   "cyclomatic": 20
   },
   "internal/api::applyTransactionLinkedFields": {
    "cognitive": 24,
@@ -698,11 +626,6 @@
   },
   "internal/api::capabilities": {
    "statements": 43
-  },
-  "internal/api::checkRelatedModelPermissions": {
-   "cognitive": 52,
-   "cyclomatic": 24,
-   "statements": 42
   },
   "internal/api::configuredTransactionLineRecords": {
    "cognitive": 51,
@@ -743,9 +666,6 @@
    "statements": 44
   },
   "internal/api::filterPublishedProjectionRows": {
-   "cognitive": 16
-  },
-  "internal/api::filterReadableAnalyticsCatalog": {
    "cognitive": 16
   },
   "internal/api::handleChannelTool": {
@@ -1110,8 +1030,7 @@
    "cognitive": 22
   },
   "internal/configstore::(*Store).activateSnapshot": {
-   "cognitive": 22,
-   "cyclomatic": 17
+   "cognitive": 19
   },
   "internal/configstore::ApplyModuleLifecycleChangeTx": {
    "statements": 42
@@ -1239,9 +1158,9 @@
    "cognitive": 16
   },
   "internal/doctype::buildSnapshot": {
-   "cognitive": 65,
-   "cyclomatic": 31,
-   "statements": 71
+   "cognitive": 57,
+   "cyclomatic": 29,
+   "statements": 63
   },
   "internal/doctype::checkFieldUnknownKeys": {
    "cognitive": 69,
@@ -1613,9 +1532,9 @@
    "cyclomatic": 16
   },
   "internal/engine::registerResourceMetrics": {
-   "cognitive": 140,
-   "cyclomatic": 49,
-   "statements": 224
+   "cognitive": 138,
+   "cyclomatic": 48,
+   "statements": 216
   },
   "internal/engine::registeredConfigQueryProviders": {
    "cognitive": 52,
@@ -2573,14 +2492,14 @@
    "cyclomatic": 16
   },
   "internal/site::parseConfigPack": {
-   "cognitive": 90,
-   "cyclomatic": 59,
-   "statements": 125
+   "cognitive": 81,
+   "cyclomatic": 54,
+   "statements": 113
   },
   "internal/site::parsePackSnapshot": {
-   "cognitive": 18,
-   "cyclomatic": 18,
-   "statements": 48
+   "cognitive": 17,
+   "cyclomatic": 17,
+   "statements": 45
   },
   "internal/site::removePlatformSiteRegistrationByID": {
    "cognitive": 33,

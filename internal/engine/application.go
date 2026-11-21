@@ -45,7 +45,6 @@ type Application struct {
 	Registry            *doctype.Registry
 	Transactions        *orm.TxManager
 	SessionManager      *auth.SessionManager
-	AnalyticsCache      *api.AnalyticsQueryCache
 	RealtimeConnections *api.RealtimeConnectionOwner
 }
 
@@ -81,7 +80,6 @@ func BuildApplication(config ApplicationConfig) (*Application, error) {
 		registry = tenants[0].Registry
 	}
 	transactions := &orm.TxManager{DB: config.Database, Registry: registry, Dialect: kdb.Resolve(config.Common.DBType)}
-	analyticsCache := api.NewAnalyticsQueryCache()
 	realtimeConnections := config.RealtimeConnections
 	if realtimeConnections == nil {
 		realtimeConnections = api.NewRealtimeConnectionOwner()
@@ -96,7 +94,7 @@ func BuildApplication(config ApplicationConfig) (*Application, error) {
 		APIDefaultLimit: config.Common.APIDefaultLimit, APIMaxLimit: config.Common.APIMaxLimit,
 		// Tenant middleware pins services into each request snapshot. Production
 		// route handlers use that snapshot, not the compatibility registry.
-		BinaryVersion: config.BinaryVersion, AnalyticsCache: analyticsCache, RealtimeConnections: realtimeConnections,
+		BinaryVersion: config.BinaryVersion, RealtimeConnections: realtimeConnections,
 		PublicAppBaseURL: config.PublicAppBaseURL,
 		CloudIdentityURL: config.CloudIdentityURL, CloudIdentityToken: config.CloudIdentityToken,
 		ExtensionTokenCacheTTL: time.Duration(config.Common.ExtensionTokenCacheSeconds) * time.Second,
@@ -105,5 +103,5 @@ func BuildApplication(config ApplicationConfig) (*Application, error) {
 		return nil, err
 	}
 	sessionManager.SetCacheBudget(config.SessionCacheBudget)
-	return &Application{Router: router, Registry: registry, Transactions: transactions, SessionManager: sessionManager, AnalyticsCache: analyticsCache, RealtimeConnections: realtimeConnections}, nil
+	return &Application{Router: router, Registry: registry, Transactions: transactions, SessionManager: sessionManager, RealtimeConnections: realtimeConnections}, nil
 }

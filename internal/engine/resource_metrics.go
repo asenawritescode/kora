@@ -4,13 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/asenawritescode/kora/internal/eventbus"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/asenawritescode/kora/internal/api"
+	"github.com/asenawritescode/kora/internal/eventbus"
+
 	"github.com/asenawritescode/kora/internal/auth"
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/internal/natsprovider"
@@ -41,11 +41,8 @@ type ResourceMetricSources struct {
 	DurableWorkScan interface {
 		Snapshot() DurableWorkScannerSnapshot
 	}
-	NATSRealtime        *natsprovider.Provider
-	DeletionWorker      *PendingDeletionWorker
-	AnalyticsQueryCache interface {
-		AnalyticsQueryCacheSnapshot() api.AnalyticsQueryCacheSnapshot
-	}
+	NATSRealtime   *natsprovider.Provider
+	DeletionWorker *PendingDeletionWorker
 }
 
 func RegisterResourceMetrics(tenants *knet.SiteRouter, hooks *AsyncHookWorker, scripts *script.BudgetedRunner, sources ...ResourceMetricSources) (*ResourceMetrics, error) {
@@ -404,15 +401,6 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 			values["kora.analytics.listeners.process_active"] = int64(snapshot.Listeners)
 			values["kora.analytics.listeners.process_capacity"] = int64(snapshot.MaxListeners)
 			values["kora.analytics.listeners.process_rejected"] = int64(snapshot.RejectedListeners)
-		}
-		if source.AnalyticsQueryCache != nil {
-			snapshot := source.AnalyticsQueryCache.AnalyticsQueryCacheSnapshot()
-			values["kora.analytics.query_cache.entries"] = int64(snapshot.Entries)
-			values["kora.analytics.query_cache.max_entries"] = int64(snapshot.MaxEntries)
-			values["kora.analytics.query_cache.bytes"] = int64(snapshot.Bytes)
-			values["kora.analytics.query_cache.max_bytes"] = int64(snapshot.MaxBytes)
-			values["kora.analytics.query_cache.evictions"] = int64(snapshot.Evictions)
-			values["kora.analytics.query_cache.rejected"] = int64(snapshot.Rejected)
 		}
 		for index, instrument := range instruments {
 			observer.ObserveInt64(instrument, values[names[index]])

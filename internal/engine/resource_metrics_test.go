@@ -12,7 +12,6 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/internal/analytics"
-	"github.com/asenawritescode/kora/internal/api"
 	"github.com/asenawritescode/kora/internal/auth"
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/net"
@@ -21,14 +20,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
-
-type analyticsCacheSnapshotStub struct {
-	snapshot api.AnalyticsQueryCacheSnapshot
-}
-
-func (s analyticsCacheSnapshotStub) AnalyticsQueryCacheSnapshot() api.AnalyticsQueryCacheSnapshot {
-	return s.snapshot
-}
 
 func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	reader := metric.NewManualReader()
@@ -167,7 +158,7 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	deletionWorker.attempts.Store(4)
 	deletionWorker.failures.Store(2)
 	deletionWorker.rejected.Store(3)
-	metrics, err := registerResourceMetrics(provider.Meter("resource-metrics-test"), router, nil, nil, ResourceMetricSources{PlatformDB: platformDB, RealtimeStreams: realtime, SessionCache: sessionBudget, Uploads: uploads, AnalyticsQueueAdmission: listenerQueueAdmission, DurableWorkScan: durableScan, DeletionWorker: deletionWorker, AnalyticsQueryCache: analyticsCacheSnapshotStub{snapshot: api.AnalyticsQueryCacheSnapshot{Entries: 2, MaxEntries: 256, Bytes: 4096, MaxBytes: 32 << 20, Evictions: 3, Rejected: 4}}})
+	metrics, err := registerResourceMetrics(provider.Meter("resource-metrics-test"), router, nil, nil, ResourceMetricSources{PlatformDB: platformDB, RealtimeStreams: realtime, SessionCache: sessionBudget, Uploads: uploads, AnalyticsQueueAdmission: listenerQueueAdmission, DurableWorkScan: durableScan, DeletionWorker: deletionWorker})
 	if err != nil {
 		t.Fatal("register resource metrics:", err)
 	}
@@ -245,9 +236,6 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	}
 	if values["kora.analytics.listeners.process_active"] != 2 || values["kora.analytics.listeners.process_capacity"] != 2 || values["kora.analytics.listeners.process_rejected"] != 1 {
 		t.Fatalf("process analytics listener count metrics = %v", values)
-	}
-	if values["kora.analytics.query_cache.entries"] != 2 || values["kora.analytics.query_cache.max_entries"] != 256 || values["kora.analytics.query_cache.bytes"] != 4096 || values["kora.analytics.query_cache.max_bytes"] != 32<<20 || values["kora.analytics.query_cache.evictions"] != 3 || values["kora.analytics.query_cache.rejected"] != 4 {
-		t.Fatalf("analytics query cache metrics = %v", values)
 	}
 	if values["kora.tenant.durable_scan.probes"] != 7 || values["kora.tenant.durable_scan.due_tenants"] != 2 || values["kora.tenant.durable_scan.probe_failures"] != 1 || values["kora.tenant.durable_scan.scan_failures"] != 2 || values["kora.tenant.durable_scan.wake_failures"] != 1 || values["kora.tenant.durable_scan.capacity_rejections"] != 1 || values["kora.tenant.durable_scan.completed_sweeps"] != 3 || values["kora.tenant.durable_scan.last_sweep_age_ns"] <= 0 {
 		t.Fatalf("durable work scan metrics = %v", values)

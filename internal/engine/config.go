@@ -387,7 +387,7 @@ func newEngine(ctx context.Context, config Config, deps engineAssemblyDependenci
 	if config.Telemetry.MetricsEnabled {
 		var budgetedScripts *script.BudgetedRunner
 		budgetedScripts, _ = shared.ScriptRunner.(*script.BudgetedRunner)
-		resourceMetrics, metricsErr := RegisterResourceMetrics(tenantAssembly.Tenants, httpAssembly.AsyncHookWorker, budgetedScripts, ResourceMetricSources{PlatformDB: startup.Platform.DB, RealtimeStreams: resources.RealtimeStreams, SessionCache: resources.SessionCacheBudget, Uploads: resources.UploadAdmission, AnalyticsQueueAdmission: resources.AnalyticsQueueAdmission, NATSRealtime: shared.NATSProvider, TenantActivation: tenantAssembly.Coordinator, DurableWorkScan: tenantAssembly.DurableWorkScanner, DeletionWorker: resources.DeletionWorker, AnalyticsQueryCache: httpAssembly.Application.AnalyticsCache})
+		resourceMetrics, metricsErr := RegisterResourceMetrics(tenantAssembly.Tenants, httpAssembly.AsyncHookWorker, budgetedScripts, ResourceMetricSources{PlatformDB: startup.Platform.DB, RealtimeStreams: resources.RealtimeStreams, SessionCache: resources.SessionCacheBudget, Uploads: resources.UploadAdmission, AnalyticsQueueAdmission: resources.AnalyticsQueueAdmission, NATSRealtime: shared.NATSProvider, TenantActivation: tenantAssembly.Coordinator, DurableWorkScan: tenantAssembly.DurableWorkScanner, DeletionWorker: resources.DeletionWorker})
 		if metricsErr != nil {
 			return nil, fmt.Errorf("register Engine resource metrics: %w", metricsErr)
 		}

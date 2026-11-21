@@ -37,7 +37,7 @@ func TestBuildApplicationOwnsRouterAndDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildApplication: %v", err)
 	}
-	if application == nil || application.Router == nil || application.Registry == nil || application.Transactions == nil || application.SessionManager == nil || application.AnalyticsCache == nil {
+	if application == nil || application.Router == nil || application.Registry == nil || application.Transactions == nil || application.SessionManager == nil {
 		t.Fatalf("BuildApplication returned incomplete application: %#v", application)
 	}
 	if err := application.SessionManager.Close(); err != nil {

@@ -410,44 +410,6 @@ type RebuildJob struct {
 	Error        string     `json:"error,omitempty"`
 }
 
-func CreateRebuildJob(db *sql.DB, dialect kdb.Dialect, job *RebuildJob) error {
-	if db == nil || job == nil {
-		return fmt.Errorf("analytics rebuild job requires database and job")
-	}
-	table := dialect.QuoteIdent("_kora_analytics_rebuild_job")
-	_, err := db.Exec(kdb.Rebind(dialect, fmt.Sprintf(`INSERT INTO %s
-		(id, site, doctype, from_date, status, started_at, metrics, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, table)),
-		job.ID, job.Site, job.DocType, job.From.Format("2006-01-02"), job.Status,
-		job.StartedAt, job.Metrics, job.StartedAt)
-	return err
-}
-
-func GetRebuildJob(db *sql.DB, dialect kdb.Dialect, site, id string) (*RebuildJob, error) {
-	if db == nil {
-		return nil, fmt.Errorf("analytics rebuild job requires database")
-	}
-	table := dialect.QuoteIdent("_kora_analytics_rebuild_job")
-	var job RebuildJob
-	var rawFromDate any
-	var completed sql.NullTime
-	err := db.QueryRow(kdb.Rebind(dialect, fmt.Sprintf(`SELECT id, site, doctype, from_date, status, started_at,
-		completed_at, metrics, COALESCE(error, '') FROM %s WHERE site = ? AND id = ?`, table)), site, id).
-		Scan(&job.ID, &job.Site, &job.DocType, &rawFromDate, &job.Status, &job.StartedAt,
-			&completed, &job.Metrics, &job.Error)
-	if err != nil {
-		return nil, err
-	}
-	job.From, err = parseRebuildDate(rawFromDate)
-	if err != nil {
-		return nil, fmt.Errorf("parse analytics rebuild date: %w", err)
-	}
-	if completed.Valid {
-		job.CompletedAt = &completed.Time
-	}
-	return &job, nil
-}
-
 func parseRebuildDate(value any) (time.Time, error) {
 	switch date := value.(type) {
 	case time.Time:

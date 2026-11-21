@@ -65,11 +65,6 @@ contract/version.go::VersionMismatchError.Error
 contract/version.go::itoa64
 internal/analytics/backfill.go::backfillMetric
 internal/analytics/model.go::BuildDataPointCatalog
-internal/analytics/query.go::QueryEngine.CachedResolve
-internal/analytics/query.go::QueryEngine.InvalidateCache
-internal/analytics/query.go::QueryEngine.cacheKey
-internal/analytics/semantic.go::BuildPublishedProjectionModel
-internal/analytics/semantic.go::BuildPublishedSemanticModel
 internal/analytics/worker.go::Worker.addDelta
 internal/api/ai/legacy_inventory.go::InspectRunStatusInventory
 internal/api/ai/legacy_inventory.go::aiRunColumns
@@ -101,7 +96,6 @@ internal/api/schema.go::DocTypeToJSONSchema
 internal/api/schema.go::FieldToJSONSchema
 internal/api/schema.go::splitLines
 internal/api/site_services.go::NewSiteRuntimeServices
-internal/api/site_services.go::NewSiteRuntimeServicesWithAnalyticsQueryCache
 internal/api/system.go::realtimePayloadVisibleToUser
 internal/application/subscriptions/engineadapter/recurring_invoices.go::InternalBillingAdapter.CreateObligation
 internal/application/subscriptions/engineadapter/recurring_invoices.go::InternalBillingAdapter.ReconcileObligation
