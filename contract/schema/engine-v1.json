@@ -949,6 +949,309 @@
       ],
       "type": "object"
     },
+    "MetricDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "denominator": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "filters": {
+          "items": {
+            "$ref": "#/$defs/MetricFilter"
+          },
+          "type": "array"
+        },
+        "format": {
+          "type": "string"
+        },
+        "formula": {
+          "type": "string"
+        },
+        "good": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "measure": {
+          "$ref": "#/$defs/MetricMeasure",
+          "x-optional-pointer": true
+        },
+        "model": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "numerator": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "label",
+        "name",
+        "type",
+        "verified"
+      ],
+      "type": "object"
+    },
+    "MetricDrillRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "group": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "metric",
+        "to"
+      ],
+      "type": "object"
+    },
+    "MetricDrillResult": {
+      "additionalProperties": false,
+      "properties": {
+        "doctype": {
+          "type": "string"
+        },
+        "filters": {
+          "items": {
+            "$ref": "#/$defs/MetricFilter"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "doctype",
+        "filters"
+      ],
+      "type": "object"
+    },
+    "MetricFilter": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "op": {
+          "type": "string"
+        },
+        "value": {
+          "x-open-json-value": true
+        }
+      },
+      "required": [
+        "field",
+        "op",
+        "value"
+      ],
+      "type": "object"
+    },
+    "MetricMeasure": {
+      "additionalProperties": false,
+      "properties": {
+        "agg": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agg"
+      ],
+      "type": "object"
+    },
+    "MetricQueryRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "compare": {
+          "type": "string"
+        },
+        "dimensions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "filters": {
+          "items": {
+            "$ref": "#/$defs/MetricFilter"
+          },
+          "type": "array"
+        },
+        "from": {
+          "type": "string"
+        },
+        "grain": {
+          "type": "string"
+        },
+        "metrics": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "to": {
+          "type": "string"
+        },
+        "top": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "from",
+        "grain",
+        "metrics",
+        "to"
+      ],
+      "type": "object"
+    },
+    "MetricQueryResult": {
+      "additionalProperties": false,
+      "properties": {
+        "dimensions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "metrics": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "previous": {
+          "items": {
+            "$ref": "#/$defs/MetricRow"
+          },
+          "type": "array"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/MetricRow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "dimensions",
+        "metrics",
+        "rows"
+      ],
+      "type": "object"
+    },
+    "MetricRow": {
+      "additionalProperties": false,
+      "properties": {
+        "bucket": {
+          "type": "string"
+        },
+        "group": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "label": {
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "bucket",
+        "group",
+        "values"
+      ],
+      "type": "object"
+    },
+    "MetricSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "good": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "label",
+        "name",
+        "type",
+        "verified"
+      ],
+      "type": "object"
+    },
+    "MetricsMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "type": "string"
+        },
+        "source_sequence": {
+          "type": "integer"
+        },
+        "tier": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of",
+        "source_sequence",
+        "tier"
+      ],
+      "type": "object"
+    },
     "ObservationReport": {
       "additionalProperties": false,
       "properties": {
@@ -2888,6 +3191,309 @@
         "desktop",
         "mobile",
         "tablet"
+      ],
+      "type": "object"
+    },
+    "MetricDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "denominator": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "filters": {
+          "items": {
+            "$ref": "#/$defs/MetricFilter"
+          },
+          "type": "array"
+        },
+        "format": {
+          "type": "string"
+        },
+        "formula": {
+          "type": "string"
+        },
+        "good": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "measure": {
+          "$ref": "#/$defs/MetricMeasure",
+          "x-optional-pointer": true
+        },
+        "model": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "numerator": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "label",
+        "name",
+        "type",
+        "verified"
+      ],
+      "type": "object"
+    },
+    "MetricDrillRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "group": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "metric",
+        "to"
+      ],
+      "type": "object"
+    },
+    "MetricDrillResult": {
+      "additionalProperties": false,
+      "properties": {
+        "doctype": {
+          "type": "string"
+        },
+        "filters": {
+          "items": {
+            "$ref": "#/$defs/MetricFilter"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "doctype",
+        "filters"
+      ],
+      "type": "object"
+    },
+    "MetricFilter": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "op": {
+          "type": "string"
+        },
+        "value": {
+          "x-open-json-value": true
+        }
+      },
+      "required": [
+        "field",
+        "op",
+        "value"
+      ],
+      "type": "object"
+    },
+    "MetricMeasure": {
+      "additionalProperties": false,
+      "properties": {
+        "agg": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agg"
+      ],
+      "type": "object"
+    },
+    "MetricQueryRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "compare": {
+          "type": "string"
+        },
+        "dimensions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "filters": {
+          "items": {
+            "$ref": "#/$defs/MetricFilter"
+          },
+          "type": "array"
+        },
+        "from": {
+          "type": "string"
+        },
+        "grain": {
+          "type": "string"
+        },
+        "metrics": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "to": {
+          "type": "string"
+        },
+        "top": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "from",
+        "grain",
+        "metrics",
+        "to"
+      ],
+      "type": "object"
+    },
+    "MetricQueryResult": {
+      "additionalProperties": false,
+      "properties": {
+        "dimensions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "metrics": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "previous": {
+          "items": {
+            "$ref": "#/$defs/MetricRow"
+          },
+          "type": "array"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/MetricRow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "dimensions",
+        "metrics",
+        "rows"
+      ],
+      "type": "object"
+    },
+    "MetricRow": {
+      "additionalProperties": false,
+      "properties": {
+        "bucket": {
+          "type": "string"
+        },
+        "group": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "label": {
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "x-open-json-value": true
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "bucket",
+        "group",
+        "values"
+      ],
+      "type": "object"
+    },
+    "MetricSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "good": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "label",
+        "name",
+        "type",
+        "verified"
+      ],
+      "type": "object"
+    },
+    "MetricsMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "type": "string"
+        },
+        "source_sequence": {
+          "type": "integer"
+        },
+        "tier": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of",
+        "source_sequence",
+        "tier"
       ],
       "type": "object"
     },
