@@ -27,7 +27,7 @@ func RebuildModel(ctx context.Context, req RebuildRequest) (*Job, error) {
 		return nil, fmt.Errorf("doctype %q has no fact model on site %q", model, req.Site)
 	}
 	store := &JobStore{DB: database, Dialect: dialect}
-	queued, err := store.Enqueue(ctx, model)
+	queued, err := store.Enqueue(ctx, model, Window{})
 	if err != nil {
 		return nil, err
 	}
