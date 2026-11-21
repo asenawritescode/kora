@@ -71,10 +71,20 @@ func registerFactConsumer(config TenantServiceConfig, loaded *knet.LoadedSite, s
 	}
 	modelSync := &facts.ModelSync{DB: loaded.DB, Dialect: dialect, Registry: loaded.Registry, Owner: contract.NewEventID()}
 	return registerTenantWorkerStart(config, func() error {
+		// The sync, the event dispatcher and the rebuild runner share one worker: the runner starts only after
+		// the sync, and the dispatcher only after the runner's first pass has been started.
+		runner := &facts.RebuildRunner{DB: loaded.DB, Dialect: dialect, Registry: loaded.Registry, Site: loaded.Name, Owner: contract.NewEventID()}
 		if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
-			if syncFactModels(ctx, loaded.Name, modelSync) {
-				RunWorkflowTriggerDispatcher(ctx, dispatcher)
+			if !syncFactModels(ctx, loaded.Name, modelSync) {
+				return
 			}
+			dispatched := make(chan struct{})
+			go func() {
+				defer close(dispatched)
+				RunWorkflowTriggerDispatcher(ctx, dispatcher)
+			}()
+			runner.Run(ctx)
+			<-dispatched
 		}) {
 			return errors.New("tenant runtime is stopping")
 		}

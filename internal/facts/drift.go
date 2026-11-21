@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"maps"
 	"math/rand/v2"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -115,21 +114,8 @@ func (c *DriftChecker) RunDue(ctx context.Context) (int, error) {
 func (c *DriftChecker) drainRebuilds(ctx context.Context) error {
 	store := &JobStore{DB: c.DB, Dialect: c.Dialect}
 	rebuilder := &Rebuilder{DB: c.DB, Dialect: c.Dialect, Registry: c.Registry, Site: c.Site, Store: store}
-	for _, dt := range c.models() {
-		for {
-			job, err := store.Claim(ctx, dt.Name, c.Owner)
-			if err != nil {
-				return err
-			}
-			if job == nil {
-				break
-			}
-			if err := rebuilder.Run(ctx, job); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	_, err := drainRebuildJobs(ctx, store, rebuilder, c.Owner, c.models())
+	return err
 }
 
 // Run checks until ctx ends, pausing driftEvery plus up to half of it as jitter.
@@ -185,14 +171,7 @@ func (c *DriftChecker) rotate(list []*doctype.DocType, n int) []*doctype.DocType
 
 // models lists the fact models in name order, so each run visits them the same way.
 func (c *DriftChecker) models() []*doctype.DocType {
-	var out []*doctype.DocType
-	for _, dt := range c.Registry.All() {
-		if dt.Facts != nil {
-			out = append(out, dt)
-		}
-	}
-	slices.SortFunc(out, func(a, b *doctype.DocType) int { return strings.Compare(a.Name, b.Name) })
-	return out
+	return factModels(c.Registry)
 }
 
 // checkModel compares the sampled days of one model and marks each drifting day dirty.
