@@ -17,9 +17,9 @@ import (
 //
 // A record.create for a record type that declares an effect is rewritten, before
 // authorization, into a record.mutate_bundle: the original create, followed by
-// one "adjust" per affected target record (for example one per product). The
+// one "adjust" per affected target record. The
 // bundle already runs as a single all-or-nothing transaction with idempotency,
-// audit and outbox, so nothing new has to be made safe. The stock changes are
+// audit and outbox, so nothing new has to be made safe. The target quantity changes are
 // authorized by the permission to create the source record, not by write
 // permission on the target.
 //
@@ -64,14 +64,14 @@ func prepareQuantityEffect(reg *doctype.Registry, op *Operation) *contract.Error
 		}
 		create.Data = signed
 	}
-	products := nonzeroEffectProducts(totals)
-	if len(products) == 0 {
+	targetNames := nonzeroEffectTargets(totals)
+	if len(targetNames) == 0 {
 		return nil
 	}
-	if len(products)+1 > MaxMutationBundleRecords {
+	if len(targetNames)+1 > MaxMutationBundleRecords {
 		return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("%s affects too many different records in one save (limit %d)", dt.Name, MaxMutationBundleRecords-1))
 	}
-	return rewriteToEffectBundle(op, dt, create.Data, totals, products)
+	return rewriteToEffectBundle(op, dt, create.Data, totals, targetNames)
 }
 
 // decodeCreateData reads the data of a create. Empty data is an empty record;
@@ -113,9 +113,9 @@ func createEffectTotals(dt *doctype.DocType, effect *doctype.QuantityEffect, dat
 // may be signed by its reason; the signed amount is written back to the row so
 // the stored record shows it. It reports whether that happened.
 func addEffectRow(dt *doctype.DocType, effect *doctype.QuantityEffect, row map[string]any, whole bool, totals map[string]float64) (bool, *contract.Error) {
-	product, _ := row[effect.SourceRecordField].(string)
+	targetName, _ := row[effect.SourceRecordField].(string)
 	amount, ok := quantityNumber(row[effect.DeltaField])
-	if product == "" || !ok || math.IsNaN(amount) || math.IsInf(amount, 0) {
+	if targetName == "" || !ok || math.IsNaN(amount) || math.IsInf(amount, 0) {
 		return false, contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("%s needs a linked record in %s and a number in %s", dt.Name, effect.SourceRecordField, effect.DeltaField))
 	}
 	if amount == 0 {
@@ -135,35 +135,35 @@ func addEffectRow(dt *doctype.DocType, effect *doctype.QuantityEffect, row map[s
 			signed = true
 		}
 	}
-	totals[product] += amount * effect.Sign()
+	totals[targetName] += amount * effect.Sign()
 	return signed, nil
 }
 
-// nonzeroEffectProducts lists the target records whose total changes, sorted: one
+// nonzeroEffectTargets lists the target records whose total changes, sorted: one
 // lock order for every writer, and a stable payload for idempotent replay.
-func nonzeroEffectProducts(totals map[string]float64) []string {
-	products := make([]string, 0, len(totals))
-	for product, total := range totals {
+func nonzeroEffectTargets(totals map[string]float64) []string {
+	targetNames := make([]string, 0, len(totals))
+	for targetName, total := range totals {
 		if total != 0 {
-			products = append(products, product)
+			targetNames = append(targetNames, targetName)
 		}
 	}
-	sort.Strings(products)
-	return products
+	sort.Strings(targetNames)
+	return targetNames
 }
 
 // rewriteToEffectBundle turns the operation into a record.mutate_bundle: the
 // create, then one adjust per target record. It marks the adjust items so they
 // are authorized by the create.
-func rewriteToEffectBundle(op *Operation, dt *doctype.DocType, data json.RawMessage, totals map[string]float64, products []string) *contract.Error {
+func rewriteToEffectBundle(op *Operation, dt *doctype.DocType, data json.RawMessage, totals map[string]float64, targetNames []string) *contract.Error {
 	effect := dt.QuantityEffect
 	records := []RecordMutationBundleItem{{Key: "record", Doctype: dt.Name, Data: data}}
-	effectKeys := make(map[string]struct{}, len(products))
-	for i, product := range products {
-		change, _ := json.Marshal(map[string]float64{effect.TargetQuantityField: totals[product]})
+	effectKeys := make(map[string]struct{}, len(targetNames))
+	for i, targetName := range targetNames {
+		change, _ := json.Marshal(map[string]float64{effect.TargetQuantityField: totals[targetName]})
 		key := "effect_" + strconv.Itoa(i)
 		effectKeys[key] = struct{}{}
-		records = append(records, RecordMutationBundleItem{Key: key, Operation: "adjust", Doctype: effect.TargetDocType, Name: product, Data: change})
+		records = append(records, RecordMutationBundleItem{Key: key, Operation: "adjust", Doctype: effect.TargetDocType, Name: targetName, Data: change})
 	}
 	payload, err := json.Marshal(RecordMutationBundlePayload{Doctype: dt.Name, Records: records})
 	if err != nil {

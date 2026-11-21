@@ -11,7 +11,7 @@ import (
 
 // commandWriter writes the records a pack command creates or updates, inside the
 // command's transaction. It runs the same status-gated quantity effect as the
-// record-command path (mutation), so a record written by a command moves stock
+// record-command path (mutation), so a record written by a command moves target quantities
 // exactly as a record written through record.create or record.update does.
 type commandWriter struct {
 	k    *Kernel
@@ -25,7 +25,7 @@ type commandWriter struct {
 // the status effect of the new record.
 func (w commandWriter) insert(ctx context.Context, dt *doctype.DocType, doc *doctype.Document) *contract.Error {
 	// A gated record with no status (none sent and no default) is refused, as a
-	// record.create is, rather than left silently out of stock.
+	// record.create is, rather than left silently out of its target quantity.
 	if _, cerr := createStatusApplies(dt, doc.Fields); cerr != nil {
 		return cerr
 	}
@@ -40,7 +40,7 @@ func (w commandWriter) insert(ctx context.Context, dt *doctype.DocType, doc *doc
 }
 
 // save saves a changed record the command names, runs its after-save hooks, and
-// applies the change of its status effect: stock moves when the status enters or
+// applies the change of its status effect: target quantities move when the status enters or
 // leaves the applying set, and the lines may not change while it stays inside.
 func (w commandWriter) save(ctx context.Context, dt *doctype.DocType, doc, oldDoc *doctype.Document, scope policy.RowScope) *contract.Error {
 	txMgr := w.run.Mgr
@@ -61,7 +61,7 @@ func (w commandWriter) effects() effectWriter {
 	return effectWriter{k: w.k, run: w.run, op: w.op, owner: commandOwner(w.op, w.user), user: w.user, writeTarget: w.saveTarget}
 }
 
-// saveTarget saves a stock record a status effect moved, with its audit and
+// saveTarget saves a target record a status effect moved, with its audit and
 // history rows, and completes it after commit as a command save does.
 func (w commandWriter) saveTarget(ctx context.Context, target *doctype.DocType, doc, oldDoc *doctype.Document) *contract.Error {
 	txMgr := w.run.Mgr

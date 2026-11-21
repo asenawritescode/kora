@@ -64,7 +64,7 @@ func (d DocType) MarshalJSON() ([]byte, error) {
 }
 
 // QuantityEffect says what saving a record does to a number on another record,
-// for example "a Stock Adjustment adds its delta to Product.stock_qty".
+// for example "an adjustment adds its delta to the target's quantity field".
 //
 // Without LinesField the change is the record's own signed DeltaField. With
 // LinesField it is the sum of DeltaField over the rows of that table, per
@@ -98,7 +98,7 @@ type QuantityEffect struct {
 	StatusField     string   `yaml:"status_field" json:"status_field,omitempty"`
 	ApplyInStatuses []string `yaml:"apply_in_statuses" json:"apply_in_statuses,omitempty"`
 	// Ledger, when set, appends one row per target record each time the effect
-	// changes its quantity, so the stock history says why it changed.
+	// changes its quantity, so the ledger says why it changed.
 	Ledger *QuantityLedger `yaml:"ledger" json:"ledger,omitempty"`
 }
 
