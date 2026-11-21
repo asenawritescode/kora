@@ -52,6 +52,7 @@ transaction:
       name: $input.sale_number
       in_block: $input.till_session
       values:
+        sale_date: $today
         register: $input.register
         location: $input.location
         till_session: $input.till_session

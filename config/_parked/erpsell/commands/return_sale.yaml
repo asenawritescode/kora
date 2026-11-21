@@ -68,6 +68,7 @@ transaction:
     create:
       record: Sale
       values:
+        sale_date: $today
         register: $input.register
         location: $input.location
         till_session: $input.till_session
