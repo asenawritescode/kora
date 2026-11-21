@@ -66,7 +66,7 @@ type Handler struct {
 	RuntimeServices     *SiteRuntimeServices
 	RealtimeConnections *RealtimeConnectionOwner
 
-	// SiteEventBuses maps site name → EventBus for analytics/realtime services.
+	// SiteEventBuses maps site name → EventBus for realtime services.
 	SiteEventBuses map[string]eventstream.Bus
 
 	// SiteOutboxes maps site name → outbox.Writer for transactional outbox recording.
@@ -170,30 +170,6 @@ func (h *Handler) siteStorage(c *gin.Context) (storage.Backend, error) {
 		fallbackStorage, fallbackStorageErr = storage.New(storage.Config{Backend: "local"})
 	})
 	return fallbackStorage, fallbackStorageErr
-}
-
-// siteAnalyticsWorker returns the analytics worker for the current request's site, or nil.
-type analyticsWorker interface {
-	InvalidateMetrics(string)
-	InvalidateAllMetrics()
-	RequestFlush()
-}
-
-func (h *Handler) siteAnalyticsWorker(c *gin.Context) analyticsWorker {
-	if w, ok := c.Get("site_analytics_worker"); ok {
-		if worker, ok := w.(analyticsWorker); ok {
-			return worker
-		}
-	}
-	return nil
-}
-
-// invalidateAnalyticsForDoctype clears the analytics worker's metrics cache
-// and triggers regeneration for the given doctype after a config change.
-func (h *Handler) invalidateAnalyticsForDoctype(c *gin.Context, doctype string) {
-	if w := h.siteAnalyticsWorker(c); w != nil {
-		w.InvalidateMetrics(doctype)
-	}
 }
 
 // siteTx returns a TxManager for the current request's site database and registry.
@@ -622,7 +598,6 @@ func (h *Handler) HandleCreate(c *gin.Context) {
 	if c.Writer.Status() != http.StatusCreated {
 		return
 	}
-	h.afterAnalyticsWrite(c, doctypeName)
 }
 
 // --- Update Handler ---
@@ -671,7 +646,6 @@ func (h *Handler) HandleUpdate(c *gin.Context) {
 	if c.Writer.Status() != http.StatusOK {
 		return
 	}
-	h.afterAnalyticsWrite(c, doctypeName)
 }
 
 // --- Delete Handler ---
@@ -691,19 +665,9 @@ func (h *Handler) HandleDelete(c *gin.Context) {
 	if c.Writer.Status() != http.StatusOK {
 		return
 	}
-	h.afterAnalyticsWrite(c, doctypeName)
 }
 
 // --- Helpers ---
-
-// afterAnalyticsWrite invalidates analytics for a committed write and asks the
-// worker to flush. It never waits: the response is not held for the flush.
-func (h *Handler) afterAnalyticsWrite(c *gin.Context, doctypeName string) {
-	h.invalidateAnalyticsForDoctype(c, doctypeName)
-	if w := h.siteAnalyticsWorker(c); w != nil {
-		w.RequestFlush()
-	}
-}
 
 // docToMap converts a Document to a map for JSON serialization, including system fields.
 func docToMap(doc *doctype.Document, dt *doctype.DocType, registry *doctype.Registry, requestedFields []string) map[string]any {
@@ -834,12 +798,12 @@ func RegisterPublicRoutesOnGroupWithRuntimeServices(apiGroup *gin.RouterGroup, r
 }
 
 // RouteOptions carries the optional dependencies of RegisterRoutesOnGroup. The
-// zero value registers the routes with no per-site registries, no script
-// runner and the process-default analytics cache.
+// zero value registers the routes with no per-site registries and no script
+// runner.
 type RouteOptions struct {
 	// Per-site registries, keyed by site name.
 
-	// EventBuses maps a site to its analytics and realtime event bus.
+	// EventBuses maps a site to its event bus.
 	EventBuses map[string]eventstream.Bus
 	// RealtimeProviders maps a site to its realtime provider.
 	RealtimeProviders map[string]*natsprovider.Provider
@@ -871,23 +835,9 @@ type RouteOptions struct {
 	// admission. Engine composition leaves it nil and relies on tenant
 	// middleware.
 	RuntimeServices *SiteRuntimeServices
-	// AnalyticsCache is the process-owned analytics query cache; nil selects
-	// the process default.
-	AnalyticsCache *AnalyticsQueryCache
 	// RealtimeConnections owns hijacked WebSocket connections so the Engine can
 	// close them before retiring tenant runtime generations.
 	RealtimeConnections *RealtimeConnectionOwner
-}
-
-// analyticsOptions derives the analytics registration options. An unset
-// AnalyticsCache selects the process default, not the cache owned by
-// RuntimeServices.
-func (o RouteOptions) analyticsOptions() AnalyticsOptions {
-	cache := o.AnalyticsCache
-	if cache == nil {
-		cache = DefaultAnalyticsQueryCache()
-	}
-	return AnalyticsOptions{EventBuses: o.EventBuses, RuntimeServices: o.RuntimeServices, Cache: cache}
 }
 
 // RegisterRoutesOnGroup installs the production API routes on apiGroup. The
@@ -999,9 +949,6 @@ func RegisterRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry
 	RegisterSystemRoutes(apiGroup, handler)
 
 	registerScriptRoutes(apiGroup, handler)
-
-	// Analytics endpoints (no-op if siteBuses is empty).
-	RegisterAnalyticsRoutes(apiGroup, registry, txManager.DB, txManager.Dialect, opts.analyticsOptions())
 
 	// Metric catalog, query and drill (permission-scoped per record type).
 	handler.metrics = registerMetricsRoutes(apiGroup, registry, txManager.DB, txManager.Dialect)

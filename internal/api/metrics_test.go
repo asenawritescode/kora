@@ -47,7 +47,7 @@ func metricsFixture(t *testing.T, perms []*doctype.Permission) (*doctype.Registr
 func serveMetrics(t *testing.T, registry *doctype.Registry, api metricsAPI, roles []string, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	execution := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-metrics", roles, nil)
+	execution := newVerifiedTestContext(t, "stable-tenant", "tenant-metrics", roles, nil)
 	ex, _ := execution.Get("policy_execution")
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -142,7 +142,7 @@ func TestMetricScopeNarrowsOwnerOnlyGrants(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			registry, _ := metricsFixture(t, tc.perms)
-			ctx := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-metrics", []string{"Cashier"}, nil)
+			ctx := newVerifiedTestContext(t, "stable-tenant", "tenant-metrics", []string{"Cashier"}, nil)
 			ex, _ := ctx.Get("policy_execution")
 			ctx.Set("policy_execution", ex)
 			scope, denial := metricScope(ctx, registry, tc.models)

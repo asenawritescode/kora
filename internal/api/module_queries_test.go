@@ -57,7 +57,7 @@ func TestAuthorizePublishedQueryRequiresActorGrantAndExactScope(t *testing.T) {
 		t.Fatal("entity grant crossed legal entity boundary")
 	}
 	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.orders.query.totals", Role: "Reader", Read: true, IfOwner: true, Scope: scope})
-	ownerScoped := newAnalyticsAuthorizationContext(t, "tenant-a", "tenant-route", []string{"Reader"}, nil)
+	ownerScoped := newVerifiedTestContext(t, "tenant-a", "tenant-route", []string{"Reader"}, nil)
 	ownerExecution, ok := ownerScoped.Get("policy_execution")
 	if !ok {
 		t.Fatal("verified execution was not installed")
@@ -66,7 +66,7 @@ func TestAuthorizePublishedQueryRequiresActorGrantAndExactScope(t *testing.T) {
 		t.Fatal("owner-scoped role permission allowed a provider result without row-level filtering")
 	}
 	registry.Permissions.SetPermission(&doctype.Permission{Doctype: "module.sales.orders.query.totals", Role: "AssignedReader", Read: true, IfAssigned: []string{"assigned_to"}, Scope: scope})
-	assignedExecution := newAnalyticsAuthorizationContext(t, "tenant-a", "tenant-route", []string{"AssignedReader"}, nil)
+	assignedExecution := newVerifiedTestContext(t, "tenant-a", "tenant-route", []string{"AssignedReader"}, nil)
 	assignedIdentity, ok := assignedExecution.Get("policy_execution")
 	if !ok {
 		t.Fatal("verified assigned execution was not installed")

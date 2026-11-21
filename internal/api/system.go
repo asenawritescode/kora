@@ -22,7 +22,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/auth"
 	"github.com/asenawritescode/kora/internal/configstore"
 	"github.com/asenawritescode/kora/internal/db"
@@ -592,7 +591,6 @@ func (h *Handler) HandleSystemDoctypeCreate(c *gin.Context) {
 			})
 			return
 		}
-		h.invalidateAnalyticsForDoctype(c, dt.Name)
 	}
 
 	// Create config version.
@@ -729,7 +727,6 @@ func (h *Handler) HandleSystemDoctypeUpdate(c *gin.Context) {
 			slog.Error("migration failed after doctype update", "doctype", doctypeName, "error", err)
 		}
 		// Invalidate analytics worker — field changes mean regenerated metrics.
-		h.invalidateAnalyticsForDoctype(c, doctypeName)
 	}
 
 	// Create config version.
@@ -851,20 +848,8 @@ func (h *Handler) HandleSystemDoctypeDelete(c *gin.Context) {
 		return
 	}
 
-	// Full cleanup: also clean analytics, permissions, and dangling Link fields.
+	// Full cleanup: also clean permissions and dangling Link fields.
 	if cleanup == "full" {
-		// Clean analytics rollup tables.
-		for _, table := range []string{
-			"_kora_analytics_daily",
-			"_kora_analytics_monthly",
-			"_kora_analytics_events",
-			"_kora_analytics_metric",
-		} {
-			if _, err := db.Exec(h.siteQuery(c, fmt.Sprintf("DELETE FROM %s WHERE doctype = ?", table)), doctypeName); err != nil {
-				slog.Warn("analytics cleanup failed", "table", table, "doctype", doctypeName, "error", err)
-			}
-		}
-
 		// Clean permissions.
 		if tx, txErr := db.BeginTx(c.Request.Context(), nil); txErr != nil {
 			slog.Warn("permission cleanup transaction failed", "doctype", doctypeName, "error", txErr)
@@ -892,7 +877,6 @@ func (h *Handler) HandleSystemDoctypeDelete(c *gin.Context) {
 	reg.Remove(doctypeName)
 
 	// Invalidate analytics worker metrics cache.
-	h.invalidateAnalyticsForDoctype(c, doctypeName)
 
 	// Create config version recording the deletion.
 	snapshot, _ := store.CollectSnapshot(reg, c.GetString("site_name"))
@@ -1156,9 +1140,6 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 					}
 				}
 				applyActivatedConfig(c.Request.Context(), db, h.siteDialect(c), recoveredSnapshot, reg)
-				if worker := h.siteAnalyticsWorker(c); worker != nil {
-					worker.InvalidateAllMetrics()
-				}
 				if bus := h.runtimeService(c, siteName).EventBus; bus != nil {
 					for _, dt := range recoveredSnapshot.DocTypes {
 						if dt == nil || strings.TrimSpace(dt.Name) == "" {
@@ -1174,11 +1155,6 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 							Timestamp: time.Now().UTC(), ModifiedBy: currentUser(c),
 							Data: map[string]any{"config_version_id": versionID, "new": busOp == eventstream.EventInsert, "source": "config_activation"},
 						})
-					}
-				}
-				if len(previousDoctypes) > 0 {
-					if err := analytics.MigrateRollupMetrics(db, h.siteDialect(c), siteName, previousDoctypes, recoveredSnapshot.DocTypes); err != nil {
-						slog.Error("recovered analytics rollup migration failed", "site", siteName, "error", err)
 					}
 				}
 				if err := configstore.UpdateActivationOperation(db, h.siteDialect(c), siteName, versionID, "activate", configstore.ActivationCompleted, op.DDLPlan, op.RecoveryPlan, ""); err != nil {
@@ -1434,17 +1410,9 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 
 	// Invalidate analytics worker metrics cache — config activation may change
 	// field types, add/remove fields, or change submittable status.
-	if w := h.siteAnalyticsWorker(c); w != nil {
-		w.InvalidateAllMetrics()
-	}
 
 	// Migrate analytics rollups after commit, using the exact in-memory schema
 	// that was active before this snapshot was installed.
-	if len(previousDoctypes) > 0 {
-		if err := analytics.MigrateRollupMetrics(db, h.siteDialect(c), siteName, previousDoctypes, snapshot.DocTypes); err != nil {
-			slog.Error("analytics rollup migration failed", "site", siteName, "error", err)
-		}
-	}
 
 	c.JSON(http.StatusOK, Response{Data: map[string]string{"message": "activated", "status": "Active"}})
 }
@@ -1614,16 +1582,7 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 				return
 			}
 			if baseActiveVersionID == journalData.ResultVersionID {
-				previousDoctypes := reg.All()
 				configstore.ApplySnapshotToRegistry(snapshot, reg)
-				if worker := h.siteAnalyticsWorker(c); worker != nil {
-					worker.InvalidateAllMetrics()
-				}
-				if len(previousDoctypes) > 0 {
-					if err := analytics.MigrateRollupMetrics(db, dialect, siteName, previousDoctypes, snapshot.DocTypes); err != nil {
-						slog.Error("recovered rollback analytics migration failed", "site", siteName, "error", err)
-					}
-				}
 			}
 			if err := configstore.UpdateActivationOperation(db, dialect, siteName, operationID, "rollback", configstore.ActivationCompleted, operation.DDLPlan, operation.RecoveryPlan, ""); err != nil {
 				internalError(c, "completing recovered config rollback", err)
@@ -1740,14 +1699,6 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 		return
 	}
 	configstore.ApplySnapshotToRegistry(snapshot, reg)
-	if worker := h.siteAnalyticsWorker(c); worker != nil {
-		worker.InvalidateAllMetrics()
-	}
-	if len(previousDoctypes) > 0 {
-		if err := analytics.MigrateRollupMetrics(db, dialect, siteName, previousDoctypes, snapshot.DocTypes); err != nil {
-			slog.Error("rollback analytics rollup migration failed", "site", siteName, "error", err)
-		}
-	}
 	if err := configstore.UpdateActivationOperation(db, dialect, siteName, operationID, "rollback", configstore.ActivationCompleted, string(planJSON), string(journalJSON), ""); err != nil {
 		internalError(c, "finalizing config rollback journal", err)
 		return

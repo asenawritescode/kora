@@ -28,7 +28,7 @@ func TestExploreCatalogOffersOnlyReadableFactRecordTypes(t *testing.T) {
 	})
 
 	gin.SetMode(gin.TestMode)
-	execution := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-explore", []string{"Cashier"}, nil)
+	execution := newVerifiedTestContext(t, "stable-tenant", "tenant-explore", []string{"Cashier"}, nil)
 	ex, _ := execution.Get("policy_execution")
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -101,7 +101,7 @@ func TestExploreCatalogLinkedDimensionsNeedReadOfTheLinkedType(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			registry := linkedRegistry(tc.perms)
 			gin.SetMode(gin.TestMode)
-			execution := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-explore", []string{"Cashier"}, nil)
+			execution := newVerifiedTestContext(t, "stable-tenant", "tenant-explore", []string{"Cashier"}, nil)
 			ex, _ := execution.Get("policy_execution")
 			router := gin.New()
 			router.Use(func(c *gin.Context) {

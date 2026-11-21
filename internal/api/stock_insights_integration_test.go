@@ -254,7 +254,7 @@ func stockRouter(t *testing.T, reg *doctype.Registry, database *sql.DB, dialect 
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		roles := strings.Split(c.GetHeader("X-Roles"), ",")
-		execution := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-dashboards", roles, nil)
+		execution := newVerifiedTestContext(t, "stable-tenant", "tenant-dashboards", roles, nil)
 		ex, _ := execution.Get("policy_execution")
 		c.Set("site_name", "tenant-dashboards")
 		c.Set("site_id", "stable-tenant")
