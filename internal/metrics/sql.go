@@ -46,8 +46,9 @@ func (p plan) summarySQL(d db.Dialect) (string, []any) {
 	where := append([]string{q("grain") + " = ?"}, p.rangeConds(d, "", &args)...)
 	where = append(where, p.scopeConds(d, "", false, &args)...)
 	where = append(where, p.filterConds(d, "", &args)...)
-	stmt := fmt.Sprintf("SELECT %s FROM %s WHERE %s GROUP BY %s",
-		strings.Join(sel, ", "), q(p.summaryTable()), strings.Join(where, " AND "), strings.Join(group, ", "))
+	having := p.keepGroups(d, "", true, &args)
+	stmt := fmt.Sprintf("SELECT %s FROM %s WHERE %s GROUP BY %s%s",
+		strings.Join(sel, ", "), q(p.summaryTable()), strings.Join(where, " AND "), strings.Join(group, ", "), having)
 	return stmt, args
 }
 
@@ -67,9 +68,46 @@ func (p plan) factsSQL(d db.Dialect) (string, []any) {
 	for _, s := range p.series {
 		sel = append(sel, p.factsAggregate(d, f, s, &args))
 	}
-	stmt := fmt.Sprintf("SELECT %s FROM (%s) AS f GROUP BY %s",
-		strings.Join(sel, ", "), p.factsUnion(d, &args), strings.Join(group, ", "))
+	union := p.factsUnion(d, &args)
+	having := p.keepGroups(d, f, false, &args)
+	stmt := fmt.Sprintf("SELECT %s FROM (%s) AS f GROUP BY %s%s",
+		strings.Join(sel, ", "), union, strings.Join(group, ", "), having)
 	return stmt, args
+}
+
+// keepGroups is the HAVING clause that keeps a group only when one of its rows meets the conditions of a
+// series, so a group no metric matches (a status a sales metric leaves out) is not shown at zero. It is
+// empty when a series has no conditions, because every row then matches. Its arguments are appended to args
+// after the ones already rendered, which is the order the statement reads them in.
+func (p plan) keepGroups(d db.Dialect, prefix string, summary bool, args *[]any) string {
+	conds := make([][]predicate, len(p.series))
+	for i, s := range p.series {
+		conds[i] = p.seriesConds(s, summary)
+		if len(conds[i]) == 0 {
+			return ""
+		}
+	}
+	parts := make([]string, 0, len(p.series))
+	for _, c := range conds {
+		parts = append(parts, "("+p.condition(d, prefix, c, args)+")")
+	}
+	return " HAVING MAX(CASE WHEN " + strings.Join(parts, " OR ") + " THEN 1 ELSE 0 END) = 1"
+}
+
+// seriesConds are the conditions a row must meet to feed a series, the same ones the aggregates use: a header
+// count takes header rows only, a count_distinct skips empty values. The summary has one row count and no
+// line_id, so its counts take the series' own conditions alone.
+func (p plan) seriesConds(s series, summary bool) []predicate {
+	switch s.agg {
+	case aggCount:
+		if summary || p.hasLineDim() {
+			return s.conds
+		}
+		return append([]predicate{{field: "line_id", op: "=", value: ""}}, s.conds...)
+	case aggCountDistinct:
+		return append([]predicate{{field: s.column, op: "!=", value: ""}}, s.conds...)
+	}
+	return s.conds
 }
 
 // factsUnion is the fact rows the query reads: the header rows unless a line dimension is grouped by,

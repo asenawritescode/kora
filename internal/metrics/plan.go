@@ -41,6 +41,7 @@ type series struct {
 	kind   Kind // simple, balance or cumulative: the bucket sums are settled per kind
 	agg    string
 	column string // measure column for sum, dimension for count_distinct, empty for count
+	line   bool   // a sum of a child line field; a header sum cannot be split by a line dimension
 	conds  []predicate
 }
 
@@ -95,6 +96,9 @@ func planQuery(cat Catalog, q Query) (plan, error) {
 		c.plan.requested = append(c.plan.requested, i)
 	}
 	if err := c.plan.addGrouping(cat, q); err != nil {
+		return plan{}, err
+	}
+	if err := c.plan.checkLineSplit(); err != nil {
 		return plan{}, err
 	}
 	c.plan.summary = c.plan.fitsSummary()
@@ -253,6 +257,7 @@ func (c *planner) addSeries(m Metric) (int, error) {
 	switch m.Measure.Agg {
 	case aggSum, aggCountDistinct:
 		s.column = m.Measure.Field
+		s.line = lineField(dt.Facts, s.column)
 	case aggCount:
 	default:
 		return 0, fmt.Errorf("metric %q: agg %q is not sum, count or count_distinct", m.Name, m.Measure.Agg)
@@ -288,6 +293,32 @@ func (p *plan) addGrouping(cat Catalog, q Query) error {
 		p.where = append(p.where, predicate{field: f.Field, op: f.Op, value: f.Value})
 	}
 	return nil
+}
+
+// checkLineSplit refuses a query that splits a header sum by a line dimension. A header total repeats on
+// every line of its record, so split by product it would count the sale once per line of the product.
+// Counts and distinct counts split by a line dimension stay allowed: they count records.
+func (p plan) checkLineSplit() error {
+	if !p.hasLineDim() {
+		return nil
+	}
+	for _, s := range p.series {
+		if s.agg == aggSum && !s.line {
+			return fmt.Errorf("%w: %q is a header total and cannot be split by %s; use a line measure",
+				ErrMeasureNotOnLines, s.metric, p.lineDimName())
+		}
+	}
+	return nil
+}
+
+// lineDimName is the first dimension of the plan that is on the child table.
+func (p plan) lineDimName() string {
+	for _, dim := range p.dims {
+		if dim.line {
+			return dim.name
+		}
+	}
+	return ""
 }
 
 // fitsSummary reports whether the summary table can answer the plan. Summaries are per day, per

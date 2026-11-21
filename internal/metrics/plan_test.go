@@ -95,7 +95,7 @@ func TestPlanQueryRoutesAndRefuses(t *testing.T) {
 		{name: "one declared dimension reads the summary", query: with(func(q *Query) { q.Dimensions = []string{"register"} }), summary: true, series: 1},
 		{name: "entity scope reads the summary", query: with(func(q *Query) { q.Scope.LegalEntity = "E1" }), summary: true, series: 1},
 		{name: "owner scope reads the facts", query: with(func(q *Query) { q.Scope.Owner = "u1" }), summary: false, series: 1, table: "_kora_fact_sale"},
-		{name: "two dimensions read the facts", query: with(func(q *Query) { q.Dimensions = []string{"register", "item"} }), summary: false, series: 1},
+		{name: "two dimensions read the facts", query: with(func(q *Query) { q.Dimensions = []string{"register", "till_session"} }), summary: false, series: 1},
 		{name: "filter on an ungrouped dimension reads the facts", query: with(func(q *Query) {
 			q.Filters = []Filter{{Field: "register", Op: "=", Value: "R1"}}
 		}), summary: false, series: 1},

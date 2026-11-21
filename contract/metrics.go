@@ -104,6 +104,7 @@ type MetricQueryResult struct {
 	Rows       []MetricRow       `json:"rows"`
 	Previous   []MetricRow       `json:"previous,omitempty"`
 	Labels     map[string]string `json:"labels,omitempty"`
+	Formats    map[string]string `json:"formats,omitempty"`
 }
 
 // ExploreRecordType is one record type a question can read, with the measures and dimensions it offers.
@@ -128,6 +129,8 @@ type ExploreMeasure struct {
 	Field  string `json:"field,omitempty"`
 	Label  string `json:"label"`
 	Format string `json:"format,omitempty"`
+	// Level is header for a sum of a record field: it cannot be split by a line dimension. Empty means any dimension.
+	Level string `json:"level,omitempty"`
 }
 
 // ExploreDimension is one category a question can group by. A path through Link fields has Hops set to
@@ -141,6 +144,8 @@ type ExploreDimension struct {
 	Kind  string `json:"kind"`
 	Hops  int    `json:"hops"`
 	Group string `json:"group,omitempty"`
+	// Level is line for a dimension of the child table and header for one of the record itself.
+	Level string `json:"level,omitempty"`
 }
 
 // MetricRow is one bucket of one group. Values follow the result's metrics: each entry is a decimal

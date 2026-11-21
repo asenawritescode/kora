@@ -246,23 +246,27 @@ func (ch Chart) checkAxis() error {
 	return nil
 }
 
-// checkDimension checks that every fact model a metric reads declares column as a dimension.
+// checkDimension checks that every fact model a metric reads declares column as a dimension, and that a
+// header total is not split by a line dimension: the same rule a query applies.
 func (c catalog) checkDimension(name, column string) error {
-	models, err := c.leafModels(name, map[string]bool{})
+	leaves, err := c.leafMetrics(name, map[string]bool{})
 	if err != nil {
 		return err
 	}
-	for _, model := range models {
-		if dt := c.models[model]; dt == nil || dt.Facts == nil || !isDimension(dt.Facts, column) {
+	for _, m := range leaves {
+		dt := c.models[m.Model]
+		if dt == nil || dt.Facts == nil || !isDimension(dt.Facts, column) {
 			return fmt.Errorf("%q is not a dimension of metric %q", column, name)
+		}
+		if !headerDimension(dt.Facts, column) && m.Measure != nil && m.Measure.Agg == aggSum && !lineField(dt.Facts, m.Measure.Field) {
+			return fmt.Errorf("%w: %q is a header total and cannot be split by %s; use a line measure", ErrMeasureNotOnLines, name, column)
 		}
 	}
 	return nil
 }
 
-// leafModels lists the fact models a metric reads, through its ratio and derived references.
-// seen holds the metrics on the current path, so a cycle is reported rather than followed.
-func (c catalog) leafModels(name string, seen map[string]bool) ([]string, error) {
+// leafMetrics lists the simple metrics name is computed from: itself, or the leaves of its ratio or derived refs.
+func (c catalog) leafMetrics(name string, seen map[string]bool) ([]Metric, error) {
 	m, ok := c.metrics[name]
 	if !ok {
 		return nil, fmt.Errorf("unknown metric %q", name)
@@ -271,17 +275,17 @@ func (c catalog) leafModels(name string, seen map[string]bool) ([]string, error)
 		return nil, fmt.Errorf("metric %q is part of a cycle", name)
 	}
 	if m.Model != "" {
-		return []string{m.Model}, nil
+		return []Metric{m}, nil
 	}
 	seen[name] = true
 	defer delete(seen, name)
-	var models []string
+	var leaves []Metric
 	for _, ref := range m.refs() {
-		refModels, err := c.leafModels(ref, seen)
+		refLeaves, err := c.leafMetrics(ref, seen)
 		if err != nil {
 			return nil, err
 		}
-		models = append(models, refModels...)
+		leaves = append(leaves, refLeaves...)
 	}
-	return models, nil
+	return leaves, nil
 }

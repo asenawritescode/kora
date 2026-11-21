@@ -16,6 +16,9 @@ var ErrNotSupported = errors.New("metrics: not supported yet")
 // ErrForbidden marks a query that names a record type the caller may not join to through a dimension path.
 var ErrForbidden = errors.New("metrics: record type not readable for this dimension")
 
+// ErrMeasureNotOnLines marks a query that splits a header sum by a line dimension, which would repeat the sum once per line.
+var ErrMeasureNotOnLines = errors.New("metrics: header measure cannot be split by a line dimension")
+
 // ErrRangeTooLarge marks a query whose range covers more buckets than the grain allows.
 var ErrRangeTooLarge = errors.New("metrics: range covers too many buckets")
 

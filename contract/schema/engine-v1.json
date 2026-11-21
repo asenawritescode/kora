@@ -1097,6 +1097,9 @@
         "label": {
           "type": "string"
         },
+        "level": {
+          "type": "string"
+        },
         "path": {
           "type": "string"
         }
@@ -1125,6 +1128,9 @@
           "type": "string"
         },
         "label": {
+          "type": "string"
+        },
+        "level": {
           "type": "string"
         }
       },
@@ -1647,6 +1653,12 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "formats": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
         },
         "labels": {
           "additionalProperties": {
@@ -4095,6 +4107,9 @@
         "label": {
           "type": "string"
         },
+        "level": {
+          "type": "string"
+        },
         "path": {
           "type": "string"
         }
@@ -4123,6 +4138,9 @@
           "type": "string"
         },
         "label": {
+          "type": "string"
+        },
+        "level": {
           "type": "string"
         }
       },
@@ -4621,6 +4639,12 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "formats": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
         },
         "labels": {
           "additionalProperties": {

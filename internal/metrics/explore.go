@@ -68,7 +68,7 @@ func exploreRecord(dt *doctype.DocType, links exploreLinks) contract.ExploreReco
 		}
 		fld := dt.GetField(col)
 		rec.Measures = append(rec.Measures, contract.ExploreMeasure{Key: "sum:" + col, Agg: aggSum, Field: col,
-			Label: fieldLabel(dt, col), Format: formatOf(fld)})
+			Label: fieldLabel(dt, col), Format: formatOf(fld), Level: levelHeader})
 	}
 	for _, d := range f.Dimensions {
 		if fieldPath(d.Field).isLine() {
@@ -77,13 +77,13 @@ func exploreRecord(dt *doctype.DocType, links exploreLinks) contract.ExploreReco
 		}
 		col := d.ColumnName()
 		fld := dt.GetField(col)
-		rec.Dimensions = append(rec.Dimensions, contract.ExploreDimension{Path: col, Label: fieldLabel(dt, col), Kind: kindOf(fld)})
+		rec.Dimensions = append(rec.Dimensions, contract.ExploreDimension{Path: col, Label: fieldLabel(dt, col), Kind: kindOf(fld), Level: levelHeader})
 		rec.Measures = append(rec.Measures, contract.ExploreMeasure{Key: "distinct:" + col, Agg: aggCountDistinct, Field: col,
 			Label: "Distinct " + fieldLabel(dt, col), Format: "number"})
-		rec.Dimensions = append(rec.Dimensions, linkedDimensions(dt, col, col, links)...)
+		rec.Dimensions = append(rec.Dimensions, withLevel(linkedDimensions(dt, col, col, links), levelHeader)...)
 	}
 	if f.StatusField != "" {
-		rec.Dimensions = append(rec.Dimensions, contract.ExploreDimension{Path: doctype.StatusColumn, Label: "Status", Kind: "Select"})
+		rec.Dimensions = append(rec.Dimensions, contract.ExploreDimension{Path: doctype.StatusColumn, Label: "Status", Kind: "Select", Level: levelHeader})
 	}
 	return rec
 }
@@ -101,8 +101,22 @@ func lineDimensions(dt *doctype.DocType, col string, links exploreLinks) []contr
 		return nil
 	}
 	path := dt.Facts.Lines + "." + col
-	out := []contract.ExploreDimension{{Path: path, Label: fieldLabel(lines, col), Kind: kindOf(fld)}}
-	return append(out, linkedDimensions(lines, col, path, links)...)
+	out := []contract.ExploreDimension{{Path: path, Label: fieldLabel(lines, col), Kind: kindOf(fld), Level: levelLine}}
+	return append(out, withLevel(linkedDimensions(lines, col, path, links), levelLine)...)
+}
+
+// Levels of a dimension or measure: a header is read from the record itself, a line from its child rows.
+const (
+	levelHeader = "header"
+	levelLine   = "line"
+)
+
+// withLevel sets the level of each dimension in dims.
+func withLevel(dims []contract.ExploreDimension, level string) []contract.ExploreDimension {
+	for i := range dims {
+		dims[i].Level = level
+	}
+	return dims
 }
 
 // linkedDimensions lists the paths a Link dimension opens: each dimension field of the record type it names
@@ -254,8 +268,23 @@ func (c Catalog) adHocMetric(a AdHoc) (Metric, error) {
 	if a.Field != "" {
 		name += "_" + slug(a.Field)
 	}
-	return Metric{Name: name, Label: label, Type: KindSimple, Model: a.Model,
+	return Metric{Name: name, Label: label, Type: KindSimple, Model: a.Model, Format: c.adHocFormat(dt, a),
 		Measure: &Measure{Agg: a.Agg, Field: a.Field}, Filters: a.Filters}, nil
+}
+
+// adHocFormat is how an unsaved measure's numbers display: a sum of a Currency field is money, everything
+// else a plain number. A line field is read from the child table named by facts lines.
+func (c Catalog) adHocFormat(dt *doctype.DocType, a AdHoc) string {
+	if a.Agg != aggSum {
+		return "number"
+	}
+	fld := dt.GetField(a.Field)
+	if fld == nil && dt.Facts != nil && dt.Facts.Lines != "" {
+		if lf := dt.GetField(dt.Facts.Lines); lf != nil && c.Models[lf.Options] != nil {
+			fld = c.Models[lf.Options].GetField(a.Field)
+		}
+	}
+	return formatOf(fld)
 }
 
 // slug lowercases a name and turns every run of other characters into one underscore.
