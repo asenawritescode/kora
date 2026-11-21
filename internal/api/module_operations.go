@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/plugin"
 	"github.com/asenawritescode/kora/internal/policy"
 	"github.com/gin-gonic/gin"
@@ -364,8 +365,38 @@ func writeReceiptValidationError(c *gin.Context, receipt contract.OperationRecei
 	} else if m := schemaFieldPattern.FindStringSubmatch(receipt.Error.Message); m != nil {
 		details["field"] = m[1] + m[2]
 	}
+	if fields := refusedFields(receipt.Error.Details); len(fields) > 0 {
+		details["fields"] = fields
+	}
 	writeError(c, http.StatusBadRequest, string(receipt.Error.Type), receipt.Error.Message, details)
 	return true
+}
+
+// refusedField is the user-facing part of one field-level refusal. The
+// predicate and other write-path internals stay out of the reply.
+type refusedField struct {
+	DocType string `json:"doctype,omitempty"`
+	Field   string `json:"field,omitempty"`
+	Message string `json:"message"`
+}
+
+// refusedFields reads the field-level refusals a command stored in its receipt
+// error, in the same fields[] shape the record write path returns.
+func refusedFields(raw json.RawMessage) []refusedField {
+	if len(raw) == 0 {
+		return nil
+	}
+	var verrs doctype.ValidationErrors
+	if err := json.Unmarshal(raw, &verrs); err != nil {
+		return nil
+	}
+	fields := make([]refusedField, 0, len(verrs))
+	for _, verr := range verrs {
+		if verr != nil {
+			fields = append(fields, refusedField{DocType: verr.DocType, Field: verr.Field, Message: verr.Message})
+		}
+	}
+	return fields
 }
 
 func (h *Handler) HandleLookupPublishedOperation(c *gin.Context) {
