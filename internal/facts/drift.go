@@ -171,26 +171,35 @@ func (c *DriftChecker) checkModel(ctx context.Context, dt *doctype.DocType, days
 			continue
 		}
 		slog.Warn("fact drift", "model", dt.Name, "day", day.String(), "summary_drift", summaryOff, "source_drift", sourceOff)
-		if held, err := c.held(ctx); err != nil || !held {
-			if err == nil {
-				err = errDriftLeaseLost
-			}
+		if err := c.recordDrift(ctx, dt, day, sourceOff); err != nil {
 			return drifted, err
-		}
-		if err := c.markDirtyDay(ctx, dt, day); err != nil {
-			return drifted, err
-		}
-		if sourceOff {
-			if err := c.queueRepair(ctx, dt, day); err != nil {
-				return drifted, err
-			}
-		}
-		if c.Drifted != nil {
-			c.Drifted.Add(ctx, 1, metric.WithAttributes(attribute.String(driftMetricLabel, dt.Name)))
 		}
 		drifted++
 	}
 	return drifted, nil
+}
+
+// recordDrift marks a drifting day dirty, queues a rebuild when the source disagrees, and counts it. Each
+// step needs the drift lease, so the check stops with errDriftLeaseLost once another replica holds it.
+func (c *DriftChecker) recordDrift(ctx context.Context, dt *doctype.DocType, day tenanttime.Date, sourceOff bool) error {
+	if held, err := c.held(ctx); err != nil || !held {
+		if err == nil {
+			err = errDriftLeaseLost
+		}
+		return err
+	}
+	if err := c.markDirtyDay(ctx, dt, day); err != nil {
+		return err
+	}
+	if sourceOff {
+		if err := c.queueRepair(ctx, dt, day); err != nil {
+			return err
+		}
+	}
+	if c.Drifted != nil {
+		c.Drifted.Add(ctx, 1, metric.WithAttributes(attribute.String(driftMetricLabel, dt.Name)))
+	}
+	return nil
 }
 
 // sampleDays returns the last driftDays business days on the tenant clock, newest first. A day is sampled
