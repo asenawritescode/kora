@@ -177,6 +177,31 @@ func TestMetricRowsEncodeNullAndExactDecimals(t *testing.T) {
 	}
 }
 
+// TestMetricRowsCarryLabelsAndFormats checks a line-dimension group reaches the wire with its record title, and an
+// unsaved measure with its display format.
+func TestMetricRowsCarryLabelsAndFormats(t *testing.T) {
+	res := metrics.Result{
+		Metrics: []string{"adhoc_sale_sum_line_total"},
+		Rows: []metrics.Row{{
+			Period: dayOf(2026, 11, 19), Group: []string{"P1"}, Labels: []string{"Soda"},
+			Values: []decimal.NullDecimal{{Decimal: decimal.RequireFromString("450"), Valid: true}},
+		}},
+	}
+	out := resultOf(res)
+	out.Formats = adHocFormats(metrics.Catalog{Metrics: map[string]metrics.Metric{
+		"adhoc_sale_sum_line_total": {Name: "adhoc_sale_sum_line_total", Format: "currency"},
+	}}, []string{"adhoc_sale_sum_line_total"})
+	if got := out.Rows[0].Labels; !slices.Equal(got, []string{"Soda"}) {
+		t.Fatalf("labels = %v, want [Soda]", got)
+	}
+	if got := out.Formats["adhoc_sale_sum_line_total"]; got != "currency" {
+		t.Fatalf("format = %q, want currency", got)
+	}
+	if adHocFormats(metrics.Catalog{}, nil) != nil {
+		t.Fatal("no measures must carry no formats")
+	}
+}
+
 // dayOf is the business date at UTC midnight, the form metric results carry.
 func dayOf(y int, m time.Month, d int) tenanttime.Date {
 	return dateOf(time.Date(y, m, d, 0, 0, 0, 0, time.UTC))

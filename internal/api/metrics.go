@@ -311,6 +311,7 @@ func (m metricsAPI) query(c *gin.Context) {
 	meta.OwnerOnly = q.Scope.Owner != ""
 	out := resultOf(res)
 	out.Labels = adHocLabels(cat, adHoc)
+	out.Formats = adHocFormats(cat, adHoc)
 	c.JSON(http.StatusOK, metricsEnvelope{Data: out, Meta: meta})
 }
 
@@ -496,6 +497,8 @@ func (m metricsAPI) authorizeQuery(c *gin.Context, cat metrics.Catalog, q *metri
 			code = "metrics.range_too_large"
 		case errors.Is(err, metrics.ErrForbidden):
 			code, status = "metrics.forbidden", http.StatusForbidden
+		case errors.Is(err, metrics.ErrMeasureNotOnLines):
+			code = "metrics.measure_not_on_lines"
 		}
 		return nil, &queryRefusal{status, code, err.Error()}
 	}
@@ -733,6 +736,18 @@ func adHocLabels(cat metrics.Catalog, names []string) map[string]string {
 	return out
 }
 
+// adHocFormats maps each unsaved measure's name to its display format; nil when the query has none.
+func adHocFormats(cat metrics.Catalog, names []string) map[string]string {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(names))
+	for _, name := range names {
+		out[name] = cat.Metrics[name].Format
+	}
+	return out
+}
+
 // parseMetricRange reads an inclusive range of business dates written YYYY-MM-DD.
 func parseMetricRange(from, to string) (tenanttime.Date, tenanttime.Date, error) {
 	start, err := time.Parse(time.DateOnly, from)
@@ -784,7 +799,8 @@ func rowsOf(rows []metrics.Row) []contract.MetricRow {
 		for _, v := range r.Values {
 			values = append(values, decimalJSON(v))
 		}
-		out = append(out, contract.MetricRow{Bucket: r.Period.String(), Group: append([]string{}, r.Group...), Label: r.Label, Values: values})
+		out = append(out, contract.MetricRow{Bucket: r.Period.String(), Group: append([]string{}, r.Group...), Label: r.Label,
+			Labels: r.Labels, Values: values})
 	}
 	return out
 }

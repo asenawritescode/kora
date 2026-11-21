@@ -115,11 +115,16 @@ func recordLabelOf(q queryAnswer, cat *metricsCatalog) string {
 	return "records"
 }
 
-// formatOf is the number format of the first metric of a query. An unsaved measure takes the format of its field in
-// the record type's catalog, and is a plain number when the catalog names none.
+// formatOf is the number format of the first metric of a query. An unsaved measure carries its format in the
+// query result; failing that it takes the format of its field in the record type's catalog, and is a plain number
+// when neither names one.
 func formatOf(q queryAnswer, cat *metricsCatalog) string {
 	if len(q.result.Metrics) > 0 {
-		if m, ok := cat.metrics[q.result.Metrics[0]]; ok && m.Format != "" {
+		name := q.result.Metrics[0]
+		if f := q.result.Formats[name]; f != "" {
+			return f
+		}
+		if m, ok := cat.metrics[name]; ok && m.Format != "" {
 			return m.Format
 		}
 	}
