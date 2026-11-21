@@ -51,8 +51,8 @@ var (
 	dashboardKeys = yamlKeys(Dashboard{})
 	tileKeys      = yamlKeys(Tile{})
 	chartKeys     = yamlKeys(Chart{})
-	rangeNames    = []string{"today", "last_7_days", "last_30_days", "this_month", "last_month"}
-	compareNames  = []string{"", "none", "previous_period"}
+	rangeNames    = presetNames()
+	compareNames  = []string{"", "none", "previous_period", "week_before"}
 	chartKinds    = []string{"bar", "line", "table"}
 	grainNames    = []string{"day", "week", "month"}
 )

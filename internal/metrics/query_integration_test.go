@@ -235,6 +235,16 @@ func queries() []expectation {
 			"2026-11-19|R2|0.00",
 			"2026-11-20|R2|0.00",
 		}, nil},
+		// Nothing sold on 25-27 Nov; the same dates a week earlier, 18-20 Nov, are the Paid totals above.
+		{"week before pairs the same days one week earlier", Query{Metrics: all, From: day(25), To: day(27), Grain: GrainDay, Compare: CompareWeekBefore}, []string{
+			"2026-11-25||0.00,0.00,null",
+			"2026-11-26||0.00,0.00,null",
+			"2026-11-27||0.00,0.00,null",
+		}, []string{
+			"2026-11-18||150.00,2.00,75.00",
+			"2026-11-19||0.00,0.00,null",
+			"2026-11-20||200.00,1.00,200.00",
+		}},
 		// Previous period of 18-20 Nov is 15-17 Nov: SAL-7 (40, one receipt) is on 17 Nov, so it is
 		// the last previous bucket, paired with 20 Nov.
 		{"previous period pairs buckets by position", Query{Metrics: all, From: day(18), To: day(20), Grain: GrainDay, Compare: ComparePreviousPeriod}, []string{

@@ -43,10 +43,12 @@ type Scope struct {
 // Compare names the window a result is compared with.
 type Compare string
 
-// Comparison windows. An empty Compare is CompareNone.
+// Comparison windows. An empty Compare is CompareNone. CompareWeekBefore reads the same dates one week
+// earlier.
 const (
 	CompareNone           Compare = "none"
 	ComparePreviousPeriod Compare = "previous_period"
+	CompareWeekBefore     Compare = "week_before"
 )
 
 // Query asks for metrics over a business-date range. From and To are both inclusive.
@@ -97,12 +99,14 @@ type Row struct {
 
 // Result holds every bucket of every group in order. Empty buckets are zero. Previous, when the
 // query compares, pairs with Rows by position: Previous[i] is the previous-period bucket of Rows[i]
-// for the same group.
+// for the same group. PreviousSpan is the window Previous was read from; it is zero when the query
+// does not compare.
 type Result struct {
-	Metrics    []string
-	Dimensions []string
-	Rows       []Row
-	Previous   []Row
+	Metrics      []string
+	Dimensions   []string
+	Rows         []Row
+	Previous     []Row
+	PreviousSpan Span
 }
 
 // periodStart is the first day of the bucket that contains t.

@@ -110,8 +110,8 @@ func checkShape(q Query) error {
 		return fmt.Errorf("grain %q must be day, week, month or range", q.Grain)
 	case toTime(q.To).Before(toTime(q.From)):
 		return fmt.Errorf("range ends %s before it starts %s", q.To, q.From)
-	case q.Compare != "" && q.Compare != CompareNone && q.Compare != ComparePreviousPeriod:
-		return fmt.Errorf("compare %q must be none or previous_period", q.Compare)
+	case q.Compare != "" && q.Compare != CompareNone && q.Compare != ComparePreviousPeriod && q.Compare != CompareWeekBefore:
+		return fmt.Errorf("compare %q must be none, previous_period or week_before", q.Compare)
 	case q.Top < 0:
 		return fmt.Errorf("top %d must not be negative", q.Top)
 	case q.Top > 0 && len(q.Dimensions) != 1:

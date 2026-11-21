@@ -44,6 +44,29 @@ func TestPreviousRange(t *testing.T) {
 	}
 }
 
+func TestWeekBeforeRangeIsTheRangeOneWeekEarlier(t *testing.T) {
+	tests := []struct {
+		name     string
+		from, to tenanttime.Date
+		grain    Grain
+		wantFrom tenanttime.Date
+		wantTo   tenanttime.Date
+	}{
+		{"single day", day(2026, 11, 21), day(2026, 11, 21), GrainDay, day(2026, 11, 14), day(2026, 11, 14)},
+		{"days", day(2026, 11, 18), day(2026, 11, 20), GrainDay, day(2026, 11, 11), day(2026, 11, 13)},
+		{"range grain", day(2026, 11, 18), day(2026, 11, 20), GrainRange, day(2026, 11, 11), day(2026, 11, 13)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := plan{from: tc.from, to: tc.to, grain: tc.grain, compare: CompareWeekBefore}
+			from, to := p.previousRange()
+			if from != tc.wantFrom || to != tc.wantTo {
+				t.Fatalf("previousRange = %s..%s, want %s..%s", from, to, tc.wantFrom, tc.wantTo)
+			}
+		})
+	}
+}
+
 // sumsPlan is a plan over the single day 18 Nov whose first requested metric is a simple sum over one series.
 func sumsPlan() plan {
 	return plan{from: day(2026, 11, 18), to: day(2026, 11, 18), grain: GrainDay,

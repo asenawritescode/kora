@@ -102,11 +102,13 @@ func (e Engine) result(ctx context.Context, p plan, cur aggregate) (Result, erro
 		return Result{}, err
 	}
 	res := Result{Metrics: p.metricNames(), Dimensions: p.dimNames(), Rows: p.rows(cur, keys, p.from, p.to, labels)}
-	if p.compare == ComparePreviousPeriod {
+	if p.compares() {
 		res.Previous, err = e.previousRows(ctx, p, cur, keys, labels)
 		if err != nil {
 			return Result{}, err
 		}
+		from, to := p.previousRange()
+		res.PreviousSpan = Span{from, to}
 	}
 	return res, nil
 }

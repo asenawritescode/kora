@@ -112,6 +112,7 @@ func TestPlanQueryRoutesAndRefuses(t *testing.T) {
 		{name: "top with two dimensions", query: with(func(q *Query) { q.Dimensions = []string{"register", "item"}; q.Top = 2 }), invalid: true},
 		{name: "negative top", query: with(func(q *Query) { q.Top = -1 }), invalid: true},
 		{name: "unknown compare window", query: with(func(q *Query) { q.Compare = "last_year" }), invalid: true},
+		{name: "compare week before is accepted", query: with(func(q *Query) { q.Compare = CompareWeekBefore }), summary: true, series: 1},
 		{name: "compare previous period is accepted", query: with(func(q *Query) { q.Compare = ComparePreviousPeriod }), summary: true, series: 1},
 		{name: "balance reads the summary and its opening", query: with(func(q *Query) { q.Metrics = []string{"balance_sales"} }), summary: true, series: 1, table: "_kora_fact_summary_sale"},
 		{name: "balance with owner scope reads the facts", query: with(func(q *Query) { q.Metrics = []string{"balance_sales"}; q.Scope.Owner = "u1" }), summary: false, series: 1, table: "_kora_fact_sale"},

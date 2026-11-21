@@ -19,8 +19,13 @@ const (
 
 // previousRange is the window of as many buckets as the range has, ending the day before its
 // first bucket. For a range that starts on a bucket boundary that is the day before From. A range
-// grain takes as many days as the range has, ending the day before From.
+// grain takes as many days as the range has, ending the day before From. A week_before window is
+// the range one week earlier.
 func (p plan) previousRange() (tenanttime.Date, tenanttime.Date) {
+	if p.compare == CompareWeekBefore {
+		shifted := Span{p.from, p.to}.weekBefore()
+		return shifted.From, shifted.To
+	}
 	if p.grain == GrainRange {
 		start := toTime(p.from)
 		days := int(toTime(p.to).Sub(start).Hours()/24) + 1
@@ -29,6 +34,11 @@ func (p plan) previousRange() (tenanttime.Date, tenanttime.Date) {
 	first := periodStart(toTime(p.from), p.grain)
 	n := len(bucketStarts(p.from, p.to, p.grain))
 	return toDate(stepPeriod(first, p.grain, -n)), toDate(first.AddDate(0, 0, -1))
+}
+
+// compares reports whether the plan reads a comparison window.
+func (p plan) compares() bool {
+	return p.compare == ComparePreviousPeriod || p.compare == CompareWeekBefore
 }
 
 // previousRows runs the previous-period window and returns its rows aligned with cur's rows. It
