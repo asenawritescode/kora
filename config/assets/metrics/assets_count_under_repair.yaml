@@ -1,0 +1,13 @@
+name: assets_count_under_repair
+label: "Assets: Under repair"
+type: simple
+model: "Asset"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Under repair"
+time: business_date
+format: number
+description: "Assets: Under repair from the Asset records (count)."

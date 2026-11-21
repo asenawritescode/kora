@@ -1,0 +1,13 @@
+name: asset_maintenance_tasks_count_done
+label: "Maintenance tasks: Done"
+type: simple
+model: "Maintenance Task"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Done"
+time: business_date
+format: number
+description: "Maintenance tasks: Done from the Maintenance Task records (count)."

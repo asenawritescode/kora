@@ -1,0 +1,13 @@
+name: asset_maintenance_tasks_count_cancelled
+label: "Maintenance tasks: Cancelled"
+type: simple
+model: "Maintenance Task"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Cancelled"
+time: business_date
+format: number
+description: "Maintenance tasks: Cancelled from the Maintenance Task records (count)."

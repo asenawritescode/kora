@@ -1,0 +1,9 @@
+name: assets_count
+label: "Assets"
+type: simple
+model: "Asset"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Assets from the Asset records (count)."
