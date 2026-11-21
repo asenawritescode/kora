@@ -1,0 +1,10 @@
+name: people_leave_days
+label: "Days of leave"
+type: simple
+model: "Leave Request"
+measure:
+  agg: sum
+  field: days
+time: business_date
+format: number
+description: "Days of leave from the Leave Request records (sum)."

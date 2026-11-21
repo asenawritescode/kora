@@ -1,0 +1,15 @@
+name: people_insights
+label: "People insights"
+description: "Figures and charts that reproduce the people overview report."
+default_range: last_30_days
+charts:
+  - id: employees_by_department
+    title: "Employees by department"
+    kind: bar
+    metrics: [people_employees_count]
+    by: department
+  - id: leave_by_type
+    title: "Days of leave by type"
+    kind: bar
+    metrics: [people_leave_days]
+    by: leave_type

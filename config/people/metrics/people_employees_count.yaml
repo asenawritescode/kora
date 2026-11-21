@@ -1,0 +1,9 @@
+name: people_employees_count
+label: "Employees"
+type: simple
+model: "Employee"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Employees from the Employee records (count)."
