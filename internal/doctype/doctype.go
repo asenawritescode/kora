@@ -54,6 +54,7 @@ type DocType struct {
 // says array, and clients call array methods on them.
 func (d DocType) MarshalJSON() ([]byte, error) {
 	type plain DocType // a type without these methods, so the call below does not recurse
+	d.Facts = d.declaredFacts()
 	if d.Fields == nil {
 		d.Fields = []Field{}
 	}
@@ -61,6 +62,13 @@ func (d DocType) MarshalJSON() ([]byte, error) {
 		d.DocConstraints = []DocConstraint{}
 	}
 	return json.Marshal(plain(d))
+}
+
+// MarshalYAML writes the record type without a generated fact model: config holds only the facts a pack declares.
+func (d DocType) MarshalYAML() (any, error) {
+	type plain DocType // a type without this method, so the value below encodes as plain fields
+	d.Facts = d.declaredFacts()
+	return plain(d), nil
 }
 
 // QuantityEffect says what saving a record does to a number on another record,

@@ -299,7 +299,7 @@ func writeSExprDocType(b *strings.Builder, dt *DocType, indent string) {
 		key string
 		val any
 		set bool
-	}{{"reference-rule-json", dt.ReferenceRule, dt.ReferenceRule != nil}, {"public-access-json", dt.PublicAccess, dt.PublicAccess != nil}, {"quantity-effect-json", dt.QuantityEffect, dt.QuantityEffect != nil}, {"facts-json", dt.Facts, dt.Facts != nil}} {
+	}{{"reference-rule-json", dt.ReferenceRule, dt.ReferenceRule != nil}, {"public-access-json", dt.PublicAccess, dt.PublicAccess != nil}, {"quantity-effect-json", dt.QuantityEffect, dt.QuantityEffect != nil}, {"facts-json", dt.declaredFacts(), dt.declaredFacts() != nil}} {
 		if !kv.set {
 			continue
 		}

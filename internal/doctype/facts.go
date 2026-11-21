@@ -20,6 +20,9 @@ type FactModel struct {
 	// ExcludeStatus lists statuses whose records have no fact rows: they are tombstoned until they
 	// move to a status outside this list. Each value must be an option of StatusField.
 	ExcludeStatus []string `yaml:"exclude_status,omitempty" json:"exclude_status,omitempty"`
+	// Generated marks a model built from the record type's fields because its pack declares none.
+	// It lives in memory only: the JSON, YAML and s-expression forms of the record type omit it.
+	Generated bool `yaml:"-" json:"-"`
 }
 
 // FactMeasure is a number summed by metrics. Field is "name" on the record, or

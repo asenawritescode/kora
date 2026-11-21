@@ -23,7 +23,7 @@ func TestRecordConsumersRegisterFactConsumerOnlyWithFactDoctypes(t *testing.T) {
 		wantStarts int
 	}{
 		{name: "tenant with a Facts doctype registers the consumer", withFacts: true, wantStarts: 1},
-		{name: "tenant without a Facts doctype registers nothing", withFacts: false, wantStarts: 0},
+		{name: "tenant with only child tables registers nothing", withFacts: false, wantStarts: 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -37,11 +37,13 @@ func TestRecordConsumersRegisterFactConsumerOnlyWithFactDoctypes(t *testing.T) {
 				t.Fatal(err)
 			}
 			reg := doctype.NewRegistry()
-			sale := &doctype.DocType{Name: "Sale"}
+			// A record type gets a generated fact model unless it is a child table, so only a child
+			// table leaves a tenant with nothing to register.
+			record := &doctype.DocType{Name: "Line", IsChildTable: true}
 			if tc.withFacts {
-				sale.Facts = &doctype.FactModel{Time: "creation"}
+				record = &doctype.DocType{Name: "Sale", Facts: &doctype.FactModel{Time: "creation"}}
 			}
-			reg.Register(sale)
+			reg.Register(record)
 			loaded := &knet.LoadedSite{SiteID: "tenant-facts", DBType: "mysql", DB: database, Registry: reg}
 			starts := 0
 			config := TenantServiceConfig{
@@ -100,3 +102,4 @@ func TestFactConsumerStartsDriftCheck(t *testing.T) {
 		}
 	}
 }
+
