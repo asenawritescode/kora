@@ -1,0 +1,13 @@
+name: grant_reports_count_submitted
+label: "Grant reports: Submitted"
+type: simple
+model: "Grant Report"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Submitted"
+time: business_date
+format: number
+description: "Grant reports: Submitted from the Grant Report records (count)."

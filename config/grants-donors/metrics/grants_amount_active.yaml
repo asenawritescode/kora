@@ -1,0 +1,14 @@
+name: grants_amount_active
+label: "Grant amount: Active"
+type: simple
+model: "Grant"
+measure:
+  agg: sum
+  field: amount
+filters:
+  - field: status
+    op: "="
+    value: "Active"
+time: business_date
+format: currency
+description: "Grant amount: Active from the Grant records (sum)."

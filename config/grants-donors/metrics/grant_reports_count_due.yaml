@@ -1,0 +1,13 @@
+name: grant_reports_count_due
+label: "Grant reports: Due"
+type: simple
+model: "Grant Report"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Due"
+time: business_date
+format: number
+description: "Grant reports: Due from the Grant Report records (count)."

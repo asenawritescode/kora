@@ -1,0 +1,9 @@
+name: grant_reports_count
+label: "Grant reports"
+type: simple
+model: "Grant Report"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Grant reports from the Grant Report records (count)."

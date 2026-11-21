@@ -1,0 +1,14 @@
+name: grants_amount_declined
+label: "Grant amount: Declined"
+type: simple
+model: "Grant"
+measure:
+  agg: sum
+  field: amount
+filters:
+  - field: status
+    op: "="
+    value: "Declined"
+time: business_date
+format: currency
+description: "Grant amount: Declined from the Grant records (sum)."
