@@ -24,6 +24,12 @@ func (d *PostgresDialect) IsAbortedTransaction(err error) bool {
 	return errors.As(err, &postgresErr) && postgresErr.Code == "25P02"
 }
 
+// IsUniqueViolation reports SQLSTATE 23505 (unique_violation).
+func (d *PostgresDialect) IsUniqueViolation(err error) bool {
+	var postgresErr *pq.Error
+	return errors.As(err, &postgresErr) && postgresErr.Code == "23505"
+}
+
 func (d *PostgresDialect) IsWriteConflict(err error) bool {
 	var postgresErr *pq.Error
 	if !errors.As(err, &postgresErr) {

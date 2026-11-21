@@ -142,6 +142,11 @@ jobs:
           KORA_ENGINE_PUBOP_REFUSAL_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_ENGINE_PUBOP_REFUSAL_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
         run: go test -tags=integration ./internal/engine -run TestPublishedOperationRefusalKeepsDetailsAcrossDialects -count=1 -timeout=10m
+      - name: Test published operation first-use lease race on disposable MySQL and PostgreSQL
+        env:
+          KORA_ENGINE_PUBOP_LEASE_RACE_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+          KORA_ENGINE_PUBOP_LEASE_RACE_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
+        run: go test -tags=integration ./internal/engine -run TestPublishedOperationFirstUseLeaseRaceAcrossDialects -count=1 -timeout=10m
 
       - name: Wait for disposable libSQL
         run: |

@@ -404,7 +404,7 @@ func replaceModuleOwnership(existing []contract.ResourceOwnership, tenant contra
 // as the configuration snapshot.
 type ModuleStore struct {
 	DB      *sql.DB
-	Dialect db.QueryDialect
+	Dialect db.Dialect
 }
 
 func (s *ModuleStore) LoadDescriptors(tenant contract.TenantID) ([]contract.ModuleDescriptor, uint64, error) {
@@ -415,7 +415,8 @@ func (s *ModuleStore) LoadDescriptors(tenant contract.TenantID) ([]contract.Modu
 	return append([]contract.ModuleDescriptor(nil), snapshot.Modules...), snapshot.Revision, nil
 }
 
-func NewModuleStore(database *sql.DB, dialect db.QueryDialect) *ModuleStore {
+// NewModuleStore returns the module store over one tenant module database.
+func NewModuleStore(database *sql.DB, dialect db.Dialect) *ModuleStore {
 	return &ModuleStore{DB: database, Dialect: dialect}
 }
 
@@ -474,7 +475,8 @@ func (s *ModuleStore) CreateCapabilityLease(ctx context.Context, lease contract.
 }
 
 // EnsureCapabilityLease makes a trusted, predeclared workflow grant durable on
-// first assembly and refuses to recreate or widen an existing lease.
+// first assembly and refuses to recreate or widen an existing lease. Concurrent
+// first use may race the insert; the winner's lease is then the one to use.
 func (s *ModuleStore) EnsureCapabilityLease(ctx context.Context, expected contract.CapabilityLease) error {
 	if ctx == nil || expected.Validate() != nil || expected.State != "active" || expected.AdmittedAttempts != 0 || !expected.ExpiresAt.After(time.Now().UTC()) {
 		return fmt.Errorf("capability lease declaration is invalid")
@@ -484,36 +486,47 @@ func (s *ModuleStore) EnsureCapabilityLease(ctx context.Context, expected contra
 		return err
 	}
 	if found {
-		if !sameCapabilityLeaseDeclaration(current, expected) {
-			return contract.NewError(contract.CodePermissionDenied, "durable capability lease differs from its declared grant")
-		}
-		if current.State == "revoked" || current.State == "expired" {
-			// Preserve runtime availability for reconciliation. Effect admission
-			// will continue to deny this durable security decision.
-			return nil
-		}
-		current.AdmittedAttempts = 0
-		if current != expected {
-			return contract.NewError(contract.CodePermissionDenied, "durable capability lease epoch differs from its declared grant")
-		}
+		return checkDurableCapabilityLease(current, expected)
+	}
+	createErr := s.CreateCapabilityLease(ctx, expected)
+	if createErr == nil {
 		return nil
 	}
-	if err := s.CreateCapabilityLease(ctx, expected); err != nil {
-		// Concurrent runtime assembly may insert the same grant first. Accept
-		// only an exact match; revoked or widened records stay denied.
-		current, found, loadErr := s.LoadCapabilityLease(ctx, expected.TenantID, expected.ID)
-		if loadErr != nil {
-			return err
-		}
-		if !found || !sameCapabilityLeaseDeclaration(current, expected) || current.State == "active" && current.GrantEpoch != expected.GrantEpoch {
-			return contract.NewError(contract.CodePermissionDenied, "capability lease could not be issued or differs from its declared grant")
-		}
+	if !s.Dialect.IsUniqueViolation(createErr) {
+		return createErr
+	}
+	// Another issuer committed the same grant after our read. Its lease is
+	// ours to use when the grant matches; anything else stays denied.
+	current, found, err = s.LoadCapabilityLease(ctx, expected.TenantID, expected.ID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return contract.NewError(contract.CodePermissionDenied, "capability lease could not be issued or differs from its declared grant")
+	}
+	return checkDurableCapabilityLease(current, expected)
+}
+
+// checkDurableCapabilityLease accepts a stored lease that carries the declared
+// grant. The expiry is not compared: each issuer stamps its own clock, and the
+// stored expiry is the one that governs admission.
+func checkDurableCapabilityLease(current, expected contract.CapabilityLease) error {
+	if !sameCapabilityLeaseGrant(current, expected) {
+		return contract.NewError(contract.CodePermissionDenied, "durable capability lease differs from its declared grant")
+	}
+	if current.State == "revoked" || current.State == "expired" {
+		// Preserve runtime availability for reconciliation. Effect admission
+		// will continue to deny this durable security decision.
+		return nil
+	}
+	if current.GrantEpoch != expected.GrantEpoch {
+		return contract.NewError(contract.CodePermissionDenied, "durable capability lease epoch differs from its declared grant")
 	}
 	return nil
 }
 
-func sameCapabilityLeaseDeclaration(current, expected contract.CapabilityLease) bool {
-	return current.ID == expected.ID && current.TenantID == expected.TenantID && current.Scope == expected.Scope && current.CallerModuleID == expected.CallerModuleID && current.ProviderModuleID == expected.ProviderModuleID && current.ProviderID == expected.ProviderID && current.Operation == expected.Operation && current.BindingRevision == expected.BindingRevision && current.ExpiresAt.Equal(expected.ExpiresAt) && current.CredentialRef == expected.CredentialRef
+func sameCapabilityLeaseGrant(current, expected contract.CapabilityLease) bool {
+	return current.ID == expected.ID && current.TenantID == expected.TenantID && current.Scope == expected.Scope && current.CallerModuleID == expected.CallerModuleID && current.ProviderModuleID == expected.ProviderModuleID && current.ProviderID == expected.ProviderID && current.Operation == expected.Operation && current.BindingRevision == expected.BindingRevision && current.CredentialRef == expected.CredentialRef
 }
 
 // LoadCapabilityLease reads the durable authority record without returning
