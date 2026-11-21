@@ -86,7 +86,11 @@ func isNumberResult(res contract.MetricQueryResult) bool {
 // labelOf names the metrics a query reads, as the card shows them.
 func labelOf(q queryAnswer, cat *metricsCatalog) string {
 	if q.saved != nil {
-		return q.saved.Name + " (saved by " + q.saved.Owner + ")"
+		owner := q.saved.OwnerName
+		if owner == "" {
+			owner = q.saved.Owner
+		}
+		return q.saved.Name + " (saved by " + owner + ")"
 	}
 	names := make([]string, 0, len(q.result.Metrics))
 	for _, name := range q.result.Metrics {

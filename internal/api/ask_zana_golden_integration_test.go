@@ -63,14 +63,19 @@ type goldenSale struct {
 // goldenDates are the business days the dataset is built on: the Monday of last week, of the week before, and today.
 type goldenDates struct{ lastMon, weekBeforeMon, today time.Time }
 
-// goldenStart is the start of the dataset's business days, as the tenant clock reads them now.
-func goldenStart(t *testing.T, database *sql.DB, dialect string) goldenDates {
+// goldenStart is the start of the dataset's business days, as the tenant clock reads them now. It uses the zone and
+// cutoff goldenSettings writes, which are written only when the dataset is seeded, so it must not read the stored clock.
+func goldenStart(t *testing.T) goldenDates {
 	t.Helper()
-	clock, err := tenanttime.Load(context.Background(), database, kdb.Resolve(dialect), goldenSite)
+	loc, err := tenanttime.ParseZone("Africa/Nairobi")
 	if err != nil {
-		t.Fatalf("tenant clock: %v", err)
+		t.Fatalf("zone: %v", err)
 	}
-	bd := clock.BusinessDate(time.Now())
+	cutoff, err := tenanttime.ParseCutoff("04:00")
+	if err != nil {
+		t.Fatalf("cutoff: %v", err)
+	}
+	bd := tenanttime.Clock{Location: loc, Cutoff: cutoff}.BusinessDate(time.Now())
 	today := time.Date(bd.Year, bd.Month, bd.Day, 0, 0, 0, 0, time.UTC)
 	thisMon := today.AddDate(0, 0, -((int(today.Weekday()) + 6) % 7))
 	return goldenDates{lastMon: thisMon.AddDate(0, 0, -7), weekBeforeMon: thisMon.AddDate(0, 0, -14), today: today}
@@ -770,7 +775,7 @@ func TestAskZanaGoldenQuestions(t *testing.T) {
 			database, reg := openErpsell(t, tc.dialect, dsn,
 				[]*doctype.Role{{Name: tillCashierRole}},
 				[]*doctype.Permission{{Doctype: "Sale", Role: tillCashierRole, Read: true, IfOwner: true}})
-			dates := goldenStart(t, database, tc.dialect)
+			dates := goldenStart(t)
 			seedGoldenSales(context.Background(), t, database, tc.dialect, reg, goldenDataset(dates))
 			reportID := createGoldenReport(t, askZanaRouter(t, database, reg, tc.dialect))
 
