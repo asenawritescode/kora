@@ -54,6 +54,18 @@ func TestFactModelValidate(t *testing.T) {
 			delete(reg, "Sale Item")
 		}, "has no record type"},
 		{"no measures", func(_ *DocType, _ map[string]*DocType, f *FactModel) { f.Measures = nil }, "at least one measure"},
+		{"currency field is a dimension linked to Currency", func(dt *DocType, _ map[string]*DocType, f *FactModel) {
+			dt.Fields = append(dt.Fields, Field{Fieldname: "currency", Fieldtype: "Link", Options: "Currency"})
+			f.Dimensions = append(f.Dimensions, FactDimension{Field: "currency"})
+			f.CurrencyField = "currency"
+		}, ""},
+		{"currency field must name a dimension", func(_ *DocType, _ map[string]*DocType, f *FactModel) {
+			f.CurrencyField = "note"
+		}, "must name a dimension"},
+		{"currency field must link to Currency", func(_ *DocType, _ map[string]*DocType, f *FactModel) {
+			f.CurrencyField = "register"
+			f.Dimensions = append(f.Dimensions, FactDimension{Field: "register"})
+		}, "must be a Link to Currency"},
 		{"excluded status is an option", func(dt *DocType, _ map[string]*DocType, f *FactModel) {
 			dt.GetField("status").Options = "Draft\nPaid\nHeld"
 			f.ExcludeStatus = []string{"Held"}

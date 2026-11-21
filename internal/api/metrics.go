@@ -305,10 +305,25 @@ func (m metricsAPI) query(c *gin.Context) {
 		metricsRunError(c, "reading query metadata", err)
 		return
 	}
-	meta = periodMeta(meta, period, res)
+	if !completeQueryMeta(c, engine, q, period, res, &meta) {
+		return
+	}
 	out := resultOf(res)
 	out.Labels = adHocLabels(cat, adHoc)
 	c.JSON(http.StatusOK, metricsEnvelope{Data: out, Meta: meta})
+}
+
+// completeQueryMeta adds the period and the currencies the query's rows carry to meta. It writes the error
+// response and reports false when the currencies cannot be read.
+func completeQueryMeta(c *gin.Context, engine metrics.Engine, q metrics.Query, period queryPeriod, res metrics.Result, meta *contract.MetricsMeta) bool {
+	*meta = periodMeta(*meta, period, res)
+	currencies, err := engine.Currencies(c.Request.Context(), q)
+	if err != nil {
+		metricsRunError(c, "reading query currencies", err)
+		return false
+	}
+	meta.Currencies = currencies
+	return true
 }
 
 // businessClock is the tenant's business clock. Without a database the default clock serves: the query

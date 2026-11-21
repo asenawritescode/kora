@@ -17,6 +17,9 @@ type FactModel struct {
 	Measures    []FactMeasure   `yaml:"measures" json:"measures"`
 	Dimensions  []FactDimension `yaml:"dimensions,omitempty" json:"dimensions,omitempty"`
 	StatusField string          `yaml:"status_field,omitempty" json:"status_field,omitempty"`
+	// CurrencyField names a header dimension whose value is a Currency link. Query results then list the
+	// currencies their rows carry, so a caller can show a mixed-currency note. Empty means the base currency.
+	CurrencyField string `yaml:"currency_field,omitempty" json:"currency_field,omitempty"`
 	// ExcludeStatus lists statuses whose records have no fact rows: they are tombstoned until they
 	// move to a status outside this list. Each value must be an option of StatusField.
 	ExcludeStatus []string `yaml:"exclude_status,omitempty" json:"exclude_status,omitempty"`
@@ -145,7 +148,24 @@ func (f *FactModel) Validate(dt *DocType, reg map[string]*DocType) []CrossFileEr
 	f.checkMeasures(c)
 	f.checkDimensions(c)
 	f.checkStatus(c)
+	f.checkCurrency(c)
 	return c.errs
+}
+
+func (f *FactModel) checkCurrency(c *factChecks) {
+	if f.CurrencyField == "" {
+		return
+	}
+	for _, d := range f.Dimensions {
+		if d.ColumnName() == f.CurrencyField {
+			if fld, _ := f.column(c.dt, c.lines, factPath(d.Field)); fld != nil && fld.Fieldtype == "Link" && fld.Options == "Currency" {
+				return
+			}
+			c.bad("facts.currency_field", fmt.Sprintf("facts currency_field %q must be a Link to Currency", f.CurrencyField))
+			return
+		}
+	}
+	c.bad("facts.currency_field", fmt.Sprintf("facts currency_field %q must name a dimension", f.CurrencyField))
 }
 
 func (f *FactModel) checkTime(c *factChecks) {

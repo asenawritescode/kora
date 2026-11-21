@@ -1612,6 +1612,12 @@
         "as_of": {
           "type": "string"
         },
+        "currencies": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "day_ends": {
           "type": "string"
         },
@@ -4415,6 +4421,12 @@
       "properties": {
         "as_of": {
           "type": "string"
+        },
+        "currencies": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "day_ends": {
           "type": "string"

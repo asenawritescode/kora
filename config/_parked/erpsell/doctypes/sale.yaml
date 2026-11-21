@@ -187,6 +187,7 @@ fields:
 facts:
   time: sale_date
   lines: items
+  currency_field: currency
   measures:
     - field: total
     - field: base_total
@@ -199,6 +200,7 @@ facts:
     - field: items.line_cost
     - field: items.line_profit
   dimensions:
+    - field: currency
     - field: register
     - field: till_session
     - field: customer

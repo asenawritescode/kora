@@ -171,6 +171,9 @@ type MetricsMeta struct {
 	Previous       *MetricsSpan    `json:"previous,omitempty"`
 	TimeZone       string          `json:"time_zone"`
 	DayEnds        string          `json:"day_ends"`
+	// Currencies lists the currency values the rows carry, for a query that reads a record type with a
+	// currency field. An empty value is the base currency.
+	Currencies []string `json:"currencies,omitempty"`
 }
 
 // MetricsPeriod is the period a result covers: its preset and its exact business dates, YYYY-MM-DD.
