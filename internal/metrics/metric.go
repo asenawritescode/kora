@@ -1,6 +1,7 @@
 // Package metrics defines the metrics a pack declares in its metrics/ directory:
-// named reads over fact models. This package validates definitions; compiling
-// them into SQL belongs to a later milestone.
+// named reads over fact models. Definitions are validated here; query.go, plan.go,
+// sql.go and run.go compile and run simple and ratio metrics over the summaries
+// and the fact tables.
 package metrics
 
 import (
