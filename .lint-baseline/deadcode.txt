@@ -72,7 +72,6 @@ internal/analytics/query.go::QueryEngine.cacheKey
 internal/analytics/semantic.go::BuildPublishedProjectionModel
 internal/analytics/semantic.go::BuildPublishedSemanticModel
 internal/analytics/worker.go::Worker.addDelta
-internal/api/ai/analytics.go::checkRelatedAnalyticsPermissions
 internal/api/ai/legacy_inventory.go::InspectRunStatusInventory
 internal/api/ai/legacy_inventory.go::aiRunColumns
 internal/api/ai/run_store.go::ListRunTasks

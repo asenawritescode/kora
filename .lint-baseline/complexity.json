@@ -276,9 +276,9 @@
    "lines": 185
   },
   "internal/api/ai::HandleChat": {
-   "cognitive": 119,
-   "cyclomatic": 57,
-   "statements": 225
+   "cognitive": 117,
+   "cyclomatic": 54,
+   "statements": 224
   },
   "internal/api/ai::ValidateProviderProfile": {
    "cyclomatic": 16
@@ -286,33 +286,18 @@
   "internal/api/ai::aiBundleChildFieldGuide": {
    "cognitive": 28
   },
-  "internal/api/ai::analyticsModelReadable": {
-   "cognitive": 55,
-   "cyclomatic": 42,
-   "statements": 62
-  },
-  "internal/api/ai::authorizeRelatedAnalytics": {
-   "cognitive": 50,
-   "cyclomatic": 27,
-   "statements": 51
-  },
   "internal/api/ai::buildAIMutationBundle": {
    "cognitive": 83,
    "cyclomatic": 45,
    "statements": 70
   },
   "internal/api/ai::buildSystemFunctions": {
-   "lines": 321
+   "lines": 316
   },
   "internal/api/ai::executeAIMutationBundle": {
    "cognitive": 24,
    "cyclomatic": 20,
    "statements": 50
-  },
-  "internal/api/ai::executeAnalyticsInsights": {
-   "cognitive": 33,
-   "cyclomatic": 22,
-   "statements": 48
   },
   "internal/api/ai::executeCreateDoctypeDraft": {
    "cognitive": 16
@@ -324,17 +309,14 @@
   },
   "internal/api/ai::executeSingleTool": {
    "cognitive": 65,
-   "cyclomatic": 64,
-   "statements": 162
+   "cyclomatic": 60,
+   "statements": 153
   },
   "internal/api/ai::executeToolCallsForAI": {
    "lines": 113
   },
   "internal/api/ai::executeUpdateDoctypeDraft": {
    "cognitive": 16
-  },
-  "internal/api/ai::filterAnalyticsCatalog": {
-   "cognitive": 17
   },
   "internal/api/ai::summarizeCompacted": {
    "cognitive": 19

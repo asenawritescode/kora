@@ -58,8 +58,10 @@ type Handler struct {
 
 	ExtensionStores ExtensionStoreOpener
 
-	Registry            *doctype.Registry
-	TxManager           *orm.TxManager
+	Registry  *doctype.Registry
+	TxManager *orm.TxManager
+	// metrics serves the metric reads the AI chat runs as the person.
+	metrics             metricsAPI
 	AuthProviders       *auth.ProviderRegistry
 	RuntimeServices     *SiteRuntimeServices
 	RealtimeConnections *RealtimeConnectionOwner
@@ -1002,7 +1004,7 @@ func RegisterRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry
 	RegisterAnalyticsRoutes(apiGroup, registry, txManager.DB, txManager.Dialect, opts.analyticsOptions())
 
 	// Metric catalog, query and drill (permission-scoped per record type).
-	registerMetricsRoutes(apiGroup, registry, txManager.DB, txManager.Dialect)
+	handler.metrics = registerMetricsRoutes(apiGroup, registry, txManager.DB, txManager.Dialect)
 }
 
 // registerScriptRoutes mounts script management (CRUD for _kora_script).

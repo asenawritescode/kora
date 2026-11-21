@@ -36,7 +36,9 @@ type metricsAPI struct {
 
 // registerMetricsRoutes mounts GET /metrics, GET /metrics/:name, POST /metrics/query, POST /metrics/drill,
 // the dashboard routes, which read the same catalog, and the saved Explore reports.
-func registerMetricsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, dialect db.Dialect) {
+//
+// It returns the metrics API, which the AI chat reads through the same handlers.
+func registerMetricsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, dialect db.Dialect) metricsAPI {
 	defs := newVersionCache[[]metrics.Metric]()
 	dashboardDefs := newVersionCache[[]metrics.Dashboard]()
 	api := metricsAPI{registry: registry, siteDB: siteDB, dialect: dialect, defs: func(c *gin.Context) ([]metrics.Metric, error) {
@@ -48,6 +50,7 @@ func registerMetricsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry
 	}}.mount(apiGroup.Group("/dashboards"))
 	registerExploreRoutes(apiGroup, registry)
 	reportsAPI{metrics: api}.mount(apiGroup.Group("/explore/reports"))
+	return api
 }
 
 // versionCache keeps each site's parsed configuration with the version it came from. A request reads only
@@ -305,6 +308,7 @@ func (m metricsAPI) query(c *gin.Context) {
 		return
 	}
 	meta = periodMeta(meta, period, res)
+	meta.OwnerOnly = q.Scope.Owner != ""
 	out := resultOf(res)
 	out.Labels = adHocLabels(cat, adHoc)
 	c.JSON(http.StatusOK, metricsEnvelope{Data: out, Meta: meta})

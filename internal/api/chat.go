@@ -31,13 +31,15 @@ func (h *Handler) HandleChat(c *gin.Context) {
 		return
 	}
 
-	ai.HandleChat(c, tx, reg, siteName, currentUser)
+	ai.HandleChat(c, ai.ChatTurn{Tx: tx, Registry: reg, Site: siteName, User: currentUser, Metrics: h.metricsRunner(c)})
 }
 
 type aiChatConversationResponse struct {
 	ConversationID string           `json:"conversation_id,omitempty"`
 	Messages       []ai.ChatMessage `json:"messages"`
 	LastRunID      string           `json:"last_run_id,omitempty"`
+	// Attachments are the answer cards and clarifying questions of the transcript, by run.
+	Attachments []ai.AnswerAttachment `json:"attachments,omitempty"`
 }
 
 // HandleAIChatConversation returns the persisted transcript for the current
@@ -82,9 +84,15 @@ func (h *Handler) HandleAIChatConversation(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, "ai_run.failed", "Unable to load AI conversation.", nil)
 		return
 	}
+	attachments, err := ai.ListAnswerAttachments(ctx, tx.DB, siteName, conversation.ID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "ai_run.failed", "Unable to load AI conversation.", nil)
+		return
+	}
 	c.JSON(http.StatusOK, Response{Data: aiChatConversationResponse{
 		ConversationID: conversation.ID,
 		Messages:       messages,
 		LastRunID:      conversation.LastRunID,
+		Attachments:    attachments,
 	}})
 }

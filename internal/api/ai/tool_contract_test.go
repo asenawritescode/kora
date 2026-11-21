@@ -98,12 +98,19 @@ func TestOpenAIToolsProjectFromCatalog(t *testing.T) {
 	}
 }
 
-func TestAnalyticsToolsAreExposed(t *testing.T) {
+func TestMetricsToolsAreExposedAndRetiredAnalyticsAreNot(t *testing.T) {
 	catalog := BuildToolCatalog(doctype.NewRegistry())
-	for _, name := range []string{"get_analytics_insights", "get_analytics_catalog", "query_analytics", "list_analytics_reports", "run_analytics_report"} {
+	for _, name := range []string{toolListMetrics, toolQueryMetrics, toolDrillMetrics, toolAskChoice} {
 		tool := findTool(t, catalog.Tools, name)
 		if tool.SafetyLevel != "safe" {
 			t.Errorf("%s safety = %q, want safe", name, tool.SafetyLevel)
+		}
+	}
+	for _, name := range []string{"get_analytics_insights", "get_analytics_catalog", "query_analytics", "list_analytics_reports", "run_analytics_report"} {
+		for _, tool := range catalog.Tools {
+			if tool.Name == name {
+				t.Errorf("retired analytics tool %s is still exposed", name)
+			}
 		}
 	}
 }

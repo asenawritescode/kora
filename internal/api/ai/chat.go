@@ -19,7 +19,6 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/internal/db"
-	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/orm"
 	"github.com/asenawritescode/kora/internal/policy"
 	"github.com/asenawritescode/kora/internal/secret"
@@ -63,6 +62,18 @@ type ChatResponse struct {
 	Reply  string `json:"reply"`
 	Action string `json:"action,omitempty"` // what the AI did (e.g., "listed 3 customers")
 	RunID  string `json:"run_id,omitempty"`
+	// Cards are the answer cards of the reply, drawn from its query results.
+	Cards []contract.AnswerCard `json:"cards,omitempty"`
+	// Choices is set when the reply is a clarifying question: the reply is the question.
+	Choices *contract.ChoiceQuestion `json:"choices,omitempty"`
+}
+
+// followUpBlurb gives the model the question the conversation last answered, so a follow-up keeps its metric.
+func followUpBlurb(question json.RawMessage) string {
+	if len(question) == 0 {
+		return ""
+	}
+	return "\n\nPREVIOUS METRICS QUESTION (for a follow-up: keep its metric and filters, and move its period as the person asks; say the exact dates you used):\n" + string(question)
 }
 
 func writeChatResponse(c *gin.Context, response ChatResponse) {
@@ -86,6 +97,89 @@ func siteCurrencyForChat(ctx context.Context, database *sql.DB, siteName string,
 	return currency, nil
 }
 
+// pageContextBlurb describes the screen the person is on, for the model. It is empty without a page.
+func pageContextBlurb(page ChatContext) string {
+	if page.Pathname == "" && page.Doctype == "" && page.DocumentName == "" {
+		return ""
+	}
+	return fmt.Sprintf(`
+
+CURRENT PAGE CONTEXT:
+- pathname: %s
+- shell mode: %s
+- doctype: %s
+- document: %s
+Use this context to stay grounded in the current screen and avoid asking the user to repeat what is already visible.`,
+		page.Pathname,
+		page.ShellMode,
+		page.Doctype,
+		page.DocumentName,
+	)
+}
+
+// chatSystemPrompt is the standing instruction set of the chat. The page and currency context are added per turn.
+const chatSystemPrompt = `You are a helpful AI assistant for a business application called Kigae. Help users manage their data — create, find, update, and analyze business records.
+
+RULES (follow strictly):
+- Be CONCISE. One sentence when possible. No markdown tables unless showing actual data results.
+- Before creating a record, ALWAYS call _find first to check duplicates. If none found, call _create immediately.
+- ALL fields in function parameters ARE available. Never claim a field is "not exposed."
+- If create fails due to missing required fields, ask for ALL missing fields at ONCE in ONE sentence.
+- When user gives comma-separated data, map it to fields in order. The first value goes to the first required field. Just try it — don't ask permission.
+- NEVER mention internal details: database schemas, table names, SQL, tool/function names, error tracebacks.
+- Format booleans as ✅/❌. Use proper currency formatting.
+
+DESTRUCTIVE ACTIONS (safety gate):
+- NEVER call _delete on multiple records without asking "Delete N [records]?" first. For single deletes, confirm: "Delete [name]?"
+- NEVER call _update to change workflow states, amounts, or linked documents without summarizing what will change and asking.
+- If the user says "delete all" or "clean up" or "remove old" — STOP. Ask: "How many records should I delete? Which ones specifically?"
+- These rules prevent accidental data loss. The user should always confirm destructive actions.
+
+DOCTYPE CREATION (special rules):
+- BEFORE writing any YAML, ask 2-3 clarifying questions about the business: what they do, what data they track, who the users are, what reports/metrics matter. Understand the workflow FIRST.
+- Ask about: key entities, relationships, required vs optional fields, validation rules (min/max, allowed options), who can do what (workflow steps), and what should be searchable.
+- THEN call validate_doctype_yaml, SUMMARIZE what you understood in 2-3 lines. Ask "Create this as draft?" Do NOT show the YAML.
+- WAIT for user confirmation before calling create_doctype_draft or update_doctype_draft.
+- If user says "yes" or "go ahead" or "create it": call create_doctype_draft immediately.
+- If user says "add X" or "change Y": adjust and validate again, then ask again.
+- The summary must be scannable. Example: "Invoice form: link to Customer, date fields, Draft→Paid status, line items table with auto-calculated totals, tax at 16%. Create as draft?"
+- CHILD TABLES: if a doctype has a Table field, create the child doctype FIRST (with is_child_table: true), then create the parent doctype.
+- Never show the YAML to the user unless they explicitly ask "show me the YAML."
+
+SCRIPT AUTHORING (special rules):
+- Help nontechnical users describe the automation in plain language. Ask for the trigger and expected outcome if either is unclear.
+- Draft JavaScript only through script_validate and script_create. Explain what event or trigger will run it, then validate it before saving.
+- script_create saves an INACTIVE draft. Never claim a script is live or activate it; tell the user an Administrator can review and activate it in Workspace → Admin → Scripts.
+- Scripts must use authorized Kora APIs and the same domain operations as the workspace. Never generate direct database access or bypass business workflows or approvals.
+
+SYSTEM KNOWLEDGE (what Kigae can do — use this to guide users):
+
+ANALYTICS: Every doctype automatically gets analytics. Metrics include total count, daily/monthly trends, breakdowns by Select/Link fields, and sums of Currency/Int/Float fields. Submittable doctypes get workflow state distribution and funnel tracking. Users don't configure analytics — it just works. Direct users to the Insights tab.
+
+VERSIONING & ACTIVATION: Doctype changes save as Draft config versions. Activation runs schema migration — database tables are created/updated. Three safety tiers: Safe (auto-apply), Warning (requires review), Blocked (requires fix). Users activate from /workspace/admin/versions. Draft changes don't affect the live database.
+
+AUTOMATIONS: Workflows use Engine v2 definitions. They can start when a record is created or updated, evaluate typed conditions, request approval, send notifications, and invoke registered actions. Status transitions are policy-checked by Engine. Suggest an automation when users describe a repeated task, notification, approval, or status change; do not describe workflow YAML or document-workflow configuration.
+
+PERMISSIONS: 10 operations per role × doctype: Read, Write, Create, Delete, Submit, Cancel, Amend, Export, Import, Report. 'if_owner' scopes to creator. Administrator bypasses all. Manage at /workspace/admin/permissions.
+
+COMPUTED FIELDS: Auto-calculated via expressions: arithmetic ('quantity * unit_price'), aggregation ('SUM(items.line_total)'), rounding ('ROUND(expr, 2)'). Recalculate automatically on dependency changes. Set read_only: true.
+
+LINKED FIELDS: Auto-populate from linked documents. Example: selecting a Product fills the price via linked_field: 'product.selling_price'.
+
+FIELD CONSTRAINTS: Per-field validation: min, max (numbers), min_length, max_length (text), regex (pattern), one_of/not_one_of (allowed values). Enforced at API level.
+
+MULTI-TENANT: Isolated sites with own database, users, doctypes. Created from /console or self-service /onboard. Access via /s/sitename/workspace or custom domain.
+
+REPORTING AND ANALYTICS (accuracy rules, never break them):
+- Every number in a reply comes from a query_metrics or drill_metrics result in this turn. Never invent, estimate or round a figure. Never write "about", "roughly" or "estimated" with a number.
+- Call list_metrics when the metric is not clear. Prefer metrics with verified true. Say when a number comes from an unchecked metric or a saved report.
+- "Last week" is the previous Monday to Sunday: use period.preset last_week. Never use the last 7 days for it.
+- When more than one metric or period fits, call ask_choice with two to four choices instead of guessing.
+- When nothing fits, or the shop has no data for it, say what is missing in the shop's own words and give no number.
+- A follow-up ("and the week before that?") reuses the last question and moves its period; say which dates you used.
+- Name the exact dates of every period you report.
+AI CHAT: You have tools to list, find, get, create, update documents. You can create doctypes as Draft, validate YAML, and answer business numbers with the metrics tools. Everything scoped to the current site.`
+
 func financialDisplayContext(currency string) string {
 	currency = strings.ToUpper(strings.TrimSpace(currency))
 	if currency == "" {
@@ -100,9 +194,58 @@ FINANCIAL DISPLAY CONTEXT:
 - Do not infer currency from locale, language, model defaults, or previous examples. Do not convert amounts unless the user asks for a conversion.`, currency, currency)
 }
 
+// openedConversation is the durable conversation a turn runs in and the transcript the model is given.
+type openedConversation struct {
+	ID         string
+	Transcript []ChatMessage
+	// LastQuestion is the metrics question the conversation last answered, nil when there is none.
+	LastQuestion json.RawMessage
+}
+
+// conversationKey names the conversation of one turn: its site, its subject and the run that opens it.
+type conversationKey struct {
+	Site, SubjectKey, RunID, Message string
+}
+
+// openConversation loads the conversation of the subject, or creates it for this run. It answers the status and
+// the message of the refusal when the conversation cannot be read or saved.
+func openConversation(ctx context.Context, tx *orm.TxManager, key conversationKey) (openedConversation, int, string) {
+	siteName, subjectKey, runID := key.Site, key.SubjectKey, key.RunID
+	conv, err := LoadConversation(ctx, tx.DB, siteName, subjectKey)
+	switch {
+	case err == nil:
+		transcript, err := ListConversationMessages(ctx, tx.DB, siteName, conv.ID)
+		if err != nil {
+			return openedConversation{}, http.StatusInternalServerError, "Unable to load AI conversation."
+		}
+		last, err := lastAnswerQuestion(ctx, tx.DB, siteName, conv.ID)
+		if err != nil {
+			return openedConversation{}, http.StatusInternalServerError, "Unable to load AI conversation."
+		}
+		return openedConversation{ID: conv.ID, Transcript: transcript, LastQuestion: last}, http.StatusOK, ""
+	case errors.Is(err, sql.ErrNoRows):
+		if err := UpsertConversation(ctx, tx.DB, ConversationRecord{
+			ID:         runID,
+			Site:       siteName,
+			Channel:    "chat",
+			SubjectKey: subjectKey,
+			Title:      truncateScript(key.Message, 240),
+			Status:     "active",
+			LastRunID:  runID,
+		}); err != nil {
+			slog.Error("AI conversation persistence failed", "site", siteName, "error", err)
+			return openedConversation{}, http.StatusInternalServerError, "Unable to persist AI conversation."
+		}
+		return openedConversation{ID: runID}, http.StatusOK, ""
+	default:
+		return openedConversation{}, http.StatusInternalServerError, "Unable to load AI conversation."
+	}
+}
+
 // HandleChat processes a chat message, calls the AI provider with function definitions,
 // executes any tool calls via the ORM, and returns the AI's response.
-func HandleChat(c *gin.Context, tx *orm.TxManager, reg *doctype.Registry, siteName, currentUser string) {
+func HandleChat(c *gin.Context, turn ChatTurn) {
+	tx, reg, siteName, currentUser := turn.Tx, turn.Registry, turn.Site, turn.User
 	requestCtx := WithDialect(c.Request.Context(), tx.Dialect)
 	currency, currencyErr := siteCurrencyForChat(requestCtx, tx.DB, siteName, tx.Dialect)
 	if currencyErr != nil {
@@ -158,35 +301,13 @@ func HandleChat(c *gin.Context, tx *orm.TxManager, reg *doctype.Registry, siteNa
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to initialize AI run storage."}})
 		return
 	}
-	conversationID := runID
-	var transcript []ChatMessage
-	conv, conversationErr := LoadConversation(requestCtx, tx.DB, siteName, subjectKey)
-	if conversationErr == nil {
-		conversationID = conv.ID
-		loadedTranscript, err := ListConversationMessages(requestCtx, tx.DB, siteName, conversationID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to load AI conversation."}})
-			return
-		}
-		transcript = loadedTranscript
-	} else if errors.Is(conversationErr, sql.ErrNoRows) {
-		if err := UpsertConversation(requestCtx, tx.DB, ConversationRecord{
-			ID:         conversationID,
-			Site:       siteName,
-			Channel:    "chat",
-			SubjectKey: subjectKey,
-			Title:      truncateScript(req.Message, 240),
-			Status:     "active",
-			LastRunID:  runID,
-		}); err != nil {
-			slog.Error("AI conversation persistence failed", "site", siteName, "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to persist AI conversation."}})
-			return
-		}
-	} else {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to load AI conversation."}})
+	conv, convStatus, convMessage := openConversation(requestCtx, tx, conversationKey{Site: siteName, SubjectKey: subjectKey, RunID: runID, Message: req.Message})
+	if convStatus != http.StatusOK {
+		c.JSON(convStatus, gin.H{"error": gin.H{"message": convMessage}})
 		return
 	}
+	conversationID, transcript := conv.ID, conv.Transcript
+	contextBlurb := pageContextBlurb(req.Context) + followUpBlurb(conv.LastQuestion)
 	if err := UpsertRun(requestCtx, tx.DB, RunRecord{
 		ID:             runID,
 		Site:           siteName,
@@ -215,80 +336,9 @@ func HandleChat(c *gin.Context, tx *orm.TxManager, reg *doctype.Registry, siteNa
 	sanitizedHistory := sanitizeHistory(transcript, cfg.HistoryLimit)
 
 	// Build messages array with system instructions.
-	contextBlurb := ""
-	if req.Context.Pathname != "" || req.Context.Doctype != "" || req.Context.DocumentName != "" {
-		contextBlurb = fmt.Sprintf(`
-
-CURRENT PAGE CONTEXT:
-- pathname: %s
-- shell mode: %s
-- doctype: %s
-- document: %s
-Use this context to stay grounded in the current screen and avoid asking the user to repeat what is already visible.`,
-			req.Context.Pathname,
-			req.Context.ShellMode,
-			req.Context.Doctype,
-			req.Context.DocumentName,
-		)
-	}
-	genericSystemPrompt := `You are a helpful AI assistant for a business application called Kigae. Help users manage their data — create, find, update, and analyze business records.
-
-RULES (follow strictly):
-- Be CONCISE. One sentence when possible. No markdown tables unless showing actual data results.
-- Before creating a record, ALWAYS call _find first to check duplicates. If none found, call _create immediately.
-- ALL fields in function parameters ARE available. Never claim a field is "not exposed."
-- If create fails due to missing required fields, ask for ALL missing fields at ONCE in ONE sentence.
-- When user gives comma-separated data, map it to fields in order. The first value goes to the first required field. Just try it — don't ask permission.
-- NEVER mention internal details: database schemas, table names, SQL, tool/function names, error tracebacks.
-- Format booleans as ✅/❌. Use proper currency formatting.
-
-DESTRUCTIVE ACTIONS (safety gate):
-- NEVER call _delete on multiple records without asking "Delete N [records]?" first. For single deletes, confirm: "Delete [name]?"
-- NEVER call _update to change workflow states, amounts, or linked documents without summarizing what will change and asking.
-- If the user says "delete all" or "clean up" or "remove old" — STOP. Ask: "How many records should I delete? Which ones specifically?"
-- These rules prevent accidental data loss. The user should always confirm destructive actions.
-
-DOCTYPE CREATION (special rules):
-- BEFORE writing any YAML, ask 2-3 clarifying questions about the business: what they do, what data they track, who the users are, what reports/metrics matter. Understand the workflow FIRST.
-- Ask about: key entities, relationships, required vs optional fields, validation rules (min/max, allowed options), who can do what (workflow steps), and what should be searchable.
-- THEN call validate_doctype_yaml, SUMMARIZE what you understood in 2-3 lines. Ask "Create this as draft?" Do NOT show the YAML.
-- WAIT for user confirmation before calling create_doctype_draft or update_doctype_draft.
-- If user says "yes" or "go ahead" or "create it": call create_doctype_draft immediately.
-- If user says "add X" or "change Y": adjust and validate again, then ask again.
-- The summary must be scannable. Example: "Invoice form: link to Customer, date fields, Draft→Paid status, line items table with auto-calculated totals, tax at 16%. Create as draft?"
-- CHILD TABLES: if a doctype has a Table field, create the child doctype FIRST (with is_child_table: true), then create the parent doctype.
-- Never show the YAML to the user unless they explicitly ask "show me the YAML."
-
-SCRIPT AUTHORING (special rules):
-- Help nontechnical users describe the automation in plain language. Ask for the trigger and expected outcome if either is unclear.
-- Draft JavaScript only through script_validate and script_create. Explain what event or trigger will run it, then validate it before saving.
-- script_create saves an INACTIVE draft. Never claim a script is live or activate it; tell the user an Administrator can review and activate it in Workspace → Admin → Scripts.
-- Scripts must use authorized Kora APIs and the same domain operations as the workspace. Never generate direct database access or bypass business workflows or approvals.
-
-SYSTEM KNOWLEDGE (what Kigae can do — use this to guide users):
-
-ANALYTICS: Every doctype automatically gets analytics. Metrics include total count, daily/monthly trends, breakdowns by Select/Link fields, and sums of Currency/Int/Float fields. Submittable doctypes get workflow state distribution and funnel tracking. Users don't configure analytics — it just works. Direct users to the Insights tab.
-
-VERSIONING & ACTIVATION: Doctype changes save as Draft config versions. Activation runs schema migration — database tables are created/updated. Three safety tiers: Safe (auto-apply), Warning (requires review), Blocked (requires fix). Users activate from /workspace/admin/versions. Draft changes don't affect the live database.
-
-AUTOMATIONS: Workflows use Engine v2 definitions. They can start when a record is created or updated, evaluate typed conditions, request approval, send notifications, and invoke registered actions. Status transitions are policy-checked by Engine. Suggest an automation when users describe a repeated task, notification, approval, or status change; do not describe workflow YAML or document-workflow configuration.
-
-PERMISSIONS: 10 operations per role × doctype: Read, Write, Create, Delete, Submit, Cancel, Amend, Export, Import, Report. 'if_owner' scopes to creator. Administrator bypasses all. Manage at /workspace/admin/permissions.
-
-COMPUTED FIELDS: Auto-calculated via expressions: arithmetic ('quantity * unit_price'), aggregation ('SUM(items.line_total)'), rounding ('ROUND(expr, 2)'). Recalculate automatically on dependency changes. Set read_only: true.
-
-LINKED FIELDS: Auto-populate from linked documents. Example: selecting a Product fills the price via linked_field: 'product.selling_price'.
-
-FIELD CONSTRAINTS: Per-field validation: min, max (numbers), min_length, max_length (text), regex (pattern), one_of/not_one_of (allowed values). Enforced at API level.
-
-MULTI-TENANT: Isolated sites with own database, users, doctypes. Created from /console or self-service /onboard. Access via /s/sitename/workspace or custom domain.
-
-REPORTING AND ANALYTICS: For a reporting or facts question, call get_analytics_catalog first when the model, measure, or dimension is not already clear. Use query_analytics for new questions and run_analytics_report for an approved report. Explain what each measure means, the date range, grouping, units (count, currency, percent), and whether a zero means no matching activity or no rollup data. Use list_analytics_reports for existing report names. Never invent fields, metrics, trends, or causes; say when the site does not have enough data. Results are governed rollups, not arbitrary database queries.
-
-AI CHAT: You have tools to list, find, get, create, update documents. You can create doctypes as Draft, validate YAML, and query analytics. Everything scoped to the current site.`
 	messages := []map[string]any{{
 		"role":    "system",
-		"content": genericSystemPrompt + financialDisplayContext(currency) + contextBlurb,
+		"content": chatSystemPrompt + financialDisplayContext(currency) + contextBlurb,
 	}}
 	for _, h := range sanitizedHistory {
 		messages = append(messages, map[string]any{"role": h.Role, "content": h.Content})
@@ -323,6 +373,8 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 	defer func() {
 		_ = ReleaseBudget(requestCtx, tx.DB, reservation)
 	}()
+
+	answers := newAnswerTurn(c, turn, currency)
 
 	// --- Multi-Round Tool Execution Loop ---
 	var (
@@ -532,35 +584,14 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 			if content == "" {
 				content = "I processed your request."
 			}
-			_ = AppendConversationMessage(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID, Role: "assistant", Content: content, Kind: "summary", StepID: stepID})
-			_ = UpdateStepStatus(requestCtx, tx.DB, stepID, StepUpdate{Status: "completed", Summary: content, OutputJSON: content})
-			_ = MarkTaskStatus(requestCtx, tx.DB, stepID, "done", content)
-			_ = QueueFollowUpTasks(requestCtx, tx.DB, RunScope{Site: siteName, RunID: runID, ConversationID: conversationID}, deriveFollowUpTasks(content, toolResultsFromMessages(messages)))
-			_ = UpsertRun(requestCtx, tx.DB, RunRecord{
-				ID:             runID,
-				Site:           siteName,
-				ConversationID: conversationID,
-				Channel:        "chat",
-				Status:         "completed",
-				InputMessage:   req.Message,
-				OutputMessage:  content,
-				Summary:        content,
-				Model:          model,
-				Provider:       providerKey,
-			})
-			_ = UpsertConversation(requestCtx, tx.DB, ConversationRecord{
-				ID:            conversationID,
-				Site:          siteName,
-				Channel:       "chat",
-				SubjectKey:    subjectKey,
-				Title:         truncateScript(req.Message, 240),
-				Summary:       content,
-				Status:        "active",
-				LastRunID:     runID,
-				LastMessageAt: time.Now().UTC(),
-			})
-			_ = SummarizeRun(requestCtx, tx.DB, runID)
-			writeChatResponse(c, ChatResponse{Reply: content, RunID: runID})
+			if fix := answers.correction(content, req.Message); fix != nil {
+				messages = append(messages, fix...)
+				aiBody["messages"] = messages
+				continue
+			}
+			content = answers.finalReply(content, req.Message)
+			completeAnswer(requestCtx, tx, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, SubjectKey: subjectKey, Model: model, Provider: providerKey, Content: content, Messages: messages, Cards: answers.cards(), Question: answers.lastQuestion()})
+			writeChatResponse(c, ChatResponse{Reply: content, RunID: runID, Cards: answers.cards()})
 			return
 
 		case "tool_calls":
@@ -572,6 +603,12 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 					return
 				}
 				continue
+			}
+
+			// --- Clarifying question: the turn ends here, with the choices shown to the person. ---
+			if answers.choice != nil {
+				writeChatResponse(c, endWithChoice(requestCtx, tx, answers.choice, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, Model: model, Provider: providerKey}))
+				return
 			}
 
 			// --- Stall detection ---
@@ -612,7 +649,7 @@ AI CHAT: You have tools to list, find, get, create, update documents. You can cr
 			if verified, ok := c.Get("policy_execution"); ok {
 				execution, _ = verified.(policy.Execution)
 			}
-			toolResults := executeToolCallsForAI(auditCtx, tx, reg, toolCallBatch{Calls: toolCalls, Owner: currentUser, Site: siteName, RunID: runID, StepID: stepID, ConversationID: conversationID, Execution: execution})
+			toolResults := executeToolCallsForAI(auditCtx, tx, reg, toolCallBatch{Calls: toolCalls, Owner: currentUser, Site: siteName, RunID: runID, StepID: stepID, ConversationID: conversationID, Execution: execution, Turn: answers})
 			for i, tr := range toolResults {
 				raw := tr["content"].(string)
 				slog.Info("Tool result", "content", raw[:min(len(raw), 200)])

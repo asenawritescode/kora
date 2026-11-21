@@ -11,16 +11,20 @@ import (
 
 // registerExploreRoutes mounts GET /explore/catalog, the record types a caller may ask questions of.
 func registerExploreRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry) {
-	apiGroup.Group("/explore").GET("/catalog", func(c *gin.Context) {
-		reg := analyticsRegistry(c, registry)
-		var docs []*doctype.DocType
-		read, join := map[string]bool{}, map[string]bool{}
-		if reg != nil {
-			docs = reg.All()
-			read, join = exploreAccess(c, reg, docs)
-		}
-		c.JSON(http.StatusOK, Response{Data: metrics.ExploreCatalog(docs, read, join)})
-	})
+	apiGroup.Group("/explore").GET("/catalog", func(c *gin.Context) { exploreCatalog(c, registry) })
+}
+
+// exploreCatalog answers GET /explore/catalog: the record types the caller may question, with the measures and
+// dimensions each offers. The AI chat reads the same catalog through its metrics tools.
+func exploreCatalog(c *gin.Context, registry *doctype.Registry) {
+	reg := analyticsRegistry(c, registry)
+	var docs []*doctype.DocType
+	read, join := map[string]bool{}, map[string]bool{}
+	if reg != nil {
+		docs = reg.All()
+		read, join = exploreAccess(c, reg, docs)
+	}
+	c.JSON(http.StatusOK, Response{Data: metrics.ExploreCatalog(docs, read, join)})
 }
 
 // exploreAccess returns the record types the caller may question (read) and the record types a dimension

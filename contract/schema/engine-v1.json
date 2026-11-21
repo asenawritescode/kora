@@ -120,6 +120,129 @@
       ],
       "type": "object"
     },
+    "AnswerAction": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "question": {
+          "x-open-json-value": true
+        },
+        "visibility": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "question"
+      ],
+      "type": "object"
+    },
+    "AnswerCard": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/AnswerAction"
+          },
+          "type": "array"
+        },
+        "change": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/AnswerMeta"
+        },
+        "previous": {
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/AnswerRow"
+          },
+          "type": "array"
+        },
+        "scope_note": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "meta",
+        "verified"
+      ],
+      "type": "object"
+    },
+    "AnswerMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "type": "string"
+        },
+        "compared": {
+          "type": "string"
+        },
+        "day_ends": {
+          "type": "string"
+        },
+        "period": {
+          "type": "string"
+        },
+        "shown": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "zone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of",
+        "day_ends",
+        "period",
+        "zone"
+      ],
+      "type": "object"
+    },
+    "AnswerRow": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "type": "object"
+    },
     "Approval": {
       "additionalProperties": false,
       "properties": {
@@ -339,6 +462,41 @@
       },
       "required": [
         "ref"
+      ],
+      "type": "object"
+    },
+    "ChoiceOption": {
+      "additionalProperties": false,
+      "properties": {
+        "hint": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hint",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ChoiceQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "choices": {
+          "items": {
+            "$ref": "#/$defs/ChoiceOption"
+          },
+          "type": "array"
+        },
+        "question": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "choices",
+        "question"
       ],
       "type": "object"
     },
@@ -1627,6 +1785,9 @@
         "history": {
           "$ref": "#/$defs/MetricsHistory",
           "x-optional-pointer": true
+        },
+        "owner_only": {
+          "type": "boolean"
         },
         "period": {
           "$ref": "#/$defs/MetricsPeriod"
@@ -2976,6 +3137,129 @@
       ],
       "type": "object"
     },
+    "AnswerAction": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "question": {
+          "x-open-json-value": true
+        },
+        "visibility": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "question"
+      ],
+      "type": "object"
+    },
+    "AnswerCard": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/AnswerAction"
+          },
+          "type": "array"
+        },
+        "change": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/AnswerMeta"
+        },
+        "previous": {
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/AnswerRow"
+          },
+          "type": "array"
+        },
+        "scope_note": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "meta",
+        "verified"
+      ],
+      "type": "object"
+    },
+    "AnswerMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "type": "string"
+        },
+        "compared": {
+          "type": "string"
+        },
+        "day_ends": {
+          "type": "string"
+        },
+        "period": {
+          "type": "string"
+        },
+        "shown": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "zone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of",
+        "day_ends",
+        "period",
+        "zone"
+      ],
+      "type": "object"
+    },
+    "AnswerRow": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "type": "object"
+    },
     "Approval": {
       "additionalProperties": false,
       "properties": {
@@ -3176,6 +3460,41 @@
       },
       "required": [
         "ref"
+      ],
+      "type": "object"
+    },
+    "ChoiceOption": {
+      "additionalProperties": false,
+      "properties": {
+        "hint": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hint",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ChoiceQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "choices": {
+          "items": {
+            "$ref": "#/$defs/ChoiceOption"
+          },
+          "type": "array"
+        },
+        "question": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "choices",
+        "question"
       ],
       "type": "object"
     },
@@ -4440,6 +4759,9 @@
         "history": {
           "$ref": "#/$defs/MetricsHistory",
           "x-optional-pointer": true
+        },
+        "owner_only": {
+          "type": "boolean"
         },
         "period": {
           "$ref": "#/$defs/MetricsPeriod"
