@@ -229,96 +229,78 @@ func validateOwnedResourceReplacements(current, incoming *doctype.ConfigSnapshot
 	return nil
 }
 
-func packageContainsResource(snapshot *doctype.ConfigSnapshot, namespace, name string) bool {
-	switch namespace {
-	case "tenant":
-		for _, value := range snapshot.DocTypes {
-			if value != nil && value.Name == name {
-				return true
-			}
-		}
-	case "role":
-		for _, value := range snapshot.Roles {
-			if value != nil && value.Name == name {
-				return true
-			}
-		}
-	case "permission":
-		for _, value := range snapshot.Permissions {
-			if value != nil && value.Doctype+"/"+value.Role == name {
-				return true
-			}
-		}
-	case "workflow":
-		for _, value := range snapshot.WorkflowDefinitions {
-			if string(value.ID) == name {
-				return true
-			}
-		}
-	case "view":
-		for _, value := range snapshot.Views {
-			if value != nil && value.Name == name {
-				return true
-			}
-		}
-	case "metric":
-		for _, value := range snapshot.AnalyticsMetrics {
-			if value != nil && value.Name == name {
-				return true
-			}
-		}
-	case "script":
-		for _, value := range snapshot.Scripts {
-			if value != nil && value.Name == name {
-				return true
-			}
-		}
-	case "job":
-		for _, value := range snapshot.ScheduledJobs {
-			if value.Name == name {
-				return true
-			}
-		}
-	case "query":
-		for _, module := range snapshot.Modules {
-			for _, value := range module.Queries {
-				if value.Name == name {
-					return true
-				}
-			}
-		}
-	case "projection":
-		for _, module := range snapshot.Modules {
-			for _, value := range module.Projections {
-				if value.ID == name {
-					return true
-				}
-			}
-		}
-	case "command":
-		for _, module := range snapshot.Modules {
-			for _, offer := range module.Provides {
-				for _, operation := range offer.Operations {
-					if string(offer.Name)+"."+operation.Name == name {
-						return true
-					}
-				}
-			}
-		}
-	case "report":
-		for _, value := range snapshot.Reports {
+// packageResourceLookups finds a named resource of one kind (the namespace) in a package snapshot.
+var packageResourceLookups = map[string]func(*doctype.ConfigSnapshot, string) bool{
+	"tenant": func(s *doctype.ConfigSnapshot, name string) bool {
+		return containsMatch(s.DocTypes, func(v *doctype.DocType) bool { return v != nil && v.Name == name })
+	},
+	"role": func(s *doctype.ConfigSnapshot, name string) bool {
+		return containsMatch(s.Roles, func(v *doctype.Role) bool { return v != nil && v.Name == name })
+	},
+	"permission": func(s *doctype.ConfigSnapshot, name string) bool {
+		return containsMatch(s.Permissions, func(v *doctype.Permission) bool { return v != nil && v.Doctype+"/"+v.Role == name })
+	},
+	"workflow": func(s *doctype.ConfigSnapshot, name string) bool {
+		return containsMatch(s.WorkflowDefinitions, func(v contract.WorkflowDefinition) bool { return string(v.ID) == name })
+	},
+	"view": func(s *doctype.ConfigSnapshot, name string) bool {
+		return containsMatch(s.Views, func(v *doctype.View) bool { return v != nil && v.Name == name })
+	},
+	"metric": func(s *doctype.ConfigSnapshot, name string) bool {
+		return containsMatch(s.AnalyticsMetrics, func(v *doctype.AnalyticsMetricConfig) bool { return v != nil && v.Name == name })
+	},
+	"script": func(s *doctype.ConfigSnapshot, name string) bool {
+		return containsMatch(s.Scripts, func(v *doctype.ScriptSnapshot) bool { return v != nil && v.Name == name })
+	},
+	"job": func(s *doctype.ConfigSnapshot, name string) bool {
+		return containsMatch(s.ScheduledJobs, func(v contract.ScheduledJobDefinition) bool { return v.Name == name })
+	},
+	"query": func(s *doctype.ConfigSnapshot, name string) bool {
+		return containsMatch(s.Modules, func(m contract.ModuleDescriptor) bool {
+			return containsMatch(m.Queries, func(v contract.PublishedQuery) bool { return v.Name == name })
+		})
+	},
+	"projection": func(s *doctype.ConfigSnapshot, name string) bool {
+		return containsMatch(s.Modules, func(m contract.ModuleDescriptor) bool {
+			return containsMatch(m.Projections, func(v contract.ProjectionDefinition) bool { return v.ID == name })
+		})
+	},
+	"command": func(s *doctype.ConfigSnapshot, name string) bool {
+		return containsMatch(s.Modules, func(m contract.ModuleDescriptor) bool {
+			return containsMatch(m.Provides, func(offer contract.CapabilityOffer) bool {
+				return containsMatch(offer.Operations, func(op contract.OperationSpec) bool {
+					return string(offer.Name)+"."+op.Name == name
+				})
+			})
+		})
+	},
+	"report": func(s *doctype.ConfigSnapshot, name string) bool {
+		return containsMatch(s.Reports, func(raw json.RawMessage) bool {
 			var report struct {
 				Name string `json:"name"`
 			}
-			if json.Unmarshal(value, &report) == nil && report.Name == name {
-				return true
-			}
-		}
-	case "metric_definition":
-		for _, value := range snapshot.Metrics {
-			if n, err := metricName(value); err == nil && n == name {
-				return true
-			}
+			return json.Unmarshal(raw, &report) == nil && report.Name == name
+		})
+	},
+	"metric_definition": func(s *doctype.ConfigSnapshot, name string) bool {
+		return containsMatch(s.Metrics, func(raw json.RawMessage) bool {
+			n, err := metricName(raw)
+			return err == nil && n == name
+		})
+	},
+}
+
+// packageContainsResource reports whether the package snapshot carries a resource of the kind and name.
+func packageContainsResource(snapshot *doctype.ConfigSnapshot, namespace, name string) bool {
+	lookup, ok := packageResourceLookups[namespace]
+	return ok && lookup(snapshot, name)
+}
+
+// containsMatch reports whether any item satisfies match.
+func containsMatch[T any](items []T, match func(T) bool) bool {
+	for _, item := range items {
+		if match(item) {
+			return true
 		}
 	}
 	return false
