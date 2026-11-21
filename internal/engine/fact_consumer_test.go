@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -58,5 +59,44 @@ func TestRecordConsumersRegisterFactConsumerOnlyWithFactDoctypes(t *testing.T) {
 				t.Fatalf("worker starts = %d, want %d", starts, tc.wantStarts)
 			}
 		})
+	}
+}
+
+// TestFactConsumerStartsDriftCheck checks that starting the fact workers starts the drift check, which is the
+// first statement to touch its lease table. The lease DDL fails on purpose, so the check stops after one call.
+func TestFactConsumerStartsDriftCheck(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal("create tenant DB:", err)
+	}
+	defer database.Close()
+	mock.MatchExpectationsInOrder(false)
+	mock.ExpectExec(".*_kora_fact_drift_lease").WillReturnError(errors.New("drift lease probe"))
+	admission, err := dbaccess.NewAdmissionWithMaintenance(2, 1, time.Second, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := doctype.NewRegistry()
+	reg.Register(&doctype.DocType{Name: "Sale", Facts: &doctype.FactModel{Time: "creation"}})
+	loaded := &knet.LoadedSite{SiteID: "tenant-drift", Name: "tenant-drift", DBType: "mysql", DB: database, Registry: reg}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	config := TenantServiceConfig{
+		ProcessContext: ctx,
+		RegisterWorkerStart: func(start func() error) error {
+			return start()
+		},
+	}
+	services := &tenantruntime.Services{WorkAdmission: admission}
+	if err := registerRecordConsumers(config, loaded, services, nil, kdb.Resolve("mysql")); err != nil {
+		t.Fatalf("registerRecordConsumers: %v", err)
+	}
+	deadline := time.After(5 * time.Second)
+	for mock.ExpectationsWereMet() != nil {
+		select {
+		case <-deadline:
+			t.Fatalf("drift check did not touch its lease table: %v", mock.ExpectationsWereMet())
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
