@@ -1,0 +1,13 @@
+name: fleet_trips_count_planned
+label: "Trips: Planned"
+type: simple
+model: "Trip"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Planned"
+time: business_date
+format: number
+description: "Trips: Planned from the Trip records (count)."

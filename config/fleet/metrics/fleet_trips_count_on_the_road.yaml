@@ -1,0 +1,13 @@
+name: fleet_trips_count_on_the_road
+label: "Trips: On the road"
+type: simple
+model: "Trip"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "On the road"
+time: business_date
+format: number
+description: "Trips: On the road from the Trip records (count)."

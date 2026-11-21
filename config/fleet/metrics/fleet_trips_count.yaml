@@ -1,0 +1,9 @@
+name: fleet_trips_count
+label: "Trips"
+type: simple
+model: "Trip"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Trips from the Trip records (count)."

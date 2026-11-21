@@ -1,0 +1,10 @@
+name: fleet_fuel_cost
+label: "Fuel cost"
+type: simple
+model: "Fuel Log"
+measure:
+  agg: sum
+  field: cost
+time: business_date
+format: currency
+description: "Fuel cost from the Fuel Log records (sum)."
