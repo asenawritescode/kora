@@ -1,0 +1,15 @@
+name: projects_insights
+label: "Projects insights"
+description: "Figures and charts that reproduce the projects overview report."
+default_range: last_30_days
+tiles:
+  - metric: projects_tasks_count_to_do
+  - metric: projects_tasks_count_in_progress
+  - metric: projects_tasks_count_blocked
+  - metric: projects_tasks_count_done
+charts:
+  - id: hours_by_project
+    title: "Hours by project"
+    kind: bar
+    metrics: [projects_hours]
+    by: project

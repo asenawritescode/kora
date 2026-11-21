@@ -1,0 +1,13 @@
+name: projects_tasks_count_blocked
+label: "Tasks: Blocked"
+type: simple
+model: "Task"
+measure:
+  agg: count
+filters:
+  - field: status
+    op: "="
+    value: "Blocked"
+time: business_date
+format: number
+description: "Tasks: Blocked from the Task records (count)."
