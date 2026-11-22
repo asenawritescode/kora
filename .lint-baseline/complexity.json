@@ -151,9 +151,9 @@
    "lines": 185
   },
   "internal/api/ai::HandleChat": {
-   "cognitive": 116,
-   "cyclomatic": 52,
-   "statements": 221
+   "cognitive": 107,
+   "cyclomatic": 48,
+   "statements": 213
   },
   "internal/api/ai::ValidateProviderProfile": {
    "cyclomatic": 16
@@ -188,7 +188,7 @@
    "statements": 73
   },
   "internal/api/ai::executeToolCallsForAI": {
-   "lines": 113
+   "lines": 108
   },
   "internal/api/ai::executeUpdateDoctypeDraft": {
    "cognitive": 16
@@ -1253,7 +1253,7 @@
    "cyclomatic": 16
   },
   "internal/engine::(*kernelCommandProviderHandle).InvokeCapability": {
-   "cyclomatic": 31
+   "cyclomatic": 30
   },
   "internal/engine::(*kernelCommandProviderHandle).Resolve": {
    "cognitive": 22,
@@ -1392,9 +1392,9 @@
    "statements": 99
   },
   "internal/engine::executePublishedOperation": {
-   "cognitive": 103,
-   "cyclomatic": 90,
-   "statements": 99
+   "cognitive": 99,
+   "cyclomatic": 87,
+   "statements": 92
   },
   "internal/engine::grantTenantMember": {
    "cognitive": 18,

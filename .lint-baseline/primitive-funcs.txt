@@ -35,7 +35,6 @@ internal/ingress::normalizeAlias
 internal/ingress::normalizeCellID
 internal/ingress::normalizeHost
 internal/mcp::isReadOperation
-internal/mcp::sanitizeName
 internal/natsprovider::validateSubjectToken
 internal/net::normalizeSiteHost
 internal/policy::isReadOperation
