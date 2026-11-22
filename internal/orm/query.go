@@ -435,7 +435,7 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 		return fmt.Errorf("persisting derived fields: %w", err)
 	}
 
-	if err := tx.writeOutbox(dbTx, eventstream.EventInsert, dt, doc.Name, modifiedBy, copyFieldsWithStatus(doc.Fields, doc.DocStatus), nil, recordChange{Revision: doc.Revision}); err != nil {
+	if err := tx.writeOutbox(dbTx, eventstream.EventInsert, dt, doc.Name, modifiedBy, eventFields(doc), nil, recordChange{Revision: doc.Revision}); err != nil {
 		return fmt.Errorf("recording insert to outbox: %w", err)
 	}
 
@@ -779,10 +779,10 @@ func (tx *TxManager) SaveInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, doc *d
 	var oldOutboxData map[string]any
 	update := recordChange{Revision: doc.Revision}
 	if oldDoc != nil {
-		oldOutboxData = copyFieldsWithStatus(oldDoc.Fields, oldDoc.DocStatus)
+		oldOutboxData = eventFields(oldDoc)
 		update.ChangedFields = ChangedFields(oldDoc.Fields, doc.Fields)
 	}
-	if err := tx.writeOutbox(dbTx, eventstream.EventUpdate, dt, doc.Name, modifiedBy, copyFieldsWithStatus(doc.Fields, doc.DocStatus), oldOutboxData, update); err != nil {
+	if err := tx.writeOutbox(dbTx, eventstream.EventUpdate, dt, doc.Name, modifiedBy, eventFields(doc), oldOutboxData, update); err != nil {
 		return fmt.Errorf("recording save to outbox: %w", err)
 	}
 
@@ -1224,7 +1224,7 @@ func (tx *TxManager) DeleteInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, name
 	}
 	var oldFields map[string]any
 	if oldDoc != nil {
-		oldFields = oldDoc.Fields
+		oldFields = oldDoc.EventFields()
 	}
 	if err := tx.writeOutbox(dbTx, eventstream.EventDelete, dt, name, "", oldFields, nil, recordChange{}); err != nil {
 		return fmt.Errorf("recording delete to outbox: %w", err)
@@ -1436,13 +1436,11 @@ func convertDefault(def string, fieldtype string, today string) any {
 	return def
 }
 
-// copyFieldsWithStatus creates a copy of fields with doc_status injected for analytics.
-func copyFieldsWithStatus(fields map[string]any, docStatus int) map[string]any {
-	out := make(map[string]any, len(fields)+1)
-	for k, v := range fields {
-		out[k] = v
-	}
-	out["doc_status"] = docStatus
+// eventFields is the record an outbox event carries: its fields with child rows as maps that keep their
+// stored names, and doc_status injected for analytics.
+func eventFields(doc *doctype.Document) map[string]any {
+	out := doc.EventFields()
+	out["doc_status"] = doc.DocStatus
 	return out
 }
 

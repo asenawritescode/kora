@@ -134,6 +134,16 @@ func (d *Document) ToMap() map[string]any {
 	return out
 }
 
+// EventFields returns the document's fields as plain maps for an outbox event. Child rows become maps
+// that carry their stored name, so every consumer reads the persisted rows, not Go struct fields.
+func (d *Document) EventFields() map[string]any {
+	out := make(map[string]any, len(d.Fields))
+	for key, value := range d.Fields {
+		out[key] = documentValueToMap(value)
+	}
+	return out
+}
+
 func documentValueToMap(value any) any {
 	switch v := value.(type) {
 	case []*Document:
