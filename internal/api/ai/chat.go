@@ -155,6 +155,33 @@ NUMBERS AND ACCESS
 - A follow-up keeps the last metric and filters; only the period changes.
 - Access is set in Workspace → Admin → Permissions.`
 
+// turnContextMessage joins the parts of one turn's context into the message placed before the latest user message.
+// Empty parts are dropped, and no text at all means the turn adds no context message.
+func turnContextMessage(parts ...string) string {
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, "\n\n")
+}
+
+// buildChatMessages lays out one provider request: the standing system text, the conversation so far, the turn's
+// context, then the latest user message. The turn context is a system message just before the user's message, so the
+// standing text (and the tools that follow it in the request) stay byte-identical from turn to turn for prompt caching.
+func buildChatMessages(standing string, history []ChatMessage, turnContext, message string) []map[string]any {
+	messages := make([]map[string]any, 0, len(history)+3)
+	messages = append(messages, map[string]any{"role": "system", "content": standing})
+	for _, h := range history {
+		messages = append(messages, map[string]any{"role": h.Role, "content": h.Content})
+	}
+	if turnContext != "" {
+		messages = append(messages, map[string]any{"role": "system", "content": turnContext})
+	}
+	return append(messages, map[string]any{"role": "user", "content": message})
+}
+
 // chatFunctions is the tool list of one chat turn: the catalog, without the metrics reads when the person has no Insights.
 func chatFunctions(tx *orm.TxManager, reg *doctype.Registry, insights, disabled bool, operations ModuleOperations) []map[string]any {
 	if disabled {
@@ -302,7 +329,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		return
 	}
 	conversationID, transcript := conv.ID, conv.Transcript
-	contextBlurb := pageContextBlurb(req.Context) + followUpBlurb(conv.LastQuestion) + turnPreviewsContext(requestCtx, turn, c, conversationID)
+	turnContext := turnContextMessage(pageContextBlurb(req.Context), followUpBlurb(conv.LastQuestion), turnPreviewsContext(requestCtx, turn, c, conversationID))
 	if err := UpsertRun(requestCtx, tx.DB, RunRecord{
 		ID:             runID,
 		Site:           siteName,
@@ -327,15 +354,8 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 	// Durable server history is the source of truth for the conversation.
 	sanitizedHistory := sanitizeHistory(transcript, cfg.HistoryLimit)
 
-	// Build messages array with system instructions.
-	messages := []map[string]any{{
-		"role":    "system",
-		"content": chatSystemPrompt + financialDisplayContext(currency) + contextBlurb + insightsNoteFor(turn.Insights),
-	}}
-	for _, h := range sanitizedHistory {
-		messages = append(messages, map[string]any{"role": h.Role, "content": h.Content})
-	}
-	messages = append(messages, map[string]any{"role": "user", "content": req.Message})
+	standing := chatSystemPrompt + financialDisplayContext(currency) + insightsNoteFor(turn.Insights)
+	messages := buildChatMessages(standing, sanitizedHistory, turnContext, req.Message)
 
 	// Build the initial AI request body. Tools and tool_choice persist across all rounds.
 	aiBody := map[string]any{
