@@ -89,6 +89,10 @@ func openMySQLUpgradeDatabase(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatal("open mysql:", err)
 	}
+	if err = root.Ping(); err != nil {
+		_ = root.Close()
+		t.Skipf("MySQL unavailable: %v", err)
+	}
 	name := fmt.Sprintf("kora_role_upgrade_%d", time.Now().UnixNano()%1_000_000_000)
 	if _, err = root.Exec("CREATE DATABASE `" + name + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"); err != nil {
 		_ = root.Close()
