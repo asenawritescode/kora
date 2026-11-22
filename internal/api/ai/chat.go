@@ -391,6 +391,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 	// --- Multi-Round Tool Execution Loop ---
 	var (
 		runUsage   Usage    // the provider usage of this run so far, summed over its rounds
+		stepsDone  int      // tool calls in this run that succeeded
 		stallCount int      // consecutive identical tool calls
 		toolErrors int      // cumulative tool errors for circuit breaker
 		lastSigs   []string // tool call signatures from previous round
@@ -650,6 +651,8 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 				if isToolError(raw) {
 					toolErrors++
 					tr["is_error"] = true
+				} else {
+					stepsDone++
 				}
 				// Cap result size.
 				toolResults[i]["content"] = capResultSize(raw, cfg.MaxToolResultChars)
@@ -781,7 +784,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 	// --- SAFETY NET: Max rounds exhausted ---
 	slog.Warn("Max rounds exhausted in chat loop", "max_rounds", cfg.MaxRounds)
 	writeChatResponse(c, ChatResponse{
-		Reply:  "I've taken several actions but wasn't able to complete the task. Could you break this into smaller steps?",
+		Reply:  maxRoundsReply(stepsDone, req.Message),
 		Action: "max_rounds_reached",
 		RunID:  runID,
 	})
@@ -797,6 +800,12 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		Provider:       providerKey,
 	})
 	_ = SummarizeRun(requestCtx, tx.DB, runID)
+}
+
+// maxRoundsReply is the reply when the round cap ends a run: one sentence on what got done and what is left.
+func maxRoundsReply(stepsDone int, request string) string {
+	return fmt.Sprintf("I finished %d step(s) for %q and ran out of rounds. Reply continue to pick up the rest.",
+		stepsDone, truncateScript(request, 120))
 }
 
 func estimatePromptTokens(messages []map[string]any, functions []map[string]any) int {
