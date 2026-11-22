@@ -63,6 +63,8 @@ type CapabilityCall struct {
 	Operation  string
 	Meta       contract.CommandMeta
 	Payload    json.RawMessage
+	// Preview checks the lease with a read and admits no attempt: nothing is counted or written.
+	Preview bool
 }
 
 // InvokeCapability dispatches an operation through the provider selected in
@@ -126,8 +128,8 @@ func (p BindingPlan) InvokeCapability(ctx context.Context, execution policy.Exec
 		_, resolveErr := p.ResolveBusinessReference(ctx, execution, BusinessReferenceRequest{Scope: call.Scope, Consumer: module, Rule: rule, Ref: ref})
 		return resolveErr
 	})
-	if admitErr := p.LeaseAdmission.AdmitCapabilityAttempt(ctx, call.Lease, time.Now().UTC()); admitErr != nil {
-		return CapabilityOperationResult{}, admitErr
+	if leaseErr := p.admitOrCheckLease(ctx, call); leaseErr != nil {
+		return CapabilityOperationResult{}, leaseErr
 	}
 	providerResult, err := invoker.InvokeCapability(ctx, CapabilityInvocation{Context: providerContext, Execution: execution, ModuleExecution: moduleExecution, Operation: *spec, Meta: call.Meta, Payload: append(json.RawMessage(nil), call.Payload...), BusinessReferenceValidator: referenceValidator})
 	if err != nil {
@@ -238,4 +240,18 @@ func (b ResolvedBinding) ValidateOperationInput(ref contract.SchemaRef, payload 
 		return fmt.Errorf("capability binding has no schema validator")
 	}
 	return b.validateSchema(ref, payload)
+}
+
+// admitOrCheckLease admits one attempt through the lease store. A preview only reads the lease:
+// it must exist, be active and unexpired, and nothing is counted.
+func (p BindingPlan) admitOrCheckLease(ctx context.Context, call CapabilityCall) error {
+	now := time.Now().UTC()
+	if !call.Preview {
+		return p.LeaseAdmission.AdmitCapabilityAttempt(ctx, call.Lease, now)
+	}
+	checker, ok := p.LeaseAdmission.(CapabilityLeaseChecker)
+	if !ok {
+		return contract.NewError(contract.CodeDependencyUnavailable, "capability lease check is unavailable")
+	}
+	return checker.CheckCapabilityLease(ctx, call.Lease, now)
 }

@@ -114,6 +114,23 @@ func TestPOSChatSaleIsPreviewedThenConfirmedAcrossDialects(t *testing.T) {
 				return ""
 			}
 			openRef, saleRef := refFor("open_session"), refFor("record_sale")
+			schemaOf := func(ref string) contract.SchemaRef {
+				for _, o := range catalog.PublishedOperations {
+					if o.OperationRef == ref {
+						return o.InputSchema
+					}
+				}
+				t.Fatalf("catalog lacks %s", ref)
+				return contract.SchemaRef{}
+			}
+			// A preview reads the operation's lease and never issues one. The first run of each
+			// operation issues its lease, so warm each one with a call the kernel refuses for its
+			// empty input. That refused run writes no business row.
+			for _, ref := range []string{openRef, saleRef} {
+				_, _ = ops.Run(context.Background(), execution("Manager"), scope, ref, contract.ExecutePublishedOperation{
+					Meta: contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("warm-" + ref)}, InputSchema: schemaOf(ref), Input: []byte("{}"),
+				})
+			}
 
 			tbl := func(n string) string { return dialect.QuoteIdent(loaded.Registry.Get(n).RawTableName()) }
 			one := func(q string, args ...any) string {
@@ -130,6 +147,9 @@ func TestPOSChatSaleIsPreviewedThenConfirmedAcrossDialects(t *testing.T) {
 			}
 			numbersConsumed := func() string {
 				return one("SELECT COALESCE(SUM(current), 0) FROM _kora_naming_series")
+			}
+			admissions := func() string {
+				return one("SELECT COALESCE(SUM(admitted_attempts), 0) FROM _kora_capability_lease WHERE tenant_id = ?", siteName)
 			}
 
 			// Administrator-free seeds, as the cashier-day test does.
@@ -198,9 +218,10 @@ func TestPOSChatSaleIsPreviewedThenConfirmedAcrossDialects(t *testing.T) {
 			}
 
 			// Turn 1 and 2: open the till as a previewed action, then confirm it.
+			admissionsBefore := admissions()
 			openPreview := turn("run-1", runAction("c1", openRef, `{"register":"REG-1","location":"LOC-1","opening_float":500}`))
-			if !strings.Contains(openPreview, `"preview"`) || count("Shift") != "0" {
-				t.Fatalf("open_session preview on %s = %s, shifts=%s; want a preview and no shift", tc.driver, openPreview, count("Shift"))
+			if !strings.Contains(openPreview, `"preview"`) || count("Shift") != "0" || admissions() != admissionsBefore {
+				t.Fatalf("open_session preview on %s = %s, shifts=%s, admissions %s->%s; want a preview, no shift and no admission", tc.driver, openPreview, count("Shift"), admissionsBefore, admissions())
 			}
 			if outcome := turn("run-2", confirm("c2", tokenOf(t, openPreview))); strings.Contains(outcome, `"error"`) || count("Shift") != "1" {
 				t.Fatalf("confirmed open_session on %s = %s, shifts=%s; want one shift", tc.driver, outcome, count("Shift"))
@@ -214,13 +235,17 @@ func TestPOSChatSaleIsPreviewedThenConfirmedAcrossDialects(t *testing.T) {
 			if !strings.Contains(salePreview, `"preview"`) {
 				t.Fatalf("record_sale preview on %s = %s, want a preview", tc.driver, salePreview)
 			}
-			if count("Sale") != "0" || outboxRows() != outboxBefore || numbersConsumed() != numbersBefore {
-				t.Fatalf("record_sale preview on %s left sales=%s outbox %s->%s numbers %s->%s; want none", tc.driver, count("Sale"), outboxBefore, outboxRows(), numbersBefore, numbersConsumed())
+			admissionsBeforeSale := admissions()
+			if count("Sale") != "0" || outboxRows() != outboxBefore || numbersConsumed() != numbersBefore || admissions() != admissionsBeforeSale {
+				t.Fatalf("record_sale preview on %s left sales=%s outbox %s->%s numbers %s->%s admissions %s->%s; want none", tc.driver, count("Sale"), outboxBefore, outboxRows(), numbersBefore, numbersConsumed(), admissionsBeforeSale, admissions())
 			}
 
 			// Turn 4: the person says yes. One sale is written, and a repeated confirm replays it.
 			saleToken := tokenOf(t, salePreview)
 			first := turn("run-4", confirm("c4", saleToken))
+			if strings.Contains(first, `"error"`) || count("Sale") != "1" || admissions() == admissionsBeforeSale {
+				t.Fatalf("confirmed record_sale on %s = %s, sales=%s; want one sale through full admission", tc.driver, first, count("Sale"))
+			}
 			if strings.Contains(first, `"error"`) || count("Sale") != "1" {
 				t.Fatalf("confirmed record_sale on %s = %s, sales=%s; want one sale", tc.driver, first, count("Sale"))
 			}

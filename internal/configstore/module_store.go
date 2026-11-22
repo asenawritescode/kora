@@ -1017,3 +1017,12 @@ func validateModuleSnapshot(snapshot contract.ModuleSnapshot) error {
 }
 
 var _ contract.ModuleStore = (*ModuleStore)(nil)
+
+// CheckCapabilityLease reports whether the stored lease matches expected and is active and
+// unexpired. It only reads: no attempt is counted and no lifecycle row is locked.
+func (s *ModuleStore) CheckCapabilityLease(ctx context.Context, expected contract.CapabilityLease, now time.Time) error {
+	if err := s.ValidateCapabilityLease(ctx, expected, now); err != nil {
+		return contract.NewError(contract.CodePermissionDenied, "capability lease is revoked, expired, or stale")
+	}
+	return nil
+}
