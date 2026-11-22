@@ -19,6 +19,7 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/orm"
 	"github.com/asenawritescode/kora/internal/policy"
 	"github.com/asenawritescode/kora/internal/secret"
@@ -184,6 +185,26 @@ REPORTING AND ANALYTICS (accuracy rules, never break them):
 - Name the exact dates of every period you report.
 AI CHAT: You have tools to list, find, get, create, update documents. You can create doctypes as Draft, validate YAML, and answer business numbers with the metrics tools. Everything scoped to the current site.`
 
+// chatFunctions is the tool list of one chat turn: the catalog, without the metrics reads when the person has no Insights.
+func chatFunctions(reg *doctype.Registry, insights, disabled bool) []map[string]any {
+	if disabled {
+		return nil
+	}
+	functions := buildOpenAIToolsFromCatalog(BuildToolCatalog(reg))
+	if !insights {
+		functions = withoutMetricsTools(functions)
+	}
+	return functions
+}
+
+// insightsNoteFor is what the model is told about Insights: nothing when the person has it.
+func insightsNoteFor(insights bool) string {
+	if insights {
+		return ""
+	}
+	return insightsUnavailableNote
+}
+
 func financialDisplayContext(currency string) string {
 	currency = strings.ToUpper(strings.TrimSpace(currency))
 	if currency == "" {
@@ -331,17 +352,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 	}
 
 	// Build function definitions from the canonical tool catalog projection.
-	var functions []map[string]any
-	if !req.DisableTools {
-		functions = buildOpenAIToolsFromCatalog(BuildToolCatalog(reg))
-		if !turn.Insights {
-			functions = withoutMetricsTools(functions)
-		}
-	}
-	insightsNote := ""
-	if !turn.Insights {
-		insightsNote = insightsUnavailableNote
-	}
+	functions := chatFunctions(reg, turn.Insights, req.DisableTools)
 
 	// Durable server history is the source of truth for the conversation.
 	sanitizedHistory := sanitizeHistory(transcript, cfg.HistoryLimit)
@@ -349,7 +360,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 	// Build messages array with system instructions.
 	messages := []map[string]any{{
 		"role":    "system",
-		"content": chatSystemPrompt + financialDisplayContext(currency) + contextBlurb + insightsNote,
+		"content": chatSystemPrompt + financialDisplayContext(currency) + contextBlurb + insightsNoteFor(turn.Insights),
 	}}
 	for _, h := range sanitizedHistory {
 		messages = append(messages, map[string]any{"role": h.Role, "content": h.Content})

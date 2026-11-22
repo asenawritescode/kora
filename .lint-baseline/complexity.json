@@ -151,9 +151,9 @@
    "lines": 185
   },
   "internal/api/ai::HandleChat": {
-   "cognitive": 117,
-   "cyclomatic": 53,
-   "statements": 223
+   "cognitive": 116,
+   "cyclomatic": 52,
+   "statements": 221
   },
   "internal/api/ai::ValidateProviderProfile": {
    "cyclomatic": 16
@@ -1014,7 +1014,7 @@
    "statements": 41
   },
   "internal/db::SystemTableSQL": {
-   "lines": 216
+   "lines": 208
   },
   "internal/dbaccess::ConfigFromEnv": {
    "cognitive": 29,

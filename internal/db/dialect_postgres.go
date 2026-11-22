@@ -589,7 +589,7 @@ func (d *PostgresDialect) numberBlockSQL() []string {
 }
 
 func (d *PostgresDialect) SystemTableSQL() []string {
-	return append(append(d.numberBlockSQL(), []string{
+	return append(append(append(d.numberBlockSQL(), postgresRoleSQL()...), []string{
 		// _kora_naming_series
 		`CREATE TABLE IF NOT EXISTS "_kora_naming_series" (
 			"doctype" VARCHAR(140) NOT NULL,
@@ -622,16 +622,6 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 		`ALTER TABLE "_kora_doctype" ADD COLUMN "version" INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE "_kora_doctype" ADD COLUMN "config_json" JSONB`,
 		`CREATE INDEX IF NOT EXISTS "idx_doctype_site" ON "_kora_doctype" ("site")`,
-
-		// _kora_role
-		`CREATE TABLE IF NOT EXISTS "_kora_role" (
-			"name" VARCHAR(140) PRIMARY KEY,
-			"site" VARCHAR(140) NOT NULL DEFAULT '',
-			"workspace_access" SMALLINT NOT NULL DEFAULT 1,
-			"description" TEXT
-		)`,
-		`ALTER TABLE "_kora_role" ADD COLUMN "site" VARCHAR(140) NOT NULL DEFAULT ''`,
-		`ALTER TABLE "_kora_role" ADD COLUMN "insights_access" SMALLINT NOT NULL DEFAULT 1`,
 
 		// _kora_permission
 		`CREATE TABLE IF NOT EXISTS "_kora_permission" (
@@ -858,5 +848,19 @@ func postgresFieldTableSQL() []string {
 		`ALTER TABLE "_kora_field" ADD COLUMN "site" VARCHAR(140) NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS "idx_parent" ON "_kora_field" ("parent")`,
 		`CREATE INDEX IF NOT EXISTS "idx_parent_fieldname" ON "_kora_field" ("parent", "fieldname")`,
+	}
+}
+
+// postgresRoleSQL is the _kora_role table and its column additions. It runs before the other system tables, which do not reference it.
+func postgresRoleSQL() []string {
+	return []string{
+		`CREATE TABLE IF NOT EXISTS "_kora_role" (
+			"name" VARCHAR(140) PRIMARY KEY,
+			"site" VARCHAR(140) NOT NULL DEFAULT '',
+			"workspace_access" SMALLINT NOT NULL DEFAULT 1,
+			"description" TEXT
+		)`,
+		`ALTER TABLE "_kora_role" ADD COLUMN "site" VARCHAR(140) NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_role" ADD COLUMN "insights_access" SMALLINT NOT NULL DEFAULT 1`,
 	}
 }
