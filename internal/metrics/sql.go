@@ -115,10 +115,10 @@ func (p plan) seriesConds(s series, summary bool) []predicate {
 func (p plan) factsUnion(d db.Dialect, args *[]any) string {
 	var parts []string
 	if !p.hasLineDim() {
-		parts = append(parts, p.factsPart(d, p.model.Facts.TableName(p.model), args))
+		parts = append(parts, p.factsPart(d, p.model.Facts.TableName(p.model), false, args))
 	}
 	if p.model.Facts.Lines != "" {
-		parts = append(parts, p.factsPart(d, p.model.Facts.LineTableName(p.model), args))
+		parts = append(parts, p.factsPart(d, p.model.Facts.LineTableName(p.model), true, args))
 	}
 	return strings.Join(parts, " UNION ALL ")
 }
@@ -148,8 +148,9 @@ func (p plan) factsAggregate(d db.Dialect, f string, s series, args *[]any) stri
 
 // factsPart selects the rows of one fact table that fall in the query's scope and range. Fact columns
 // are qualified with the fact alias, because the joins of a path dimension bring in other tables with
-// the same column names.
-func (p plan) factsPart(d db.Dialect, table string, args *[]any) string {
+// the same column names. A line table part keeps only rows with a line id: a line row with an empty id
+// is never a header, so it cannot be counted as one.
+func (p plan) factsPart(d db.Dialect, table string, lines bool, args *[]any) string {
 	q := d.QuoteIdent
 	var selects []string
 	for _, c := range p.factsColumns() {
@@ -157,6 +158,9 @@ func (p plan) factsPart(d db.Dialect, table string, args *[]any) string {
 	}
 	selects = append(selects, p.pathSelects(d)...)
 	where := p.factsWhere(d, args)
+	if lines {
+		where = append(where, factAlias+"."+q("line_id")+" <> ''")
+	}
 	from := q(table) + " AS " + factAlias + p.joinClauses(d)
 	return fmt.Sprintf("SELECT %s FROM %s WHERE %s", strings.Join(selects, ", "), from, strings.Join(where, " AND "))
 }
