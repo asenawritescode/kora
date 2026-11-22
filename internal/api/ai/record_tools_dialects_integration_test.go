@@ -129,8 +129,8 @@ func TestRecordToolsReachPackTypesAcrossDialects(t *testing.T) {
 			if !strings.HasPrefix(preview, `{"preview"`) {
 				t.Fatalf("create Item on %s = %q, want a preview", tc.name, preview)
 			}
-			token := tokenOf(t, preview)
-			created := runInTurn("run-"+suffix+"-confirm", "step-confirm", toolCall("call-confirm", toolConfirmWrite, `{"confirm_token":"`+token+`"}`))[0]
+			token := writeIDOf(t, preview)
+			created := runInTurn("run-"+suffix+"-confirm", "step-confirm", toolCall("call-confirm", toolConfirmWrite, `{"write_id":"`+token+`"}`))[0]
 			if !strings.HasPrefix(created, "Created Item") {
 				t.Fatalf("confirm Item on %s = %q, want Created Item", tc.name, created)
 			}

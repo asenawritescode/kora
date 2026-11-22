@@ -43,7 +43,7 @@ func previewRecordWrite(tx *orm.TxManager, reg *doctype.Registry, inv toolInvoca
 	return storePreview(tx, inv, w, preview)
 }
 
-// storePreview keeps one previewed write as previewed and returns the reply with its confirm token.
+// storePreview keeps one previewed write as previewed and returns the reply with its write_id.
 func storePreview(tx *orm.TxManager, inv toolInvocation, stored any, preview map[string]any) string {
 	if inv.RunID == "" || inv.ConversationID == "" {
 		return (&aiToolError{Code: errConfirmInvalid, Message: "A preview needs a conversation turn."}).text()
@@ -56,7 +56,7 @@ func storePreview(tx *orm.TxManager, inv toolInvocation, stored any, preview map
 	if err != nil {
 		return (&aiToolError{Code: errInvalidValue, Message: "The preview could not be encoded."}).text()
 	}
-	token, err := storePendingWrite(tx.Context, tx.DB, pendingPreview{
+	writeID, err := storePendingWrite(tx.Context, tx.DB, pendingPreview{
 		Site: inv.Site, ConversationID: inv.ConversationID, RunID: inv.RunID, ActorID: inv.Owner,
 		ToolName: inv.Name, ArgsJSON: string(argsJSON), PreviewJSON: string(previewJSON),
 	})
@@ -64,10 +64,10 @@ func storePreview(tx *orm.TxManager, inv toolInvocation, stored any, preview map
 		return (&aiToolError{Code: errConfirmInvalid, Message: "The preview could not be saved."}).text()
 	}
 	out, err := json.Marshal(previewReply{
-		Preview:      preview,
-		ConfirmToken: token,
-		ExpiresIn:    pendingTTLSeconds,
-		Next:         "Show the person this preview. After they say yes, call confirm_write with confirm_token. Do not call it in this reply.",
+		Preview:   preview,
+		WriteID:   writeID,
+		ExpiresIn: pendingTTLSeconds,
+		Next:      "Show the person this preview. After they say yes, call confirm_write with write_id. Do not call it in this reply.",
 	})
 	if err != nil {
 		return (&aiToolError{Code: errInvalidValue, Message: "The preview could not be encoded."}).text()
@@ -143,10 +143,10 @@ func executeConfirmPackAction(tx *orm.TxManager, inv toolInvocation, row pending
 
 // previewReply is the reply to a previewed write. Its fields keep this order on the wire.
 type previewReply struct {
-	Preview      map[string]any `json:"preview"`
-	ConfirmToken string         `json:"confirm_token"`
-	ExpiresIn    int            `json:"expires_in"`
-	Next         string         `json:"next"`
+	Preview   map[string]any `json:"preview"`
+	WriteID   string         `json:"write_id"`
+	ExpiresIn int            `json:"expires_in"`
+	Next      string         `json:"next"`
 }
 
 // previewBody is what the person sees: the saved values of a create, or the changed fields of an
@@ -173,12 +173,12 @@ func previewBody(tx *orm.TxManager, dt *doctype.DocType, w recordWrite, result *
 // executeConfirmWrite runs the write a preview stored. The stored command runs with the
 // preview's idempotency key, so a replayed confirm returns the first outcome.
 func executeConfirmWrite(tx *orm.TxManager, reg *doctype.Registry, inv toolInvocation) string {
-	token, _ := inv.Args["confirm_token"].(string)
-	if strings.TrimSpace(token) == "" {
-		return (&aiToolError{Code: errConfirmInvalid, Message: "confirm_token is required.", Field: "confirm_token", Fix: "Pass the confirm_token from the preview."}).text()
+	writeID, _ := inv.Args["write_id"].(string)
+	if strings.TrimSpace(writeID) == "" {
+		return (&aiToolError{Code: errConfirmInvalid, Message: "write_id is required.", Field: "write_id", Fix: "Pass the write_id from the preview."}).text()
 	}
 	caller := pendingCaller{Site: inv.Site, ConversationID: inv.ConversationID, RunID: inv.RunID, ActorID: inv.Owner}
-	row, aerr := claimPendingWrite(tx.Context, tx.DB, strings.TrimSpace(token), caller)
+	row, aerr := claimPendingWrite(tx.Context, tx.DB, strings.TrimSpace(writeID), caller)
 	if aerr != nil {
 		return aerr.text()
 	}

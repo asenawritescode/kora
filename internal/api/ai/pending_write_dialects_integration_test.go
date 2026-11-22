@@ -107,13 +107,13 @@ func TestChatWritesArePreviewedThenConfirmedAcrossDialects(t *testing.T) {
 			}
 			itemName := "Sugar 2kg " + suffix
 			createArgs := fmt.Sprintf(`{"record_type":"Item","data":{"item_name":%q,"uom":"Each","price":250}}`, itemName)
-			confirmArgs := func(token string) string { return fmt.Sprintf(`{"confirm_token":%q}`, token) }
+			confirmArgs := func(token string) string { return fmt.Sprintf(`{"write_id":%q}`, token) }
 
 			// Turn 1: the create previews. Nothing is written and no outbox event is kept.
 			outboxBefore := outboxRows()
 			preview := turn("run-1", alice, "alice@example.test", site, conversation, call("c1", toolCreateRecord, createArgs))
-			if !strings.HasPrefix(preview, `{"preview"`) || !strings.Contains(preview, `"confirm_token":"cw_`) {
-				t.Fatalf("create preview on %s = %s, want preview with confirm_token", tc.name, preview)
+			if !strings.HasPrefix(preview, `{"preview"`) || !strings.Contains(preview, `"write_id":"pw_`) {
+				t.Fatalf("create preview on %s = %s, want preview with write_id", tc.name, preview)
 			}
 			if n := count("Item", "item_name", itemName); n != 0 {
 				t.Fatalf("preview wrote %d Item rows on %s, want 0", n, tc.name)
@@ -122,12 +122,12 @@ func TestChatWritesArePreviewedThenConfirmedAcrossDialects(t *testing.T) {
 				t.Fatalf("preview changed outbox rows on %s", tc.name)
 			}
 			var previewed struct {
-				ConfirmToken string `json:"confirm_token"`
+				WriteID string `json:"write_id"`
 			}
 			if err = json.Unmarshal([]byte(preview), &previewed); err != nil {
 				t.Fatal(err)
 			}
-			token := previewed.ConfirmToken
+			token := previewed.WriteID
 
 			// The same turn cannot confirm its own preview.
 			if got := turn("run-1", alice, "alice@example.test", site, conversation, call("c2", toolConfirmWrite, confirmArgs(token))); !strings.Contains(got, `"code":"confirm_invalid"`) {
@@ -163,7 +163,7 @@ func TestChatWritesArePreviewedThenConfirmedAcrossDialects(t *testing.T) {
 			// An expired preview cannot be confirmed.
 			expiring := itemName + " expiring"
 			expiredPreview := turn("run-4", alice, "alice@example.test", site, conversation, call("c8", toolCreateRecord, fmt.Sprintf(`{"record_type":"Item","data":{"item_name":%q,"uom":"Each","price":100}}`, expiring)))
-			expiredToken := tokenOf(t, expiredPreview)
+			expiredToken := writeIDOf(t, expiredPreview)
 			setPendingCreatedAt(t, database, dialect, expiredToken, time.Now().UTC().Add(-time.Hour))
 			if got := turn("run-5", alice, "alice@example.test", site, conversation, call("c9", toolConfirmWrite, confirmArgs(expiredToken))); !strings.Contains(got, `"code":"confirm_expired"`) {
 				t.Fatalf("expired confirm on %s = %s, want confirm_expired", tc.name, got)
@@ -172,7 +172,7 @@ func TestChatWritesArePreviewedThenConfirmedAcrossDialects(t *testing.T) {
 			// A changed stored argument cannot be confirmed.
 			tampered := itemName + " tampered"
 			tamperPreview := turn("run-6", alice, "alice@example.test", site, conversation, call("c10", toolCreateRecord, fmt.Sprintf(`{"record_type":"Item","data":{"item_name":%q,"uom":"Each","price":100}}`, tampered)))
-			tamperToken := tokenOf(t, tamperPreview)
+			tamperToken := writeIDOf(t, tamperPreview)
 			setPendingArgs(t, database, dialect, tamperToken, strings.Replace(argsJSONOf(t, database, dialect, tamperToken), `"price":100`, `"price":999`, 1))
 			if got := turn("run-7", alice, "alice@example.test", site, conversation, call("c11", toolConfirmWrite, confirmArgs(tamperToken))); !strings.Contains(got, `"code":"confirm_invalid"`) {
 				t.Fatalf("tampered confirm on %s = %s, want confirm_invalid", tc.name, got)
@@ -183,7 +183,7 @@ func TestChatWritesArePreviewedThenConfirmedAcrossDialects(t *testing.T) {
 
 			// A create missing required fields returns one missing_fields error and no token.
 			missing := turn("run-8", alice, "alice@example.test", site, conversation, call("c12", toolCreateRecord, `{"record_type":"Item","data":{"uom":"Each"}}`))
-			if strings.Count(missing, `"code":"missing_fields"`) != 1 || strings.Contains(missing, "confirm_token") {
+			if strings.Count(missing, `"code":"missing_fields"`) != 1 || strings.Contains(missing, "write_id") {
 				t.Fatalf("missing-field create on %s = %s, want one missing_fields error and no token", tc.name, missing)
 			}
 		})
@@ -229,29 +229,29 @@ func isolatedAIDatabase(t *testing.T, driver, dsn string) *sql.DB {
 	return database
 }
 
-// tokenOf returns the confirm_token of a preview result.
-func tokenOf(t *testing.T, preview string) string {
+// writeIDOf returns the write_id of a preview result.
+func writeIDOf(t *testing.T, preview string) string {
 	t.Helper()
 	var out struct {
-		ConfirmToken string `json:"confirm_token"`
+		WriteID string `json:"write_id"`
 	}
-	if err := json.Unmarshal([]byte(preview), &out); err != nil || out.ConfirmToken == "" {
-		t.Fatalf("preview %s has no confirm_token: %v", preview, err)
+	if err := json.Unmarshal([]byte(preview), &out); err != nil || out.WriteID == "" {
+		t.Fatalf("preview %s has no write_id: %v", preview, err)
 	}
-	return out.ConfirmToken
+	return out.WriteID
 }
 
 // setPendingCreatedAt moves a stored preview's creation time, to test expiry against the database clock.
 func setPendingCreatedAt(t *testing.T, database *sql.DB, dialect kdb.Dialect, token string, at time.Time) {
 	t.Helper()
-	if _, err := database.Exec(kdb.Rebind(dialect, "UPDATE _kora_ai_pending_write SET created_at = ? WHERE id = ?"), at, pendingIDFor(token)); err != nil {
+	if _, err := database.Exec(kdb.Rebind(dialect, "UPDATE _kora_ai_pending_write SET created_at = ? WHERE id = ?"), at, token); err != nil {
 		t.Fatal("age pending write:", err)
 	}
 }
 
 func setPendingArgs(t *testing.T, database *sql.DB, dialect kdb.Dialect, token, args string) {
 	t.Helper()
-	if _, err := database.Exec(kdb.Rebind(dialect, "UPDATE _kora_ai_pending_write SET args_json = ? WHERE id = ?"), args, pendingIDFor(token)); err != nil {
+	if _, err := database.Exec(kdb.Rebind(dialect, "UPDATE _kora_ai_pending_write SET args_json = ? WHERE id = ?"), args, token); err != nil {
 		t.Fatal("change pending write arguments:", err)
 	}
 }
@@ -259,7 +259,7 @@ func setPendingArgs(t *testing.T, database *sql.DB, dialect kdb.Dialect, token, 
 func argsJSONOf(t *testing.T, database *sql.DB, dialect kdb.Dialect, token string) string {
 	t.Helper()
 	var args string
-	if err := database.QueryRow(kdb.Rebind(dialect, "SELECT args_json FROM _kora_ai_pending_write WHERE id = ?"), pendingIDFor(token)).Scan(&args); err != nil {
+	if err := database.QueryRow(kdb.Rebind(dialect, "SELECT args_json FROM _kora_ai_pending_write WHERE id = ?"), token).Scan(&args); err != nil {
 		t.Fatal("read pending write arguments:", err)
 	}
 	return args

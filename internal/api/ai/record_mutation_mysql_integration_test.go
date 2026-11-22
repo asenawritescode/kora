@@ -106,8 +106,8 @@ func TestAIRecordMutationUsesKernelReceiptAndAudit(t *testing.T) {
 	if !strings.HasPrefix(preview, `{"preview"`) {
 		t.Fatalf("AI create preview = %q, want a preview", preview)
 	}
-	created := callTool("call-confirm-1", "confirm_write", map[string]any{"confirm_token": tokenOf(t, preview)}, "run-2", "step-2")
-	replayedCreate := callTool("call-confirm-1", "confirm_write", map[string]any{"confirm_token": tokenOf(t, preview)}, "run-3", "step-3")
+	created := callTool("call-confirm-1", "confirm_write", map[string]any{"write_id": writeIDOf(t, preview)}, "run-2", "step-2")
+	replayedCreate := callTool("call-confirm-1", "confirm_write", map[string]any{"write_id": writeIDOf(t, preview)}, "run-3", "step-3")
 	if !strings.HasPrefix(created, "Created Task \"") || replayedCreate != created {
 		t.Fatalf("AI confirm/replay outputs differ: first=%q replay=%q", created, replayedCreate)
 	}
@@ -120,8 +120,8 @@ func TestAIRecordMutationUsesKernelReceiptAndAudit(t *testing.T) {
 
 	updateCall := map[string]any{"record_type": "Task", "name": name, "data": map[string]any{"title": "Updated"}}
 	updatePreview := callTool("call-update-1", "update_record", updateCall, "run-3", "step-4")
-	updated := callTool("call-confirm-2", "confirm_write", map[string]any{"confirm_token": tokenOf(t, updatePreview)}, "run-4", "step-5")
-	replayedUpdate := callTool("call-confirm-2", "confirm_write", map[string]any{"confirm_token": tokenOf(t, updatePreview)}, "run-5", "step-6")
+	updated := callTool("call-confirm-2", "confirm_write", map[string]any{"write_id": writeIDOf(t, updatePreview)}, "run-4", "step-5")
+	replayedUpdate := callTool("call-confirm-2", "confirm_write", map[string]any{"write_id": writeIDOf(t, updatePreview)}, "run-5", "step-6")
 	if !strings.HasPrefix(updated, "Updated Task \"") || replayedUpdate != updated {
 		t.Fatalf("AI update confirm/replay outputs differ: first=%q replay=%q", updated, replayedUpdate)
 	}

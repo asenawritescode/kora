@@ -87,7 +87,7 @@ func recordToolDescriptors(types []string) []ToolDescriptor {
 		"limit":       map[string]any{"type": "integer", "minimum": 1, "maximum": maxFindRecords, "description": "Max rows (default 5)."},
 	}
 	return []ToolDescriptor{
-		recordTool(toolConfirmWrite, "Run a write that a preview returned. Call it only in a later message, after the person says yes, with the confirm_token from that preview.", objectSchema(map[string]any{"confirm_token": map[string]any{"type": "string", "description": "confirm_token from the latest preview."}}, "confirm_token"), "confirm"),
+		recordTool(toolConfirmWrite, "Run a write that a preview returned. Call it only in a later message, after the person says yes, with the write_id from that preview.", objectSchema(map[string]any{"write_id": map[string]any{"type": "string", "description": "write_id from the latest preview."}}, "write_id"), "confirm"),
 		recordTool(toolFindRecords, "Find or list records of one type, recent first. Returns names, titles and summary fields.", objectSchema(findProps, "record_type"), recordToolOperation[toolFindRecords]),
 		recordTool(toolGetRecord, "Get one record by name.", objectSchema(map[string]any{"record_type": typeProp, "name": nameProp}, "record_type", "name"), recordToolOperation[toolGetRecord]),
 		recordTool(toolDescribeRecord, "Describe a record type: fields with type, required, default, options, link target, read-only and computed flags, child tables and pack commands. Call before a write.", objectSchema(map[string]any{"record_type": typeProp}, "record_type"), recordToolOperation[toolDescribeRecord]),

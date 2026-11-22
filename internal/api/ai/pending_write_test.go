@@ -30,21 +30,11 @@ func TestPendingMoveAllowsOnlyTheDocumentedTransitions(t *testing.T) {
 	}
 }
 
-func TestConfirmTokenIsRandomAndStoredAsHash(t *testing.T) {
-	first, err := newConfirmToken()
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := newConfirmToken()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first == second || !strings.HasPrefix(first, "cw_") {
-		t.Fatalf("tokens %q and %q must differ and carry the cw_ prefix", first, second)
-	}
-	id := pendingIDFor(first)
-	if id == first || len(id) != 64 || id != pendingIDFor(first) {
-		t.Fatalf("storage key %q must be a stable 64-character hash, not the token", id)
+// TestWriteIDIsRandomAndPrefixed checks that each preview gets its own pw_ id.
+func TestWriteIDIsRandomAndPrefixed(t *testing.T) {
+	first, second := newWriteID(), newWriteID()
+	if first == second || !strings.HasPrefix(first, "pw_") || len(first) != len("pw_")+26 {
+		t.Fatalf("write ids %q and %q must differ and be pw_ plus a 26-character ULID", first, second)
 	}
 }
 

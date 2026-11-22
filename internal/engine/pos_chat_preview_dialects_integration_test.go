@@ -204,17 +204,17 @@ func TestPOSChatSaleIsPreviewedThenConfirmedAcrossDialects(t *testing.T) {
 				return map[string]any{"id": id, "type": "function", "function": map[string]any{"name": "run_action", "arguments": fmt.Sprintf(`{"action":%q,"input":%s}`, ref, input)}}
 			}
 			confirm := func(id, token string) map[string]any {
-				return map[string]any{"id": id, "type": "function", "function": map[string]any{"name": "confirm_write", "arguments": fmt.Sprintf(`{"confirm_token":%q}`, token)}}
+				return map[string]any{"id": id, "type": "function", "function": map[string]any{"name": "confirm_write", "arguments": fmt.Sprintf(`{"write_id":%q}`, token)}}
 			}
-			tokenOf := func(t *testing.T, preview string) string {
+			writeIDOf := func(t *testing.T, preview string) string {
 				t.Helper()
 				var out struct {
-					ConfirmToken string `json:"confirm_token"`
+					WriteID string `json:"write_id"`
 				}
-				if err := json.Unmarshal([]byte(preview), &out); err != nil || out.ConfirmToken == "" {
-					t.Fatalf("preview %s has no confirm_token: %v", preview, err)
+				if err := json.Unmarshal([]byte(preview), &out); err != nil || out.WriteID == "" {
+					t.Fatalf("preview %s has no write_id: %v", preview, err)
 				}
-				return out.ConfirmToken
+				return out.WriteID
 			}
 
 			// Turn 1 and 2: open the till as a previewed action, then confirm it.
@@ -223,7 +223,7 @@ func TestPOSChatSaleIsPreviewedThenConfirmedAcrossDialects(t *testing.T) {
 			if !strings.Contains(openPreview, `"preview"`) || count("Shift") != "0" || admissions() != admissionsBefore {
 				t.Fatalf("open_session preview on %s = %s, shifts=%s, admissions %s->%s; want a preview, no shift and no admission", tc.driver, openPreview, count("Shift"), admissionsBefore, admissions())
 			}
-			if outcome := turn("run-2", confirm("c2", tokenOf(t, openPreview))); strings.Contains(outcome, `"error"`) || count("Shift") != "1" {
+			if outcome := turn("run-2", confirm("c2", writeIDOf(t, openPreview))); strings.Contains(outcome, `"error"`) || count("Shift") != "1" {
 				t.Fatalf("confirmed open_session on %s = %s, shifts=%s; want one shift", tc.driver, outcome, count("Shift"))
 			}
 			till := one("SELECT name FROM " + tbl("Till Session"))
@@ -241,7 +241,7 @@ func TestPOSChatSaleIsPreviewedThenConfirmedAcrossDialects(t *testing.T) {
 			}
 
 			// Turn 4: the person says yes. One sale is written, and a repeated confirm replays it.
-			saleToken := tokenOf(t, salePreview)
+			saleToken := writeIDOf(t, salePreview)
 			first := turn("run-4", confirm("c4", saleToken))
 			if strings.Contains(first, `"error"`) || count("Sale") != "1" || admissions() == admissionsBeforeSale {
 				t.Fatalf("confirmed record_sale on %s = %s, sales=%s; want one sale through full admission", tc.driver, first, count("Sale"))

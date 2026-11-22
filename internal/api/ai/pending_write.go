@@ -2,18 +2,20 @@ package ai
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/oklog/ulid/v2"
 )
 
 // A chat write is previewed first and runs only when the person confirms it. The preview
-// is a row in _kora_ai_pending_write, keyed by the hash of its confirm token.
+// is a row in _kora_ai_pending_write, keyed by its write_id. The write_id is not a secret:
+// confirm also requires the same site, actor and conversation, and a turn other than the
+// one that made the preview.
 //
 // States and the one table of allowed moves:
 //
@@ -72,19 +74,9 @@ type pendingWrite struct {
 	Expired        bool
 }
 
-// newConfirmToken returns a random single-use token. Only its hash is stored.
-func newConfirmToken() (string, error) {
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return "", fmt.Errorf("generate confirm token: %w", err)
-	}
-	return "cw_" + base64.RawURLEncoding.EncodeToString(raw), nil
-}
-
-// pendingIDFor returns the storage key of a token.
-func pendingIDFor(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(sum[:])
+// newWriteID returns the random id of a preview. It is the row's primary key.
+func newWriteID() string {
+	return "pw_" + ulid.Make().String()
 }
 
 // pendingArgsHash fingerprints the stored write arguments. confirm recomputes it.
@@ -104,20 +96,17 @@ type pendingPreview struct {
 	PreviewJSON    string
 }
 
-// storePendingWrite records a preview as previewed and returns its confirm token.
+// storePendingWrite records a preview as previewed and returns its write_id.
 func storePendingWrite(ctx context.Context, database *sql.DB, p pendingPreview) (string, error) {
-	token, err := newConfirmToken()
-	if err != nil {
-		return "", err
-	}
-	_, err = (aiSQL{database}).ExecContext(ctx, `
+	id := newWriteID()
+	_, err := (aiSQL{database}).ExecContext(ctx, `
 INSERT INTO _kora_ai_pending_write (id, site, conversation_id, run_id, actor_id, tool_name, args_hash, args_json, preview_json, state, attempts, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, `+dialectFromContext(ctx).NowTimestamp()+`)`,
-		pendingIDFor(token), p.Site, p.ConversationID, p.RunID, p.ActorID, p.ToolName, pendingArgsHash(p.ArgsJSON), p.ArgsJSON, p.PreviewJSON, pendingPreviewed)
+		id, p.Site, p.ConversationID, p.RunID, p.ActorID, p.ToolName, pendingArgsHash(p.ArgsJSON), p.ArgsJSON, p.PreviewJSON, pendingPreviewed)
 	if err != nil {
 		return "", fmt.Errorf("store pending write: %w", err)
 	}
-	return token, nil
+	return id, nil
 }
 
 // pendingCaller is the verified identity and turn that asks to confirm a preview.
@@ -147,20 +136,19 @@ FROM _kora_ai_pending_write WHERE id = ? AND site = ?`, pendingTTLSeconds, id, s
 }
 
 // claimPendingWrite moves a previewed write to executing for one confirm call and returns it.
-// Every refusal is an aiToolError: a token that belongs to another person, site or
+// Every refusal is an aiToolError: a write_id that belongs to another person, site or
 // conversation, or is in the same turn, or whose arguments changed, is confirm_invalid; an
 // expired preview is confirm_expired. A write already done returns its first outcome.
-func claimPendingWrite(ctx context.Context, database *sql.DB, token string, caller pendingCaller) (pendingWrite, *aiToolError) {
-	id := pendingIDFor(token)
-	row, err := loadPendingWrite(ctx, database, caller.Site, id)
+func claimPendingWrite(ctx context.Context, database *sql.DB, writeID string, caller pendingCaller) (pendingWrite, *aiToolError) {
+	row, err := loadPendingWrite(ctx, database, caller.Site, writeID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return pendingWrite{}, invalidConfirm("No pending write matches this confirm_token.")
+		return pendingWrite{}, invalidConfirm("No pending write matches this write_id.")
 	}
 	if err != nil {
 		return pendingWrite{}, &aiToolError{Code: errConfirmInvalid, Message: "The pending write could not be read."}
 	}
 	if row.ActorID != caller.ActorID || row.ConversationID != caller.ConversationID {
-		return pendingWrite{}, invalidConfirm("No pending write matches this confirm_token.")
+		return pendingWrite{}, invalidConfirm("No pending write matches this write_id.")
 	}
 	if pendingArgsHash(row.ArgsJSON) != row.ArgsHash {
 		return pendingWrite{}, invalidConfirm("The previewed arguments changed. Preview the write again.")
@@ -175,7 +163,7 @@ func claimPendingWrite(ctx context.Context, database *sql.DB, token string, call
 		return pendingWrite{}, invalidConfirm("The person must reply before this write can be confirmed.")
 	}
 	if row.Expired {
-		return pendingWrite{}, &aiToolError{Code: errConfirmExpired, Message: "This preview expired. Preview the write again.", Fix: "Call the create or update tool again to get a new confirm_token."}
+		return pendingWrite{}, &aiToolError{Code: errConfirmExpired, Message: "This preview expired. Preview the write again.", Fix: "Call the create, update or run_action tool again to get a new write_id."}
 	}
 	return claimRow(ctx, database, row, caller)
 }
@@ -229,7 +217,7 @@ func errorIf(cond bool, message string) string {
 }
 
 func invalidConfirm(message string) *aiToolError {
-	return &aiToolError{Code: errConfirmInvalid, Message: message, Fix: "Ask the person to confirm the write, then call confirm_write with the confirm_token from the latest preview."}
+	return &aiToolError{Code: errConfirmInvalid, Message: message, Fix: "Ask the person to confirm the write, then call confirm_write with the write_id from the latest preview."}
 }
 
 // confirmIdempotencyKey is the kernel idempotency key of a confirmed write. It is derived
