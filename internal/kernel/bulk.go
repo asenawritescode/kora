@@ -53,7 +53,7 @@ func (k *Kernel) ExecuteBulk(ctx context.Context, siteDB *sql.DB, reg *doctype.R
 	}
 	exec := func(op Operation) (contract.CommandResult, *contract.Error) {
 		if opts.DryRun {
-			return k.dryRun(ctx, siteDB, reg, op)
+			return k.Preview(ctx, siteDB, reg, op)
 		}
 		return k.Execute(ctx, siteDB, reg, op)
 	}
@@ -83,7 +83,12 @@ func runBulk(base Operation, rows []BulkRow, opts BulkOptions, exec func(Operati
 	return out
 }
 
-func (k *Kernel) dryRun(ctx context.Context, siteDB *sql.DB, reg *doctype.Registry, op Operation) (contract.CommandResult, *contract.Error) {
+// Preview runs op the way Execute would, validation, guards and naming included,
+// then rolls the transaction back. Nothing is persisted: rolled-back rows cover the
+// business write, receipt, outbox events and number-series counters, and the
+// after-commit completion is never invoked. Hook scripts still run inside the
+// transaction, so callers must not preview while scripts with external effects are enabled.
+func (k *Kernel) Preview(ctx context.Context, siteDB *sql.DB, reg *doctype.Registry, op Operation) (contract.CommandResult, *contract.Error) {
 	tx, err := siteDB.BeginTx(ctx, nil)
 	if err != nil {
 		return contract.CommandResult{}, contract.NewError(contract.CodeInternal, "dry run: begin transaction")

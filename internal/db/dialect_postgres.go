@@ -589,7 +589,7 @@ func (d *PostgresDialect) numberBlockSQL() []string {
 }
 
 func (d *PostgresDialect) SystemTableSQL() []string {
-	return append(append(append(d.numberBlockSQL(), postgresRoleSQL()...), []string{
+	return append(append(append(append(d.numberBlockSQL(), postgresRoleSQL()...), d.aiPendingWriteSQL()...), []string{
 		// _kora_naming_series
 		`CREATE TABLE IF NOT EXISTS "_kora_naming_series" (
 			"doctype" VARCHAR(140) NOT NULL,

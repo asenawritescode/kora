@@ -545,7 +545,7 @@ func (d *MySQLDialect) numberBlockSQL() []string {
 }
 
 func (d *MySQLDialect) SystemTableSQL() []string {
-	return append(append(append(d.numberBlockSQL(), mysqlRoleSQL()...), []string{
+	return append(append(append(append(d.numberBlockSQL(), mysqlRoleSQL()...), d.aiPendingWriteSQL()...), []string{
 		// _kora_naming_series
 		"CREATE TABLE IF NOT EXISTS _kora_naming_series (\n\t\t\tdoctype VARCHAR(140) NOT NULL,\n\t\t\tprefix VARCHAR(32) NOT NULL,\n\t\t\tcurrent BIGINT NOT NULL DEFAULT 0,\n\t\t\tmodified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),\n\t\t\tPRIMARY KEY (doctype, prefix)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
