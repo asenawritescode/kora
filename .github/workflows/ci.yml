@@ -136,6 +136,11 @@ jobs:
           ./internal/db ./internal/dbaccess ./internal/api ./internal/tenanttime ./internal/projection ./internal/outbox ./internal/site ./internal/requests/sqlstore ./internal/workflow/sqlstore ./internal/metrics
           ./internal/notifications/sqlstore ./internal/management/sqlstore ./internal/facts ./internal/mcp -count=1 -timeout=15m
 
+      - name: Test AI transcript run IDs on disposable MySQL
+        env:
+          KORA_AI_TRANSCRIPT_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+        run: go test -tags=integration ./internal/api/ai -run TestTranscriptCarriesRunIDsAcrossDialects/mysql -count=1 -timeout=5m
+
       - name: Test programmatic module owner command fixture
         env:
           KORA_ENGINE_MODULE_COMMAND_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
@@ -175,6 +180,11 @@ jobs:
         env:
           KORA_PROJECTION_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
         run: go test -tags=integration ./internal/projection -count=1 -timeout=5m
+
+      - name: Test AI transcript run IDs on disposable PostgreSQL
+        env:
+          KORA_AI_TRANSCRIPT_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
+        run: go test -tags=integration ./internal/api/ai -run TestTranscriptCarriesRunIDsAcrossDialects/postgres -count=1 -timeout=5m
 
       - name: Test Ask Zana golden questions on disposable PostgreSQL
         env:
