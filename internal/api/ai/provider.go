@@ -136,6 +136,12 @@ var modelConfigs = map[string]AIConfig{
 		MaxTokensPerCall: 4096, HTTPTimeoutSec: 60, MaxRetries: 2,
 		RetryBackoffMs: 500, HistoryLimit: 20,
 	},
+	"deepseek-chat": {
+		MaxRounds: 6, TokenBudget: 60000, CompactionThreshold: 0.80,
+		MaxToolResultChars: 3000, StallThreshold: 3, MaxToolErrors: 5,
+		MaxTokensPerCall: 1024, HTTPTimeoutSec: 90, MaxRetries: 2,
+		RetryBackoffMs: 1000, HistoryLimit: 12,
+	},
 	"deepseek-v4-pro": {
 		MaxRounds: 15, TokenBudget: 120000, CompactionThreshold: 0.80,
 		MaxToolResultChars: 4000, StallThreshold: 3, MaxToolErrors: 5,

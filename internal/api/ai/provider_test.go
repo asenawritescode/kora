@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,6 +9,8 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+
+	"github.com/asenawritescode/kora/internal/secret"
 )
 
 func TestValidateProviderProfile(t *testing.T) {
@@ -137,5 +140,39 @@ func TestResolveProviderPrefersCloudGateway(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLoadAIConfigModelTable(t *testing.T) {
+	tests := []struct {
+		name                                               string
+		model                                              string
+		wantRounds, wantTokens, wantHistory, wantResultCap int
+		wantBudget                                         int
+	}{
+		{name: "deepseek chat is tuned for short tool loops", model: "deepseek-chat", wantRounds: 6, wantTokens: 1024, wantHistory: 12, wantResultCap: 3000, wantBudget: 60000},
+		{name: "unknown model keeps the defaults", model: "some-unlisted-model", wantRounds: 10, wantTokens: 4096, wantHistory: 20, wantResultCap: 4000, wantBudget: 80000},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			database, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock: %v", err)
+			}
+			defer func() { _ = database.Close() }()
+			// No site override is stored: every lookup finds no row, so only the model table applies.
+			for range 11 {
+				mock.ExpectQuery("").WillReturnError(sql.ErrNoRows)
+			}
+			cfg := LoadAIConfig(secret.NewStore(database), "demo", tc.model)
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("site overrides were not all read: %v", err)
+			}
+			if cfg.MaxRounds != tc.wantRounds || cfg.MaxTokensPerCall != tc.wantTokens || cfg.HistoryLimit != tc.wantHistory ||
+				cfg.MaxToolResultChars != tc.wantResultCap || cfg.TokenBudget != tc.wantBudget {
+				t.Errorf("LoadAIConfig(%q) = rounds %d tokens %d history %d result %d budget %d",
+					tc.model, cfg.MaxRounds, cfg.MaxTokensPerCall, cfg.HistoryLimit, cfg.MaxToolResultChars, cfg.TokenBudget)
+			}
+		})
 	}
 }
