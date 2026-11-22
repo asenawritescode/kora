@@ -173,6 +173,9 @@
         "previous": {
           "type": "string"
         },
+        "previous_label": {
+          "type": "string"
+        },
         "progress": {
           "type": "number",
           "x-optional-pointer": true
@@ -3256,6 +3259,9 @@
           "$ref": "#/$defs/AnswerMeta"
         },
         "previous": {
+          "type": "string"
+        },
+        "previous_label": {
           "type": "string"
         },
         "progress": {

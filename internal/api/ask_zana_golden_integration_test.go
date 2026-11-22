@@ -482,6 +482,9 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 				if card.Kind != "number" || card.Value != "KES 1,820" || card.Previous != "KES 750" || card.Change != "▲ 142.7% on the week before" {
 					t.Fatalf("card = %+v", card)
 				}
+				if card.PreviousLabel != "Week before" || card.Meta.DayEnds != "days end 04:00" {
+					t.Fatalf("previous label %q, number card day cutoff %q; want %q and the cutoff", card.PreviousLabel, card.Meta.DayEnds, "Week before")
+				}
 				if !card.Verified || card.ScopeNote != "" || card.Meta.Period != lastWeek || card.Meta.Compared != weekBefore {
 					t.Fatalf("card flags or dates = %+v", card)
 				}
@@ -511,6 +514,16 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 				want := []string{"Soda 3", "Juice 3", "Bread 3"}
 				if card.Kind != "table" || !card.Verified || !sameSet(rowValues(card), want) {
 					t.Fatalf("rows = %v (kind %s verified %v), want %v verified", rowValues(card), card.Kind, card.Verified, want)
+				}
+				// A table carries the records behind it, named for the lines it groups, and no day cutoff in its meta.
+				var see *contract.AnswerAction
+				for i := range card.Actions {
+					if card.Actions[i].Kind == "see_records" {
+						see = &card.Actions[i]
+					}
+				}
+				if see == nil || see.Label != "See the sales lines" || card.Meta.DayEnds != "" {
+					t.Fatalf("actions = %+v day cutoff %q; want see_records \"See the sales lines\" and no day cutoff", card.Actions, card.Meta.DayEnds)
 				}
 			},
 		}}},

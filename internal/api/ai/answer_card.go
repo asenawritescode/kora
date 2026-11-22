@@ -86,6 +86,10 @@ func (t *answerTurn) cardFor(q queryAnswer, page cardPage) contract.AnswerCard {
 		card.Kind = "table"
 		fillTable(&card, q, cat, page.Currency)
 	}
+	if card.Kind == "table" {
+		// A table card's meta does not print the business day cutoff; the number card's does.
+		card.Meta.DayEnds = ""
+	}
 	card.Actions = actionsOf(q, page, card.RecordTypeLabel, t.openQuestion(q))
 	return card
 }
@@ -188,6 +192,9 @@ func fillNumber(card *contract.AnswerCard, q queryAnswer, cat *metricsCatalog, c
 	}
 	prev, prevOK := valueOf(q.result.Previous[0].Values[0])
 	card.Previous = printAmount(prev, prevOK, format, currency)
+	if q.request.Compare == "week_before" {
+		card.PreviousLabel = "Week before"
+	}
 	card.Change = changeOf(cur, curOK, prev, prevOK, q.request.Compare)
 }
 
@@ -362,10 +369,8 @@ func actionsOf(q queryAnswer, page cardPage, recordLabel string, open json.RawMe
 	if open != nil {
 		actions = append(actions, contract.AnswerAction{Kind: "open_in_insights", Label: "Open in Insights", Question: open})
 	}
-	if isNumberResult(q.result) {
-		if drill, ok := drillRequestOf(q); ok {
-			actions = append(actions, contract.AnswerAction{Kind: "see_records", Label: "See the " + strings.ToLower(recordLabel), Question: drill})
-		}
+	if drill, ok := drillRequestOf(q); ok {
+		actions = append(actions, contract.AnswerAction{Kind: "see_records", Label: seeRecordsLabel(q, recordLabel), Question: drill})
 	}
 	if saved, ok := savedQuestionOf(q); ok {
 		visibility := []string{"private"}
@@ -380,9 +385,37 @@ func actionsOf(q queryAnswer, page cardPage, recordLabel string, open json.RawMe
 	return actions
 }
 
-// drillRequestOf is the drill behind a number: the same metric and business days, without a group.
+// seeRecordsLabel names the see_records button: the records behind the question. A question grouped by a line
+// dimension (a product on the sale lines) names the lines.
+func seeRecordsLabel(q queryAnswer, recordLabel string) string {
+	name := pluralLower(recordLabel)
+	for _, dim := range q.request.Dimensions {
+		if strings.HasPrefix(dim, "items.") {
+			return "See the " + name + " lines"
+		}
+	}
+	return "See the " + name
+}
+
+// pluralLower is a record type label in lower case, in the plural: "Sale" is "sales", "Inventory" is "inventories".
+func pluralLower(label string) string {
+	lower := strings.ToLower(label)
+	switch {
+	case strings.HasSuffix(lower, "s"), strings.HasSuffix(lower, "x"), strings.HasSuffix(lower, "ch"), strings.HasSuffix(lower, "sh"):
+		if strings.HasSuffix(lower, "s") && !strings.HasSuffix(lower, "ss") {
+			return lower // already plural: "records", "sales"
+		}
+		return lower + "es"
+	case strings.HasSuffix(lower, "y") && len(lower) > 1 && !strings.ContainsRune("aeiou", rune(lower[len(lower)-2])):
+		return lower[:len(lower)-1] + "ies"
+	}
+	return lower + "s"
+}
+
+// drillRequestOf is the drill behind a figure: the same metric over the same business days, without a group. A
+// table of a metric drills to the records behind its total.
 func drillRequestOf(q queryAnswer) (json.RawMessage, bool) {
-	if len(q.request.Metrics) != 1 || len(q.request.Measures) != 0 || len(q.request.Dimensions) != 0 {
+	if len(q.request.Metrics) != 1 || len(q.request.Measures) != 0 {
 		return nil, false
 	}
 	raw, err := json.Marshal(contract.MetricDrillRequest{Metric: q.request.Metrics[0], From: q.meta.Period.From, To: q.meta.Period.To})

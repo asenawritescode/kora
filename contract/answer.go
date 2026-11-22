@@ -41,6 +41,9 @@ type AnswerCard struct {
 	Value    string `json:"value,omitempty"`
 	Change   string `json:"change,omitempty"`
 	Previous string `json:"previous,omitempty"`
+	// PreviousLabel names what Previous is, as the card prints it before the value: "Week before" for a week-before
+	// comparison. Empty prints the value alone.
+	PreviousLabel string `json:"previous_label,omitempty"`
 	// Sparkline is one value per day of the period on a number card, from a day-grain read of the same question.
 	// It is set only for periods of 31 days or fewer.
 	Sparkline []string `json:"sparkline,omitempty"`
