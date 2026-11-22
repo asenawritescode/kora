@@ -60,3 +60,42 @@ func TestDrillLineSumListsItsSales(t *testing.T) {
 		})
 	}
 }
+
+// TestTopLineDimensionLabelsRows checks a dashboard's top-N by a line link dimension: the kept row carries its
+// record's title, not the code. P1 (Tea) has the largest line amount, 250 against P2's 200.
+func TestTopLineDimensionLabelsRows(t *testing.T) {
+	tests := []struct {
+		driver, dialect, envVar string
+	}{
+		{"mysql", "mysql", "KORA_METRICS_DISPOSABLE_MYSQL_DSN"},
+		{"postgres", "postgres", "KORA_METRICS_DISPOSABLE_POSTGRES_DSN"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.driver, func(t *testing.T) {
+			dsn := os.Getenv(tc.envVar)
+			if dsn == "" {
+				t.Skipf("set %s to run", tc.envVar)
+			}
+			database := disposabledb.Open(t, tc.driver, dsn)
+			dialect := db.Resolve(tc.dialect)
+			dts := erpsellDoctypes(t)
+			seedSaleLines(t, database.DB, dialect)
+			writeSaleLines(t, database.DB, dialect, dts)
+			cat, names, err := NewCatalog(nil, dts).WithAdHoc([]AdHoc{{Model: "Sale", Agg: aggSum, Field: "line_total"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			engine := Engine{DB: database.DB, Dialect: dialect, Catalog: cat}
+			res, err := engine.Query(context.Background(), Query{Metrics: names, Dimensions: []string{"items.product"}, Top: 1,
+				Grain: GrainRange, From: tenanttime.Date{Year: 2026, Month: 11, Day: 18}, To: tenanttime.Date{Year: 2026, Month: 11, Day: 20},
+				Scope: Scope{Joinable: map[string]bool{"Product": true}}})
+			if err != nil {
+				t.Fatalf("query: %v", err)
+			}
+			// The top row is P1; the rest of the range folds into the Other row, which carries no label.
+			if len(res.Rows) != 2 || res.Rows[0].Group[0] != "P1" || labelText(res.Rows[0]) != "Tea" {
+				t.Fatalf("rows = %+v, want P1 labelled Tea, then Other", res.Rows)
+			}
+		})
+	}
+}
