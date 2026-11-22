@@ -1,0 +1,29 @@
+name: cake_accounts_insights
+label: "Cake accounts insights"
+description: "Figures and charts that reproduce the cake profit and loss and quarterly purchases reports."
+default_range: last_30_days
+tiles:
+  - metric: cake_sales
+  - metric: cake_expenses
+  - metric: cake_net_profit
+  - metric: cake_profit_margin
+charts:
+  - id: sales_and_expenses
+    title: "Sales and expenses by day"
+    kind: bar
+    metrics: [cake_sales, cake_expenses]
+    by: time
+    grain: day
+    compare: none
+  - id: net_profit_by_day
+    title: "Net profit by day"
+    kind: line
+    metrics: [cake_net_profit]
+    by: time
+    grain: day
+    compare: none
+  - id: spend_by_item
+    title: "Spend by item"
+    kind: bar
+    metrics: [cake_expenses]
+    by: item

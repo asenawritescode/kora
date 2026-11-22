@@ -1,0 +1,10 @@
+name: stock_adjustments_count
+label: Stock adjustments
+type: simple
+model: Stock Adjustment
+measure:
+  agg: count
+time: business_date
+good: up
+format: number
+description: Stock Adjustment records (count).

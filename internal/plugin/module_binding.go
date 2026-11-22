@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
+	"github.com/asenawritescode/kora/internal/projection"
 )
 
 type ProviderKind string
@@ -229,7 +229,7 @@ type PublishedProjectionKey struct {
 }
 
 type PublishedProjectionStore interface {
-	Save(context.Context, analytics.PublishedProjectionSnapshot) error
+	Save(context.Context, projection.Snapshot) error
 	MarkStale(context.Context, contract.ProjectionDefinition, contract.BusinessScope, string) error
 }
 
@@ -489,7 +489,7 @@ func (p BindingPlan) RebuildPublishedProjection(ctx context.Context, store Publi
 	if err != nil || len(checkpoint) > 2048 {
 		return p.markProjectionStale(ctx, store, definition, scope)
 	}
-	if err := store.Save(ctx, analytics.PublishedProjectionSnapshot{
+	if err := store.Save(ctx, projection.Snapshot{
 		Definition: definition, Scope: scope, SourceID: "published_sources",
 		SourceRevision: hex.EncodeToString(revisionBytes[:]), Cursor: string(checkpoint), AsOf: projectionAsOf,
 		Freshness: contract.QueryFresh, Data: data,

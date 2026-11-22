@@ -8,10 +8,8 @@ import (
 	"github.com/asenawritescode/kora/internal/eventstream"
 )
 
-// LocalProvider adapts the in-process/WAL eventstream.Bus to the provider-neutral
-// contract.EventPublisher interface (RFC §7). The WAL rotation/replay machinery
-// remains behind this provider and is not part of the public EventPublisher
-// contract.
+// LocalProvider adapts the in-process eventstream.Bus to the provider-neutral
+// contract.EventPublisher interface (RFC §7).
 type LocalProvider struct {
 	bus eventstream.Bus
 }

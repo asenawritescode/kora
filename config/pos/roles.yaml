@@ -1,5 +1,6 @@
 - name: Cashier
   workspace_access: true
+  insights_access: false
   description: Rings up sales and runs shifts.
 
 - name: Manager

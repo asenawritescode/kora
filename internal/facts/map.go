@@ -1,6 +1,7 @@
 package facts
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -44,7 +45,8 @@ type Row struct {
 
 // Map turns a change into its header row and, if Lines is set, one row per child line.
 // Dropped lines and every line of a delete are tombstones. A bad axis value maps to the zero Date.
-func Map(dt *doctype.DocType, ev Change, clock tenanttime.Clock) (Row, []Row) {
+// A line without a name is an error: no line row is written under an empty id.
+func Map(dt *doctype.DocType, ev Change, clock tenanttime.Clock) (Row, []Row, error) {
 	f := dt.Facts
 	src := ev.Data
 	if ev.Deleted || src == nil {
@@ -57,31 +59,68 @@ func Map(dt *doctype.DocType, ev Change, clock tenanttime.Clock) (Row, []Row) {
 	head.Measures = measureValues(f.Measures, src, nil)
 	head.Dimensions = dimensionValues(f.Dimensions, src, nil)
 	if f.Lines == "" {
-		return head, nil
+		return head, nil, nil
 	}
+	rows, err := lineRows(dt, head, ev, src, deleted)
+	if err != nil {
+		return head, nil, err
+	}
+	return head, rows, nil
+}
+
+// lineRows maps the lines of the new row, then the lines of the old row that the new one dropped.
+func lineRows(dt *doctype.DocType, head Row, ev Change, src map[string]any, deleted bool) ([]Row, error) {
+	f := dt.Facts
 	var rows []Row
 	seen := map[string]bool{}
 	for _, child := range childRows(src, f.Lines) {
-		seen[text(child["name"])] = true
-		rows = append(rows, lineRow(head, f, src, child, deleted))
+		id, err := lineID(dt, ev, child)
+		if err != nil {
+			return nil, err
+		}
+		seen[id] = true
+		rows = append(rows, withLineID(lineRow(head, f, src, child, deleted), id))
 	}
-	if !ev.Deleted {
-		for _, child := range childRows(ev.OldData, f.Lines) {
-			if !seen[text(child["name"])] {
-				rows = append(rows, lineRow(head, f, src, child, true))
-			}
+	if ev.Deleted {
+		return rows, nil
+	}
+	for _, child := range childRows(ev.OldData, f.Lines) {
+		id, err := lineID(dt, ev, child)
+		if err != nil {
+			return nil, err
+		}
+		if !seen[id] {
+			rows = append(rows, withLineID(lineRow(head, f, src, child, true), id))
 		}
 	}
-	return head, rows
+	return rows, nil
+}
+
+// errLineWithoutID is returned for a child line whose event payload has no name. Such a line has no
+// key of its own, so writing it would collide with every other line of the record.
+var errLineWithoutID = errors.New("facts: line without an id")
+
+// lineID is the stored name of a child line. A line without one is an error, never an empty id.
+func lineID(dt *doctype.DocType, ev Change, child map[string]any) (string, error) {
+	id := text(child["name"])
+	if id == "" {
+		return "", fmt.Errorf("%w: %s %s", errLineWithoutID, dt.Name, ev.RecordID)
+	}
+	return id, nil
 }
 
 // lineRow fills a copy of the header with one child line; header measures stay on the header.
 func lineRow(head Row, f *doctype.FactModel, rec, child map[string]any, deleted bool) Row {
-	head.LineID = text(child["name"])
 	head.Deleted = deleted
 	head.Measures = measureValues(f.Measures, nil, child)
 	head.Dimensions = dimensionValues(f.Dimensions, rec, child)
 	return head
+}
+
+// withLineID sets the id of a line row.
+func withLineID(row Row, id string) Row {
+	row.LineID = id
+	return row
 }
 
 // newRow fills the columns every row shares.

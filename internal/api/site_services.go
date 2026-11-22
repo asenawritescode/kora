@@ -12,38 +12,15 @@ import (
 // external API consumers. Engine tenant requests use the immutable service
 // bundle pinned in request context instead of consulting this mutable map.
 type SiteRuntimeServices struct {
-	mu             sync.RWMutex
-	sites          map[string]SiteRuntimeService
-	analyticsCache *AnalyticsQueryCache
-}
-
-// AnalyticsQueryCacheSnapshot reports the process router's retained semantic
-// query cache budget for Engine resource metrics.
-func (s *SiteRuntimeServices) AnalyticsQueryCacheSnapshot() AnalyticsQueryCacheSnapshot {
-	// Retain this method for existing resource-metrics adapters. Engine process
-	// composition observes its explicitly owned cache directly.
-	return s.analyticsCacheOwner().AnalyticsQueryCacheSnapshot()
+	mu    sync.RWMutex
+	sites map[string]SiteRuntimeService
 }
 
 // SiteRuntimeService is the process-local service bundle for one loaded site.
 type SiteRuntimeService = tenantruntime.Services
 
 func NewSiteRuntimeServices() *SiteRuntimeServices {
-	return NewSiteRuntimeServicesWithAnalyticsQueryCache(DefaultAnalyticsQueryCache())
-}
-
-func NewSiteRuntimeServicesWithAnalyticsQueryCache(cache *AnalyticsQueryCache) *SiteRuntimeServices {
-	if cache == nil {
-		cache = DefaultAnalyticsQueryCache()
-	}
-	return &SiteRuntimeServices{sites: make(map[string]SiteRuntimeService), analyticsCache: cache}
-}
-
-func (s *SiteRuntimeServices) analyticsCacheOwner() *AnalyticsQueryCache {
-	if s == nil || s.analyticsCache == nil {
-		return DefaultAnalyticsQueryCache()
-	}
-	return s.analyticsCache
+	return &SiteRuntimeServices{sites: make(map[string]SiteRuntimeService)}
 }
 
 // Replace publishes the complete bundle for a site atomically.

@@ -147,138 +147,13 @@
   "contract::validateLocalSchemaReferences": {
    "cognitive": 31
   },
-  "internal/analytics::(*CloudRelay).Start": {
-   "cognitive": 20
-  },
-  "internal/analytics::(*QueryEngine).Resolve": {
-   "cognitive": 23,
-   "cyclomatic": 22
-  },
-  "internal/analytics::(*QueryEngine).ResolveInsights": {
-   "cognitive": 45,
-   "cyclomatic": 20
-  },
-  "internal/analytics::(*QueryEngine).resolveModelQuery": {
-   "cognitive": 25,
-   "cyclomatic": 23
-  },
-  "internal/analytics::(*QueryEngine).resolvePublishedProjection": {
-   "cognitive": 110,
-   "cyclomatic": 67
-  },
-  "internal/analytics::(*QueryEngine).resolveRelatedMeasure": {
-   "cognitive": 81,
-   "cyclomatic": 54
-  },
-  "internal/analytics::(*RebuildRunner).process": {
-   "cognitive": 51,
-   "cyclomatic": 28
-  },
-  "internal/analytics::(*ReportDefinition).Validate": {
-   "cognitive": 32,
-   "cyclomatic": 21
-  },
-  "internal/analytics::(*SemanticModel).Validate": {
-   "cognitive": 80,
-   "cyclomatic": 58
-  },
-  "internal/analytics::(*SemanticRequest).Validate": {
-   "cognitive": 66,
-   "cyclomatic": 42
-  },
-  "internal/analytics::(*Worker).flush": {
-   "cognitive": 51,
-   "cyclomatic": 45
-  },
-  "internal/analytics::(*Worker).process": {
-   "cognitive": 61,
-   "cyclomatic": 40
-  },
-  "internal/analytics::(*Worker).run": {
-   "cognitive": 20
-  },
-  "internal/analytics::(PublishedProjectionSnapshot).Validate": {
-   "cognitive": 19,
-   "cyclomatic": 27
-  },
-  "internal/analytics::(QueryRequest).Validate": {
-   "cognitive": 26,
-   "cyclomatic": 28
-  },
-  "internal/analytics::Backfill": {
-   "cognitive": 59,
-   "cyclomatic": 39,
-   "statements": 78
-  },
-  "internal/analytics::BootstrapTables": {
-   "cognitive": 21,
-   "cyclomatic": 17
-  },
-  "internal/analytics::BuildSemanticModel": {
-   "cognitive": 19,
-   "cyclomatic": 17
-  },
-  "internal/analytics::ClaimNextRebuildJob": {
-   "cognitive": 29,
-   "cyclomatic": 25,
-   "statements": 59
-  },
-  "internal/analytics::GenerateMetrics": {
-   "cognitive": 16,
-   "lines": 83
-  },
-  "internal/analytics::LoadConfig": {
-   "cognitive": 26,
-   "cyclomatic": 23
-  },
-  "internal/analytics::MarkPublishedProjectionStale": {
-   "cyclomatic": 18
-  },
-  "internal/analytics::Resolve": {
-   "statements": 49
-  },
-  "internal/analytics::Validate": {
-   "statements": 65
-  },
-  "internal/analytics::ValidateReportModels": {
-   "cognitive": 83,
-   "cyclomatic": 36,
-   "statements": 50
-  },
-  "internal/analytics::analyticsPeriodExpression": {
-   "cyclomatic": 19
-  },
-  "internal/analytics::backfillMetricWithExec": {
-   "statements": 41
-  },
-  "internal/analytics::contributionOutsideRebuiltRange": {
-   "cognitive": 17
-  },
-  "internal/analytics::flush": {
-   "statements": 132
-  },
-  "internal/analytics::process": {
-   "statements": 79
-  },
-  "internal/analytics::resolveModelQuery": {
-   "statements": 42
-  },
-  "internal/analytics::resolvePublishedProjection": {
-   "statements": 132
-  },
-  "internal/analytics::resolveRelatedMeasure": {
-   "statements": 138
-  },
-  "internal/analytics::rollupTableDDL": {
-   "lines": 154
-  },
   "internal/api/ai::EnsureAIRunTables": {
    "lines": 185
   },
   "internal/api/ai::HandleChat": {
-   "cognitive": 119,
-   "cyclomatic": 57,
-   "statements": 225
+   "cognitive": 116,
+   "cyclomatic": 52,
+   "statements": 221
   },
   "internal/api/ai::ValidateProviderProfile": {
    "cyclomatic": 16
@@ -286,33 +161,18 @@
   "internal/api/ai::aiBundleChildFieldGuide": {
    "cognitive": 28
   },
-  "internal/api/ai::analyticsModelReadable": {
-   "cognitive": 55,
-   "cyclomatic": 42,
-   "statements": 62
-  },
-  "internal/api/ai::authorizeRelatedAnalytics": {
-   "cognitive": 50,
-   "cyclomatic": 27,
-   "statements": 51
-  },
   "internal/api/ai::buildAIMutationBundle": {
    "cognitive": 83,
    "cyclomatic": 45,
    "statements": 70
   },
   "internal/api/ai::buildSystemFunctions": {
-   "lines": 321
+   "lines": 316
   },
   "internal/api/ai::executeAIMutationBundle": {
    "cognitive": 24,
    "cyclomatic": 20,
    "statements": 50
-  },
-  "internal/api/ai::executeAnalyticsInsights": {
-   "cognitive": 33,
-   "cyclomatic": 22,
-   "statements": 48
   },
   "internal/api/ai::executeCreateDoctypeDraft": {
    "cognitive": 16
@@ -324,17 +184,14 @@
   },
   "internal/api/ai::executeSingleTool": {
    "cognitive": 65,
-   "cyclomatic": 64,
-   "statements": 162
+   "cyclomatic": 60,
+   "statements": 153
   },
   "internal/api/ai::executeToolCallsForAI": {
    "lines": 113
   },
   "internal/api/ai::executeUpdateDoctypeDraft": {
    "cognitive": 16
-  },
-  "internal/api/ai::filterAnalyticsCatalog": {
-   "cognitive": 17
   },
   "internal/api/ai::summarizeCompacted": {
    "cognitive": 19
@@ -373,15 +230,15 @@
    "cognitive": 29
   },
   "internal/api::(*Handler).HandleConfigVersionActivate": {
-   "cognitive": 134,
-   "cyclomatic": 72
+   "cognitive": 117,
+   "cyclomatic": 66
   },
   "internal/api::(*Handler).HandleConfigVersionPreview": {
    "cognitive": 19
   },
   "internal/api::(*Handler).HandleConfigVersionRollback": {
-   "cognitive": 85,
-   "cyclomatic": 55
+   "cognitive": 68,
+   "cyclomatic": 49
   },
   "internal/api::(*Handler).HandleConfigVersionSnapshot": {
    "cognitive": 17
@@ -442,8 +299,8 @@
    "cyclomatic": 23
   },
   "internal/api::(*Handler).HandleSystemDoctypeDelete": {
-   "cognitive": 35,
-   "cyclomatic": 27
+   "cognitive": 30,
+   "cyclomatic": 25
   },
   "internal/api::(*Handler).HandleSystemDoctypeUpdate": {
    "cognitive": 19
@@ -566,13 +423,13 @@
    "statements": 57
   },
   "internal/api::HandleConfigVersionActivate": {
-   "statements": 172
+   "statements": 162
   },
   "internal/api::HandleConfigVersionPreview": {
    "statements": 42
   },
   "internal/api::HandleConfigVersionRollback": {
-   "statements": 149
+   "statements": 138
   },
   "internal/api::HandleConfigVersionSnapshot": {
    "statements": 42
@@ -641,13 +498,13 @@
    "statements": 60
   },
   "internal/api::HandleSystemDoctypeCreate": {
-   "statements": 63
+   "statements": 62
   },
   "internal/api::HandleSystemDoctypeDelete": {
-   "statements": 64
+   "statements": 60
   },
   "internal/api::HandleSystemDoctypeUpdate": {
-   "statements": 52
+   "statements": 51
   },
   "internal/api::HandleSystemNavigation": {
    "statements": 76
@@ -665,16 +522,11 @@
    "cognitive": 41,
    "cyclomatic": 22
   },
-  "internal/api::RegisterAnalyticsRoutes": {
-   "cognitive": 143,
-   "cyclomatic": 76,
-   "lines": 370
-  },
   "internal/api::RegisterOperations": {
    "statements": 78
   },
   "internal/api::RegisterRoutesOnGroup": {
-   "statements": 73
+   "statements": 72
   },
   "internal/api::RegisterSystemRoutes": {
    "statements": 41
@@ -686,10 +538,6 @@
    "cognitive": 44,
    "cyclomatic": 22,
    "statements": 46
-  },
-  "internal/api::analyticsModelSourcesReadable": {
-   "cognitive": 26,
-   "cyclomatic": 20
   },
   "internal/api::applyTransactionLinkedFields": {
    "cognitive": 24,
@@ -726,11 +574,6 @@
   },
   "internal/api::capabilities": {
    "statements": 43
-  },
-  "internal/api::checkRelatedModelPermissions": {
-   "cognitive": 52,
-   "cyclomatic": 24,
-   "statements": 42
   },
   "internal/api::configuredTransactionLineRecords": {
    "cognitive": 51,
@@ -771,9 +614,6 @@
    "statements": 44
   },
   "internal/api::filterPublishedProjectionRows": {
-   "cognitive": 16
-  },
-  "internal/api::filterReadableAnalyticsCatalog": {
    "cognitive": 16
   },
   "internal/api::handleChannelTool": {
@@ -1054,11 +894,6 @@
    "cognitive": 29,
    "cyclomatic": 16
   },
-  "internal/cli::runAnalyticsBackfill": {
-   "cognitive": 19,
-   "cyclomatic": 17,
-   "statements": 50
-  },
   "internal/cli::runConfigExportContext": {
    "cognitive": 47,
    "cyclomatic": 31,
@@ -1098,6 +933,9 @@
    "cognitive": 27,
    "cyclomatic": 16
   },
+  "internal/cloudrelay::(*Relay).Start": {
+   "cognitive": 20
+  },
   "internal/configstore::(*ModuleStore).AdmitCapabilityAttempt": {
    "cognitive": 25,
    "cyclomatic": 20
@@ -1135,8 +973,7 @@
    "cognitive": 22
   },
   "internal/configstore::(*Store).activateSnapshot": {
-   "cognitive": 22,
-   "cyclomatic": 17
+   "cognitive": 19
   },
   "internal/configstore::ApplyModuleLifecycleChangeTx": {
    "statements": 42
@@ -1171,16 +1008,13 @@
    "lines": 259
   },
   "internal/db::ExtensibilityTablesMySQL": {
-   "lines": 142
-  },
-  "internal/db::ExtensibilityTablesPostgres": {
-   "lines": 83
+   "lines": 136
   },
   "internal/db::LoadSchema": {
    "statements": 41
   },
   "internal/db::SystemTableSQL": {
-   "lines": 216
+   "lines": 208
   },
   "internal/dbaccess::ConfigFromEnv": {
    "cognitive": 29,
@@ -1264,9 +1098,9 @@
    "cognitive": 16
   },
   "internal/doctype::buildSnapshot": {
-   "cognitive": 65,
-   "cyclomatic": 31,
-   "statements": 71
+   "cognitive": 57,
+   "cyclomatic": 29,
+   "statements": 63
   },
   "internal/doctype::checkFieldUnknownKeys": {
    "cognitive": 69,
@@ -1398,24 +1232,20 @@
    "cognitive": 54,
    "cyclomatic": 26
   },
-  "internal/engine::(*DurableWorkScanner).probeTenant": {
-   "cognitive": 24,
-   "cyclomatic": 20
-  },
   "internal/engine::(*DurableWorkScanner).run": {
    "cognitive": 20
   },
   "internal/engine::(*DurableWorkScanner).scanPage": {
-   "cognitive": 29,
-   "cyclomatic": 21
+   "cognitive": 27,
+   "cyclomatic": 20
   },
   "internal/engine::(*HTTPManagementPackageArtifactResolver).ResolvePackage": {
    "cognitive": 18,
    "cyclomatic": 23
   },
   "internal/engine::(*ProcessResources).Shutdown": {
-   "cognitive": 93,
-   "cyclomatic": 56
+   "cognitive": 86,
+   "cyclomatic": 54
   },
   "internal/engine::(*TenantReloadController).Reload": {
    "cognitive": 25,
@@ -1484,9 +1314,9 @@
    "statements": 95
   },
   "internal/engine::AssembleTenantRuntime": {
-   "cognitive": 26,
-   "cyclomatic": 23,
-   "statements": 46
+   "cognitive": 22,
+   "cyclomatic": 20,
+   "statements": 43
   },
   "internal/engine::Execute": {
    "statements": 70
@@ -1524,7 +1354,7 @@
    "cognitive": 29
   },
   "internal/engine::Shutdown": {
-   "statements": 101
+   "statements": 98
   },
   "internal/engine::StartDirectoryFeed": {
    "cognitive": 32,
@@ -1577,9 +1407,9 @@
    "cognitive": 16
   },
   "internal/engine::installTenantServices": {
-   "cognitive": 163,
-   "cyclomatic": 105,
-   "statements": 324
+   "cognitive": 153,
+   "cyclomatic": 99,
+   "statements": 308
   },
   "internal/engine::loadStartupTenants": {
    "cognitive": 31,
@@ -1601,14 +1431,6 @@
   },
   "internal/engine::mergeProviderSelections": {
    "cognitive": 24
-  },
-  "internal/engine::migrateAnalyticsWALDirectories": {
-   "cognitive": 56,
-   "cyclomatic": 32,
-   "statements": 62
-  },
-  "internal/engine::migrateAnalyticsWALNamespaces": {
-   "cognitive": 27
   },
   "internal/engine::newEngine": {
    "cognitive": 66,
@@ -1638,9 +1460,9 @@
    "cyclomatic": 16
   },
   "internal/engine::registerResourceMetrics": {
-   "cognitive": 140,
-   "cyclomatic": 49,
-   "statements": 224
+   "cognitive": 96,
+   "cyclomatic": 37,
+   "statements": 186
   },
   "internal/engine::registeredConfigQueryProviders": {
    "cognitive": 52,
@@ -1661,7 +1483,7 @@
    "lines": 111
   },
   "internal/engine::scanPage": {
-   "statements": 61
+   "statements": 55
   },
   "internal/engine::validateBuiltinWorkflowSchema": {
    "cognitive": 56,
@@ -1694,29 +1516,8 @@
    "cognitive": 26,
    "cyclomatic": 20
   },
-  "internal/eventbus::(*channelBus).AcknowledgeWAL": {
-   "cognitive": 46,
-   "cyclomatic": 28
-  },
-  "internal/eventbus::(*channelBus).refreshWALBacklogLocked": {
-   "cognitive": 32,
-   "cyclomatic": 19
-  },
-  "internal/eventbus::(*channelBus).writeWAL": {
-   "cognitive": 23,
-   "cyclomatic": 18
-  },
-  "internal/eventbus::AcknowledgeWAL": {
-   "statements": 65
-  },
   "internal/eventbus::addListener": {
    "statements": 49
-  },
-  "internal/eventbus::refreshWALBacklogLocked": {
-   "statements": 58
-  },
-  "internal/eventbus::writeWAL": {
-   "statements": 52
   },
   "internal/expression::(*TreeEvaluator).eval": {
    "cognitive": 27,
@@ -2105,6 +1906,13 @@
    "cognitive": 24,
    "cyclomatic": 18
   },
+  "internal/projection::(Snapshot).Validate": {
+   "cognitive": 19,
+   "cyclomatic": 27
+  },
+  "internal/projection::markPublishedStale": {
+   "cyclomatic": 17
+  },
   "internal/query::(*Definition).validate": {
    "cognitive": 18,
    "cyclomatic": 17
@@ -2370,7 +2178,7 @@
   "internal/schema::AnalyzeImpact": {
    "cognitive": 27,
    "cyclomatic": 18,
-   "statements": 50
+   "statements": 49
   },
   "internal/schema::ComputeDiff": {
    "cognitive": 138,
@@ -2537,9 +2345,9 @@
    "statements": 52
   },
   "internal/site::ValidatePack": {
-   "cognitive": 96,
-   "cyclomatic": 53,
-   "statements": 105
+   "cognitive": 83,
+   "cyclomatic": 41,
+   "statements": 82
   },
   "internal/site::acquirePlatformRegistryBootstrapLock": {
    "cognitive": 27,
@@ -2591,14 +2399,14 @@
    "cyclomatic": 16
   },
   "internal/site::parseConfigPack": {
-   "cognitive": 90,
-   "cyclomatic": 59,
-   "statements": 125
+   "cognitive": 81,
+   "cyclomatic": 54,
+   "statements": 113
   },
   "internal/site::parsePackSnapshot": {
-   "cognitive": 18,
-   "cyclomatic": 18,
-   "statements": 48
+   "cognitive": 17,
+   "cyclomatic": 17,
+   "statements": 45
   },
   "internal/site::removePlatformSiteRegistrationByID": {
    "cognitive": 33,
@@ -2647,8 +2455,8 @@
    "cognitive": 17
   },
   "internal/tenantruntime::(*Runtime).Close": {
-   "cognitive": 25,
-   "cyclomatic": 20
+   "cognitive": 22,
+   "cyclomatic": 18
   },
   "internal/tenantruntime::Activate": {
    "statements": 60

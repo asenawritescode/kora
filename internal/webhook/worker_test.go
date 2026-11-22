@@ -75,7 +75,7 @@ func TestWorkerStopIsIdempotent(t *testing.T) {
 }
 
 func TestWorkerUsesBoundedMultiBusListenerQueue(t *testing.T) {
-	inner := eventbus.NewChannelBus(1, t.TempDir())
+	inner := eventbus.NewChannelBus(1, 0)
 	bus, err := eventbus.NewDeferredMultiBus(inner)
 	if err != nil {
 		t.Fatal("create multi bus:", err)

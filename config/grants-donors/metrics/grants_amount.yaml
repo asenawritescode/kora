@@ -1,0 +1,10 @@
+name: grants_amount
+label: "Grant amount"
+type: balance
+model: "Grant"
+measure:
+  agg: sum
+  field: amount
+time: business_date
+format: currency
+description: "Grant amount from the Grant records (sum)."

@@ -1,0 +1,9 @@
+name: projects_tasks_count
+label: "Tasks"
+type: balance
+model: "Task"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Tasks from the Task records (count)."

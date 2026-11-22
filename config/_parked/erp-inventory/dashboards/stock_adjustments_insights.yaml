@@ -1,0 +1,13 @@
+name: stock_adjustments_insights
+label: "Stock adjustment insights"
+description: "Figures and charts that reproduce the stock adjustments report."
+default_range: last_30_days
+tiles:
+  - metric: stock_adjustments_count
+  - metric: stock_adjustments_delta
+charts:
+  - id: adjustments_by_reason
+    title: "Adjustments by reason"
+    kind: bar
+    metrics: [stock_adjustments_count, stock_adjustments_delta]
+    by: reason

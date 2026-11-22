@@ -63,16 +63,6 @@ contract/version.go::DetectVersionConflict
 contract/version.go::NewConflictRecord
 contract/version.go::VersionMismatchError.Error
 contract/version.go::itoa64
-internal/analytics/backfill.go::backfillMetric
-internal/analytics/cloud_relay.go::CloudRelay.ProductEventsDropped
-internal/analytics/model.go::BuildDataPointCatalog
-internal/analytics/query.go::QueryEngine.CachedResolve
-internal/analytics/query.go::QueryEngine.InvalidateCache
-internal/analytics/query.go::QueryEngine.cacheKey
-internal/analytics/semantic.go::BuildPublishedProjectionModel
-internal/analytics/semantic.go::BuildPublishedSemanticModel
-internal/analytics/worker.go::Worker.addDelta
-internal/api/ai/analytics.go::checkRelatedAnalyticsPermissions
 internal/api/ai/legacy_inventory.go::InspectRunStatusInventory
 internal/api/ai/legacy_inventory.go::aiRunColumns
 internal/api/ai/run_store.go::ListRunTasks
@@ -103,7 +93,6 @@ internal/api/schema.go::DocTypeToJSONSchema
 internal/api/schema.go::FieldToJSONSchema
 internal/api/schema.go::splitLines
 internal/api/site_services.go::NewSiteRuntimeServices
-internal/api/site_services.go::NewSiteRuntimeServicesWithAnalyticsQueryCache
 internal/api/system.go::realtimePayloadVisibleToUser
 internal/application/subscriptions/engineadapter/recurring_invoices.go::InternalBillingAdapter.CreateObligation
 internal/application/subscriptions/engineadapter/recurring_invoices.go::InternalBillingAdapter.ReconcileObligation
@@ -128,6 +117,7 @@ internal/auth/session.go::NewSessionManager
 internal/auth/session.go::TenantMagicLinkURL
 internal/auth/session.go::newSessionManager
 internal/auth/site.go::SiteGuard.Close
+internal/cloudrelay/relay.go::Relay.ProductEventsDropped
 internal/db/dialect.go::MySQL
 internal/dbaccess/admission.go::NewAdmission
 internal/disposabledb/disposabledb.go::Open
@@ -189,8 +179,6 @@ internal/engine/management_invitation_executor.go::recordInvitationOutcome
 internal/engine/management_invitation_executor.go::retryInvitationDelivery
 internal/engine/management_invitation_executor.go::revokeInvitationForReconciliation
 internal/engine/scheduler.go::StartScheduler
-internal/eventbus/bus.go::NewChannelBus
-internal/eventbus/bus.go::NewChannelBusWithMaxEventBytes
 internal/eventbus/multibus.go::NewMultiBus
 internal/eventbus/queue_admission.go::NewAnalyticsQueueAdmission
 internal/expression/expression.go::ExprError.Error

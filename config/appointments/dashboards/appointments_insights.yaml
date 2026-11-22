@@ -1,0 +1,17 @@
+name: appointments_insights
+label: "Appointments insights"
+description: "Figures and charts that reproduce the appointments overview report."
+default_range: last_30_days
+tiles:
+  - metric: appointments_count
+charts:
+  - id: appointments_by_status
+    title: "Appointments by status"
+    kind: bar
+    metrics: [appointments_count]
+    by: status
+  - id: appointments_by_service
+    title: "Appointments by service"
+    kind: bar
+    metrics: [appointments_count]
+    by: service

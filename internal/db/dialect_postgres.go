@@ -328,7 +328,7 @@ func (d *PostgresDialect) TableSuffix() string {
 
 func (d *PostgresDialect) ColumnType(f *doctype.Field) string {
 	switch f.Fieldtype {
-	case "Data", "Select", "Link", "Dynamic Link":
+	case "Data", "Select", "Link", "Dynamic Link", "User":
 		return "VARCHAR(140)"
 	case "Text", "Text Editor":
 		return "TEXT"
@@ -469,6 +469,9 @@ func (d *PostgresDialect) InsertOrIgnorePrefix() string {
 // SharedRowLock is PostgreSQL's locking read: FOR SHARE.
 func (d *PostgresDialect) SharedRowLock() string { return " FOR SHARE" }
 
+// ExclusiveRowLock is PostgreSQL's locking read: FOR UPDATE.
+func (d *PostgresDialect) ExclusiveRowLock() string { return " FOR UPDATE" }
+
 // AllocateNameNumber issues the next PREFIX-NNNN number. The prefix is its own
 // counter key, so it shares the series path.
 func (d *PostgresDialect) AllocateNameNumber(tx *sql.Tx, doctypeName, prefix, tableName string) (int64, error) {
@@ -586,7 +589,7 @@ func (d *PostgresDialect) numberBlockSQL() []string {
 }
 
 func (d *PostgresDialect) SystemTableSQL() []string {
-	return append(append(d.numberBlockSQL(), []string{
+	return append(append(append(d.numberBlockSQL(), postgresRoleSQL()...), []string{
 		// _kora_naming_series
 		`CREATE TABLE IF NOT EXISTS "_kora_naming_series" (
 			"doctype" VARCHAR(140) NOT NULL,
@@ -619,15 +622,6 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 		`ALTER TABLE "_kora_doctype" ADD COLUMN "version" INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE "_kora_doctype" ADD COLUMN "config_json" JSONB`,
 		`CREATE INDEX IF NOT EXISTS "idx_doctype_site" ON "_kora_doctype" ("site")`,
-
-		// _kora_role
-		`CREATE TABLE IF NOT EXISTS "_kora_role" (
-			"name" VARCHAR(140) PRIMARY KEY,
-			"site" VARCHAR(140) NOT NULL DEFAULT '',
-			"workspace_access" SMALLINT NOT NULL DEFAULT 1,
-			"description" TEXT
-		)`,
-		`ALTER TABLE "_kora_role" ADD COLUMN "site" VARCHAR(140) NOT NULL DEFAULT ''`,
 
 		// _kora_permission
 		`CREATE TABLE IF NOT EXISTS "_kora_permission" (
@@ -813,7 +807,7 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 
 		// Backward compat: existing _kora_view tables may lack idx column.
 		`ALTER TABLE "_kora_view" ADD COLUMN IF NOT EXISTS "idx" INTEGER NOT NULL DEFAULT 0`,
-	}...), append(append(postgresFieldTableSQL(), PaymentTablesPostgres()...), DashboardOverrideTablesPostgres()...)...)
+	}...), append(append(postgresFieldTableSQL(), PaymentTablesPostgres()...), append(DashboardOverrideTablesPostgres(), SavedReportTablesPostgres()...)...)...)
 }
 
 // postgresFieldTableSQL creates _kora_field, the stored fields of each record
@@ -854,5 +848,19 @@ func postgresFieldTableSQL() []string {
 		`ALTER TABLE "_kora_field" ADD COLUMN "site" VARCHAR(140) NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS "idx_parent" ON "_kora_field" ("parent")`,
 		`CREATE INDEX IF NOT EXISTS "idx_parent_fieldname" ON "_kora_field" ("parent", "fieldname")`,
+	}
+}
+
+// postgresRoleSQL is the _kora_role table and its column additions. It runs before the other system tables, which do not reference it.
+func postgresRoleSQL() []string {
+	return []string{
+		`CREATE TABLE IF NOT EXISTS "_kora_role" (
+			"name" VARCHAR(140) PRIMARY KEY,
+			"site" VARCHAR(140) NOT NULL DEFAULT '',
+			"workspace_access" SMALLINT NOT NULL DEFAULT 1,
+			"description" TEXT
+		)`,
+		`ALTER TABLE "_kora_role" ADD COLUMN "site" VARCHAR(140) NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_role" ADD COLUMN "insights_access" SMALLINT NOT NULL DEFAULT 1`,
 	}
 }

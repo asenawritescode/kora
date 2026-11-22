@@ -2,15 +2,15 @@ package engine
 
 import (
 	"context"
-	"github.com/asenawritescode/kora/internal/eventbus"
-	"github.com/asenawritescode/kora/internal/eventstream"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/asenawritescode/kora/internal/cloudrelay"
+	"github.com/asenawritescode/kora/internal/eventbus"
+	"github.com/asenawritescode/kora/internal/eventstream"
+
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/asenawritescode/kora/internal/analytics"
-	"github.com/asenawritescode/kora/internal/api"
 	"github.com/asenawritescode/kora/internal/auth"
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/net"
@@ -20,18 +20,10 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
-type analyticsCacheSnapshotStub struct {
-	snapshot api.AnalyticsQueryCacheSnapshot
-}
-
-func (s analyticsCacheSnapshotStub) AnalyticsQueryCacheSnapshot() api.AnalyticsQueryCacheSnapshot {
-	return s.snapshot
-}
-
 func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	reader := metric.NewManualReader()
 	provider := metric.NewMeterProvider(metric.WithReader(reader))
-	bus := eventbus.NewChannelBusWithLimits(2, 1024, 2048, t.TempDir())
+	bus := eventbus.NewChannelBus(2, 1024)
 	defer bus.Close()
 	fanout, err := eventbus.NewMultiBus(bus)
 	if err != nil {
@@ -64,8 +56,8 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	tenantDB.SetMaxOpenConns(3)
 	loaded := &net.LoadedSite{SiteID: "metrics-tenant", Name: "metrics-tenant", DB: tenantDB, AnalyticsEventBus: fanout}
 	services := loaded.RuntimeServiceSnapshot()
-	cloudRelay := analytics.NewCloudRelay(nil, loaded.Name, analytics.CloudRelayConfig{AccountID: "metrics-account"})
-	cloudEvent := analytics.CloudProductEventDTO{Kind: "first_login", Properties: analytics.FirstLoginPropertiesDTO{User: "user@example.invalid"}}
+	cloudRelay := cloudrelay.New(nil, loaded.Name, cloudrelay.Config{AccountID: "metrics-account"})
+	cloudEvent := cloudrelay.ProductEvent{Kind: "first_login", Properties: cloudrelay.FirstLoginProperties{User: "user@example.invalid"}}
 	for i := 0; i < 32; i++ {
 		if !cloudRelay.EnqueueProductEvent(cloudEvent, "") {
 			t.Fatalf("enqueue Cloud telemetry metric fixture %d", i)
@@ -76,7 +68,6 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	}
 	services.AnalyticsRelay = cloudRelay
 	services.Scheduler = schedulerWorker
-	services.AnalyticsRebuild = analytics.NewRebuildRunner(tenantDB, db.Resolve("mysql"), loaded.Name, nil, nil)
 	backlog := &outbox.BacklogMetrics{}
 	backlog.RecordLeaseLost()
 	// Outbox metrics are sampled through their own publisher DB; the OTel
@@ -151,10 +142,6 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	durableScan.capacity.Store(1)
 	durableScan.sweeps.Store(3)
 	durableScan.lastSweep = time.Now().Add(-2 * time.Second)
-	durableScan.beginColdWALScan("")
-	durableScan.recordColdWALBacklog(eventbus.WALBacklogSnapshot{Pending: true, AgeKnown: true, OldestAge: 3 * time.Second, Bytes: 2048, BytesKnown: true})
-	durableScan.recordColdWALBacklog(eventbus.WALBacklogSnapshot{Pending: true, AgeKnown: false, BytesKnown: true})
-	durableScan.publishColdWALSnapshot()
 	platformDB, _, err := sqlmock.New()
 	if err != nil {
 		t.Fatal("create platform pool metric fixture:", err)
@@ -165,7 +152,7 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	deletionWorker.attempts.Store(4)
 	deletionWorker.failures.Store(2)
 	deletionWorker.rejected.Store(3)
-	metrics, err := registerResourceMetrics(provider.Meter("resource-metrics-test"), router, nil, nil, ResourceMetricSources{PlatformDB: platformDB, RealtimeStreams: realtime, SessionCache: sessionBudget, Uploads: uploads, AnalyticsQueueAdmission: listenerQueueAdmission, DurableWorkScan: durableScan, DeletionWorker: deletionWorker, AnalyticsQueryCache: analyticsCacheSnapshotStub{snapshot: api.AnalyticsQueryCacheSnapshot{Entries: 2, MaxEntries: 256, Bytes: 4096, MaxBytes: 32 << 20, Evictions: 3, Rejected: 4}}})
+	metrics, err := registerResourceMetrics(provider.Meter("resource-metrics-test"), router, nil, nil, ResourceMetricSources{PlatformDB: platformDB, RealtimeStreams: realtime, SessionCache: sessionBudget, Uploads: uploads, AnalyticsQueueAdmission: listenerQueueAdmission, DurableWorkScan: durableScan, DeletionWorker: deletionWorker})
 	if err != nil {
 		t.Fatal("register resource metrics:", err)
 	}
@@ -200,11 +187,6 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	if values["kora.cloud.product_events.queue_items"] != 32 || values["kora.cloud.product_events.queue_capacity"] != 32 || values["kora.cloud.product_events.dropped"] != 1 {
 		t.Fatalf("Cloud product event queue metrics = %v", values)
 	}
-	for _, name := range []string{"kora.analytics.rebuild.active", "kora.analytics.rebuild.claims", "kora.analytics.rebuild.claim_failures", "kora.analytics.rebuild.admission_deferrals", "kora.analytics.rebuild.execution_failures", "kora.analytics.rebuild.lease_renew_failures", "kora.analytics.rebuild.lease_lost", "kora.analytics.rebuild.completion_failures"} {
-		if !names[name] || values[name] != 0 {
-			t.Fatalf("analytics rebuild metric %q is missing or nonzero without worker activity: names=%v values=%v", name, names, values)
-		}
-	}
 	if values["kora.outbox.pending_sampled"] != 1 || values["kora.outbox.failed_sampled"] != 0 || values["kora.outbox.publishing_sampled"] != 0 || values["kora.outbox.sample_saturated"] != 0 || values["kora.outbox.oldest_unpublished_age_ns"] < int64(12*time.Second) || values["kora.outbox.lease_lost"] != 1 {
 		t.Fatalf("cached outbox backlog metrics = %v", values)
 	}
@@ -229,7 +211,7 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	if values["kora.analytics.events.dropped"] != 1 {
 		t.Fatalf("analytics rejected/dropped event gauge = %v, want 1", values)
 	}
-	if values["kora.analytics.events.payload_rejected"] != 1 || values["kora.analytics.events.wal_write_failures"] != 0 || values["kora.analytics.listeners.overflows"] != 0 || values["kora.analytics.listeners.registration_rejected"] != 0 {
+	if values["kora.analytics.events.payload_rejected"] != 1 || values["kora.analytics.listeners.overflows"] != 0 || values["kora.analytics.listeners.registration_rejected"] != 0 {
 		t.Fatalf("analytics drop-cause counters = %v", values)
 	}
 	if values["kora.session_cache.shared_bytes"] != 0 || values["kora.session_cache.shared_max_bytes"] != 4096 {
@@ -244,19 +226,10 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 	if values["kora.analytics.listeners.process_active"] != 2 || values["kora.analytics.listeners.process_capacity"] != 2 || values["kora.analytics.listeners.process_rejected"] != 1 {
 		t.Fatalf("process analytics listener count metrics = %v", values)
 	}
-	if values["kora.analytics.query_cache.entries"] != 2 || values["kora.analytics.query_cache.max_entries"] != 256 || values["kora.analytics.query_cache.bytes"] != 4096 || values["kora.analytics.query_cache.max_bytes"] != 32<<20 || values["kora.analytics.query_cache.evictions"] != 3 || values["kora.analytics.query_cache.rejected"] != 4 {
-		t.Fatalf("analytics query cache metrics = %v", values)
-	}
 	if values["kora.tenant.durable_scan.probes"] != 7 || values["kora.tenant.durable_scan.due_tenants"] != 2 || values["kora.tenant.durable_scan.probe_failures"] != 1 || values["kora.tenant.durable_scan.scan_failures"] != 2 || values["kora.tenant.durable_scan.wake_failures"] != 1 || values["kora.tenant.durable_scan.capacity_rejections"] != 1 || values["kora.tenant.durable_scan.completed_sweeps"] != 3 || values["kora.tenant.durable_scan.last_sweep_age_ns"] <= 0 {
 		t.Fatalf("durable work scan metrics = %v", values)
 	}
-	if values["kora.analytics.wal.pending"] != 1 || values["kora.analytics.wal.age_unknown"] != 1 || values["kora.analytics.wal.oldest_age_ns"] < int64(3*time.Second) {
-		t.Fatalf("durable analytics WAL metrics = %v", values)
-	}
-	if values["kora.analytics.wal.bytes"] != 0 || values["kora.analytics.wal.bytes_unknown"] != 0 || values["kora.analytics.wal.cold_bytes"] != 2048 || values["kora.analytics.wal.cold_bytes_unknown"] != 0 {
-		t.Fatalf("durable analytics WAL byte metrics = %v", values)
-	}
-	for _, name := range []string{"kora.db.connections.wait_total", "kora.db.connections.rejected", "kora.db.pools.open", "kora.db.pools.in_use", "kora.db.pools.idle", "kora.db.pools.max_open", "kora.db.pools.wait_total", "kora.db.pools.wait_duration_ns", "kora.db.operations.total", "kora.db.operations.duration_ns", "kora.db.lock_contention.total", "kora.db.work.wait_duration_ns", "kora.db.work.maintenance_active", "kora.db.work.maintenance_capacity", "kora.async_hooks.queue.rejected_items", "kora.tenant.runtimes.active", "kora.tenant.runtimes.capacity", "kora.tenant.activation.waiters", "kora.tenant.activation.max_waiters", "kora.tenant.activation.wait_total", "kora.tenant.activation.wait_duration_ns", "kora.tenant.activation.rejected", "kora.process.rss_bytes", "kora.analytics.events.dropped", "kora.analytics.events.payload_rejected", "kora.analytics.events.wal_write_failures", "kora.analytics.listeners.overflows", "kora.analytics.listeners.registration_rejected", "kora.analytics.listeners.active", "kora.analytics.listeners.capacity", "kora.analytics.listeners.queued_items", "kora.analytics.listeners.queue_upper_bound_bytes", "kora.analytics.listeners.queue_max_bytes", "kora.analytics.listeners.oldest_age_upper_bound_ns", "kora.analytics.process_queued_bytes", "kora.analytics.process_queue_max_bytes", "kora.analytics.process_queue_rejected", "kora.analytics.listeners.process_active", "kora.analytics.listeners.process_capacity", "kora.analytics.listeners.process_rejected", "kora.analytics.query_cache.entries", "kora.analytics.query_cache.max_entries", "kora.analytics.query_cache.bytes", "kora.analytics.query_cache.max_bytes", "kora.analytics.query_cache.evictions", "kora.analytics.query_cache.rejected", "kora.session_cache.bytes", "kora.session_cache.max_bytes", "kora.realtime.streams.active", "kora.realtime.streams.capacity", "kora.realtime.streams.rejected", "kora.realtime.nats.subscriptions.active", "kora.realtime.nats.client_pending_messages", "kora.realtime.nats.client_pending_bytes", "kora.realtime.nats.client_pending_nonempty_observed_span_ns", "kora.realtime.nats.application_pending_items", "kora.realtime.nats.application_pending_bytes", "kora.realtime.nats.application_capacity_items", "kora.realtime.nats.application_capacity_bytes", "kora.realtime.nats.application_oldest_age_upper_bound_ns", "kora.realtime.nats.client_dropped_messages", "kora.analytics.queue.items", "kora.analytics.queue.upper_bound_bytes", "kora.analytics.queue.max_items", "kora.analytics.queue.max_bytes", "kora.analytics.queue.oldest_age_upper_bound_ns", "kora.session_cache.shared_bytes", "kora.session_cache.shared_max_bytes", "kora.uploads.active", "kora.uploads.capacity", "kora.uploads.active_reserved_bytes", "kora.uploads.reserved_bytes_capacity", "kora.uploads.rejected", "kora.scheduler.durable.active", "kora.scheduler.durable.claims", "kora.scheduler.durable.claim_failures", "kora.scheduler.durable.lease_renew_failures", "kora.scheduler.durable.uncertain_outcomes", "kora.scheduler.durable.completion_failures", "kora.outbox.pending_sampled", "kora.outbox.failed_sampled", "kora.outbox.publishing_sampled", "kora.outbox.sample_saturated", "kora.outbox.oldest_unpublished_age_ns", "kora.outbox.metrics_refresh_failures", "kora.outbox.lease_lost"} {
+	for _, name := range []string{"kora.db.connections.wait_total", "kora.db.connections.rejected", "kora.db.pools.open", "kora.db.pools.in_use", "kora.db.pools.idle", "kora.db.pools.max_open", "kora.db.pools.wait_total", "kora.db.pools.wait_duration_ns", "kora.db.operations.total", "kora.db.operations.duration_ns", "kora.db.lock_contention.total", "kora.db.work.wait_duration_ns", "kora.db.work.maintenance_active", "kora.db.work.maintenance_capacity", "kora.async_hooks.queue.rejected_items", "kora.tenant.runtimes.active", "kora.tenant.runtimes.capacity", "kora.tenant.activation.waiters", "kora.tenant.activation.max_waiters", "kora.tenant.activation.wait_total", "kora.tenant.activation.wait_duration_ns", "kora.tenant.activation.rejected", "kora.process.rss_bytes", "kora.analytics.events.dropped", "kora.analytics.events.payload_rejected", "kora.analytics.listeners.overflows", "kora.analytics.listeners.registration_rejected", "kora.analytics.listeners.active", "kora.analytics.listeners.capacity", "kora.analytics.listeners.queued_items", "kora.analytics.listeners.queue_upper_bound_bytes", "kora.analytics.listeners.queue_max_bytes", "kora.analytics.listeners.oldest_age_upper_bound_ns", "kora.analytics.process_queued_bytes", "kora.analytics.process_queue_max_bytes", "kora.analytics.process_queue_rejected", "kora.analytics.listeners.process_active", "kora.analytics.listeners.process_capacity", "kora.analytics.listeners.process_rejected", "kora.session_cache.bytes", "kora.session_cache.max_bytes", "kora.realtime.streams.active", "kora.realtime.streams.capacity", "kora.realtime.streams.rejected", "kora.realtime.nats.subscriptions.active", "kora.realtime.nats.client_pending_messages", "kora.realtime.nats.client_pending_bytes", "kora.realtime.nats.client_pending_nonempty_observed_span_ns", "kora.realtime.nats.application_pending_items", "kora.realtime.nats.application_pending_bytes", "kora.realtime.nats.application_capacity_items", "kora.realtime.nats.application_capacity_bytes", "kora.realtime.nats.application_oldest_age_upper_bound_ns", "kora.realtime.nats.client_dropped_messages", "kora.analytics.queue.items", "kora.analytics.queue.upper_bound_bytes", "kora.analytics.queue.max_items", "kora.analytics.queue.max_bytes", "kora.analytics.queue.oldest_age_upper_bound_ns", "kora.session_cache.shared_bytes", "kora.session_cache.shared_max_bytes", "kora.uploads.active", "kora.uploads.capacity", "kora.uploads.active_reserved_bytes", "kora.uploads.reserved_bytes_capacity", "kora.uploads.rejected", "kora.scheduler.durable.active", "kora.scheduler.durable.claims", "kora.scheduler.durable.claim_failures", "kora.scheduler.durable.lease_renew_failures", "kora.scheduler.durable.uncertain_outcomes", "kora.scheduler.durable.completion_failures", "kora.outbox.pending_sampled", "kora.outbox.failed_sampled", "kora.outbox.publishing_sampled", "kora.outbox.sample_saturated", "kora.outbox.oldest_unpublished_age_ns", "kora.outbox.metrics_refresh_failures", "kora.outbox.lease_lost"} {
 		if !names[name] {
 			t.Errorf("resource metric %s was not exported", name)
 		}
@@ -266,7 +239,7 @@ func TestResourceMetricsRegisterAndObserveProcessResourceGauges(t *testing.T) {
 			t.Errorf("resource metric %s was not exported", name)
 		}
 	}
-	for _, name := range []string{"kora.tenant.durable_scan.probes", "kora.tenant.durable_scan.due_tenants", "kora.tenant.durable_scan.probe_failures", "kora.tenant.durable_scan.scan_failures", "kora.tenant.durable_scan.wake_failures", "kora.tenant.durable_scan.capacity_rejections", "kora.tenant.durable_scan.completed_sweeps", "kora.tenant.durable_scan.last_sweep_age_ns", "kora.analytics.wal.pending", "kora.analytics.wal.oldest_age_ns", "kora.analytics.wal.age_unknown", "kora.analytics.wal.bytes", "kora.analytics.wal.bytes_unknown", "kora.analytics.wal.cold_bytes", "kora.analytics.wal.cold_bytes_unknown"} {
+	for _, name := range []string{"kora.tenant.durable_scan.probes", "kora.tenant.durable_scan.due_tenants", "kora.tenant.durable_scan.probe_failures", "kora.tenant.durable_scan.scan_failures", "kora.tenant.durable_scan.wake_failures", "kora.tenant.durable_scan.capacity_rejections", "kora.tenant.durable_scan.completed_sweeps", "kora.tenant.durable_scan.last_sweep_age_ns"} {
 		if !names[name] {
 			t.Errorf("resource metric %s was not exported", name)
 		}

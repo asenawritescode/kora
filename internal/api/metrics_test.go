@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/metrics"
 	"github.com/asenawritescode/kora/internal/policy"
@@ -46,7 +47,7 @@ func metricsFixture(t *testing.T, perms []*doctype.Permission) (*doctype.Registr
 func serveMetrics(t *testing.T, registry *doctype.Registry, api metricsAPI, roles []string, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	execution := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-metrics", roles, nil)
+	execution := newVerifiedTestContext(t, "stable-tenant", "tenant-metrics", roles, nil)
 	ex, _ := execution.Get("policy_execution")
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -109,6 +110,9 @@ func TestMetricsQueryChecksAuthorizationThenShape(t *testing.T) {
 		{"range over the month cap is refused", `{"metrics":["sales"],"from":"2016-01-01","to":"2026-01-01","grain":"month"}`, http.StatusBadRequest, "metrics.range_too_large"},
 		{"unparseable date is a bad query", `{"metrics":["sales"],"from":"18/11/2026","to":"2026-11-20","grain":"day"}`, http.StatusBadRequest, "metrics.query_invalid"},
 		{"readable and valid reaches the database step", `{"metrics":["sales"],"from":"2026-11-18","to":"2026-11-20","grain":"day"}`, http.StatusServiceUnavailable, "server.store_unavailable"},
+		{"preset period reaches the database step", `{"metrics":["sales"],"period":{"preset":"last_week"},"grain":"day"}`, http.StatusServiceUnavailable, "server.store_unavailable"},
+		{"preset period with dates is a bad query", `{"metrics":["sales"],"period":{"preset":"last_week"},"from":"2026-11-18","to":"2026-11-20","grain":"day"}`, http.StatusBadRequest, "metrics.query_invalid"},
+		{"unknown preset is a bad query", `{"metrics":["sales"],"period":{"preset":"fortnight"},"grain":"day"}`, http.StatusBadRequest, "metrics.query_invalid"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,7 +142,7 @@ func TestMetricScopeNarrowsOwnerOnlyGrants(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			registry, _ := metricsFixture(t, tc.perms)
-			ctx := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-metrics", []string{"Cashier"}, nil)
+			ctx := newVerifiedTestContext(t, "stable-tenant", "tenant-metrics", []string{"Cashier"}, nil)
 			ex, _ := ctx.Get("policy_execution")
 			ctx.Set("policy_execution", ex)
 			scope, denial := metricScope(ctx, registry, tc.models)
@@ -170,6 +174,31 @@ func TestMetricRowsEncodeNullAndExactDecimals(t *testing.T) {
 	want := `{"metrics":["sales","average_sale"],"dimensions":[],"rows":[{"bucket":"2026-11-19","group":[],"values":["12.5",null]}]}`
 	if string(out) != want {
 		t.Fatalf("result = %s\nwant    %s", out, want)
+	}
+}
+
+// TestMetricRowsCarryLabelsAndFormats checks a line-dimension group reaches the wire with its record title, and an
+// unsaved measure with its display format.
+func TestMetricRowsCarryLabelsAndFormats(t *testing.T) {
+	res := metrics.Result{
+		Metrics: []string{"adhoc_sale_sum_line_total"},
+		Rows: []metrics.Row{{
+			Period: dayOf(2026, 11, 19), Group: []string{"P1"}, Labels: []string{"Soda"},
+			Values: []decimal.NullDecimal{{Decimal: decimal.RequireFromString("450"), Valid: true}},
+		}},
+	}
+	out := resultOf(res)
+	out.Formats = adHocFormats(metrics.Catalog{Metrics: map[string]metrics.Metric{
+		"adhoc_sale_sum_line_total": {Name: "adhoc_sale_sum_line_total", Format: "currency"},
+	}}, []string{"adhoc_sale_sum_line_total"})
+	if got := out.Rows[0].Labels; !slices.Equal(got, []string{"Soda"}) {
+		t.Fatalf("labels = %v, want [Soda]", got)
+	}
+	if got := out.Formats["adhoc_sale_sum_line_total"]; got != "currency" {
+		t.Fatalf("format = %q, want currency", got)
+	}
+	if adHocFormats(metrics.Catalog{}, nil) != nil {
+		t.Fatal("no measures must carry no formats")
 	}
 }
 
@@ -220,5 +249,67 @@ func TestMetricDefsCacheDoesNotKeepFailedParse(t *testing.T) {
 	parsed := false
 	if _, err := cache.load("a", 1, func() ([]metrics.Metric, error) { parsed = true; return nil, nil }); err != nil || !parsed {
 		t.Fatalf("after a failed parse the next load must parse again: parsed=%v err=%v", parsed, err)
+	}
+}
+
+// TestMetricsQueryJoinsNeedReadOfTheLinkedType checks that a dimension path into a linked record type the
+// caller may not read is refused, and that a readable one passes authorization.
+func TestMetricsQueryJoinsNeedReadOfTheLinkedType(t *testing.T) {
+	defs := []metrics.Metric{{Name: "expenses", Label: "Expenses", Type: metrics.KindSimple, Model: "Expense", Measure: &metrics.Measure{Agg: "count"}}}
+	tests := []struct {
+		name       string
+		perms      []*doctype.Permission
+		wantStatus int
+	}{
+		{"linked type not readable is refused", []*doctype.Permission{{Doctype: "Expense", Role: "Cashier", Read: true}}, http.StatusForbidden},
+		{"linked type readable reaches the database step", []*doctype.Permission{{Doctype: "Expense", Role: "Cashier", Read: true}, {Doctype: "Supplier", Role: "Cashier", Read: true}}, http.StatusServiceUnavailable},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := linkedRegistry(tc.perms)
+			api := metricsAPI{registry: registry, defs: func(*gin.Context) ([]metrics.Metric, error) { return defs, nil }}
+			body := `{"metrics":["expenses"],"dimensions":["supplier.town"],"from":"2026-11-18","to":"2026-11-20","grain":"day"}`
+			recorder := serveMetrics(t, registry, api, []string{"Cashier"}, "POST", "/api/v1/metrics/query", body)
+			if recorder.Code != tc.wantStatus {
+				t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body, tc.wantStatus)
+			}
+		})
+	}
+}
+
+func TestQueryPeriodOfResolvesPresetsAndCustomDates(t *testing.T) {
+	loc, err := time.LoadLocation("Africa/Nairobi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := tenanttime.Clock{Location: loc, Cutoff: 4 * time.Hour}
+	now := time.Date(2026, 11, 21, 12, 0, 0, 0, loc).UTC()
+	tests := []struct {
+		name     string
+		req      contract.MetricQueryRequest
+		preset   metrics.Preset
+		from, to string
+		wantErr  bool
+	}{
+		{name: "no period reads from and to", req: contract.MetricQueryRequest{From: "2026-11-18", To: "2026-11-20"}, preset: metrics.PresetCustom, from: "2026-11-18", to: "2026-11-20"},
+		{name: "custom reads from and to", req: contract.MetricQueryRequest{Period: &contract.MetricPeriod{Preset: "custom"}, From: "2026-11-01", To: "2026-11-05"}, preset: metrics.PresetCustom, from: "2026-11-01", to: "2026-11-05"},
+		{name: "last week resolves on the clock", req: contract.MetricQueryRequest{Period: &contract.MetricPeriod{Preset: "last_week"}}, preset: metrics.PresetLastWeek, from: "2026-11-09", to: "2026-11-15"},
+		{name: "last week with dates is refused", req: contract.MetricQueryRequest{Period: &contract.MetricPeriod{Preset: "last_week"}, From: "2026-11-01"}, wantErr: true},
+		{name: "custom without dates is refused", req: contract.MetricQueryRequest{Period: &contract.MetricPeriod{Preset: "custom"}}, wantErr: true},
+		{name: "unknown preset is refused", req: contract.MetricQueryRequest{Period: &contract.MetricPeriod{Preset: "fortnight"}}, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := queryPeriodOf(tc.req, clock, now)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error %v", err, tc.wantErr)
+			}
+			if tc.wantErr {
+				return
+			}
+			if got.preset != tc.preset || got.span.From.String() != tc.from || got.span.To.String() != tc.to {
+				t.Fatalf("period = %s %s..%s, want %s %s..%s", got.preset, got.span.From, got.span.To, tc.preset, tc.from, tc.to)
+			}
+		})
 	}
 }

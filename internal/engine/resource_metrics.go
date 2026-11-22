@@ -4,13 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/asenawritescode/kora/internal/eventbus"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/asenawritescode/kora/internal/api"
+	"github.com/asenawritescode/kora/internal/eventbus"
+
 	"github.com/asenawritescode/kora/internal/auth"
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/internal/natsprovider"
@@ -41,11 +41,8 @@ type ResourceMetricSources struct {
 	DurableWorkScan interface {
 		Snapshot() DurableWorkScannerSnapshot
 	}
-	NATSRealtime        *natsprovider.Provider
-	DeletionWorker      *PendingDeletionWorker
-	AnalyticsQueryCache interface {
-		AnalyticsQueryCacheSnapshot() api.AnalyticsQueryCacheSnapshot
-	}
+	NATSRealtime   *natsprovider.Provider
+	DeletionWorker *PendingDeletionWorker
 }
 
 func RegisterResourceMetrics(tenants *knet.SiteRouter, hooks *AsyncHookWorker, scripts *script.BudgetedRunner, sources ...ResourceMetricSources) (*ResourceMetrics, error) {
@@ -69,10 +66,9 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 		"kora.realtime.nats.subscriptions.active", "kora.realtime.nats.client_pending_messages", "kora.realtime.nats.client_pending_bytes", "kora.realtime.nats.client_pending_nonempty_observed_span_ns", "kora.realtime.nats.application_pending_items", "kora.realtime.nats.application_pending_bytes", "kora.realtime.nats.application_capacity_items", "kora.realtime.nats.application_capacity_bytes", "kora.realtime.nats.application_oldest_age_upper_bound_ns", "kora.realtime.nats.client_dropped_messages",
 		"kora.process.goroutines", "kora.process.heap_alloc_bytes", "kora.process.heap_sys_bytes", "kora.process.rss_bytes",
 		"kora.session_cache.entries", "kora.session_cache.bytes", "kora.session_cache.max_entries", "kora.session_cache.max_bytes",
-		"kora.analytics.queue.items", "kora.analytics.queue.upper_bound_bytes", "kora.analytics.queue.max_items", "kora.analytics.queue.max_bytes", "kora.analytics.queue.oldest_age_upper_bound_ns", "kora.analytics.events.dropped", "kora.analytics.events.payload_rejected", "kora.analytics.events.wal_write_failures", "kora.analytics.listeners.overflows", "kora.analytics.listeners.registration_rejected",
+		"kora.analytics.queue.items", "kora.analytics.queue.upper_bound_bytes", "kora.analytics.queue.max_items", "kora.analytics.queue.max_bytes", "kora.analytics.queue.oldest_age_upper_bound_ns", "kora.analytics.events.dropped", "kora.analytics.events.payload_rejected", "kora.analytics.listeners.overflows", "kora.analytics.listeners.registration_rejected",
 		"kora.analytics.process_queued_bytes", "kora.analytics.process_queue_max_bytes", "kora.analytics.process_queue_rejected",
 		"kora.analytics.listeners.process_active", "kora.analytics.listeners.process_capacity", "kora.analytics.listeners.process_rejected",
-		"kora.analytics.query_cache.entries", "kora.analytics.query_cache.max_entries", "kora.analytics.query_cache.bytes", "kora.analytics.query_cache.max_bytes", "kora.analytics.query_cache.evictions", "kora.analytics.query_cache.rejected",
 		"kora.session_cache.shared_bytes", "kora.session_cache.shared_max_bytes",
 		"kora.uploads.active", "kora.uploads.capacity", "kora.uploads.active_reserved_bytes", "kora.uploads.reserved_bytes_capacity", "kora.uploads.rejected",
 		"kora.tenant.runtimes.capacity",
@@ -80,12 +76,10 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 		"kora.analytics.listeners.active", "kora.analytics.listeners.capacity", "kora.analytics.listeners.queued_items", "kora.analytics.listeners.queue_upper_bound_bytes", "kora.analytics.listeners.queue_max_bytes", "kora.analytics.listeners.oldest_age_upper_bound_ns",
 		"kora.tenant.durable_scan.probes", "kora.tenant.durable_scan.due_tenants", "kora.tenant.durable_scan.probe_failures", "kora.tenant.durable_scan.scan_failures", "kora.tenant.durable_scan.wake_failures", "kora.tenant.durable_scan.capacity_rejections", "kora.tenant.durable_scan.completed_sweeps", "kora.tenant.durable_scan.last_sweep_age_ns",
 		"kora.scheduler.durable.active", "kora.scheduler.durable.claims", "kora.scheduler.durable.claim_failures", "kora.scheduler.durable.lease_renew_failures", "kora.scheduler.durable.lease_lost", "kora.scheduler.durable.uncertain_outcomes", "kora.scheduler.durable.completion_failures", "kora.scheduler.durable.pending_occurrences", "kora.scheduler.durable.oldest_pending_age_ns", "kora.scheduler.durable.backlog_sample_failures",
-		"kora.analytics.rebuild.active", "kora.analytics.rebuild.claims", "kora.analytics.rebuild.claim_failures", "kora.analytics.rebuild.admission_deferrals", "kora.analytics.rebuild.execution_failures", "kora.analytics.rebuild.lease_renew_failures", "kora.analytics.rebuild.lease_lost", "kora.analytics.rebuild.completion_failures",
 		"kora.outbox.pending_sampled", "kora.outbox.failed_sampled", "kora.outbox.publishing_sampled", "kora.outbox.sample_saturated", "kora.outbox.oldest_unpublished_age_ns", "kora.outbox.metrics_refresh_failures", "kora.outbox.lease_lost",
 		"kora.outbox.blocked_sampled", "kora.outbox.publish_failures.full", "kora.outbox.publish_failures.other", "kora.outbox.archived_rows", "kora.outbox.archive_failures",
 		"kora.event_stream.messages", "kora.event_stream.bytes", "kora.event_stream.max_messages", "kora.event_stream.max_bytes", "kora.event_stream.usage_ratio_bps",
 		"kora.platform.deletion.cleanup_attempts", "kora.platform.deletion.cleanup_failures", "kora.platform.deletion.admission_rejections",
-		"kora.analytics.wal.pending", "kora.analytics.wal.oldest_age_ns", "kora.analytics.wal.age_unknown", "kora.analytics.wal.bytes", "kora.analytics.wal.bytes_unknown", "kora.analytics.wal.cold_bytes", "kora.analytics.wal.cold_bytes_unknown",
 		"kora.cloud.product_events.queue_items", "kora.cloud.product_events.queue_capacity", "kora.cloud.product_events.dropped",
 	}
 	descriptions := []string{
@@ -100,22 +94,19 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 		"Active NATS realtime subscriptions", "Messages pending in NATS client subscription buffers", "Bytes pending in NATS client subscription buffers", "Span between consecutive metric samples that observed a NATS client subscription backlog as nonempty; not message age", "Messages pending in Engine application subscription channels", "Conservative byte upper bound for Engine application subscription channels", "Aggregate Engine application channel item capacity", "Aggregate Engine application channel byte capacity", "Conservative upper bound on age of messages waiting in Engine application subscription channels", "Cumulative messages dropped by NATS client realtime subscriptions",
 		"Current process goroutine count", "Current process heap allocation bytes", "Current process heap system bytes", "Current process resident set size from the Linux process statm interface",
 		"Cached session entries across resident tenants", "Estimated bytes retained by session caches across resident tenants", "Session cache entry capacity across resident tenants", "Session cache byte capacity across resident tenants",
-		"Analytics wake-up events queued across resident tenants", "Conservative serialized-payload upper bound for queued analytics events", "Analytics wake-up event capacity across resident tenants", "Analytics wake-up queue byte capacity across resident tenants", "Conservative upper bound on age of queued in-memory analytics wake-up events", "Analytics events rejected or dropped by resident buses since bus startup", "Analytics events rejected by the configured encoded-payload limit", "Analytics event WAL persistence failures", "Analytics listener events dropped because subscriber queues were full", "Analytics subscriber registrations rejected by capacity or lifecycle limits",
+		"Analytics wake-up events queued across resident tenants", "Conservative serialized-payload upper bound for queued analytics events", "Analytics wake-up event capacity across resident tenants", "Analytics wake-up queue byte capacity across resident tenants", "Conservative upper bound on age of queued in-memory analytics wake-up events", "Analytics events rejected or dropped by resident buses since bus startup", "Analytics events rejected by the configured encoded-payload limit", "Analytics listener events dropped because subscriber queues were full", "Analytics subscriber registrations rejected by capacity or lifecycle limits",
 		"Conservative queued analytics payload bytes reserved process-wide", "Process-wide conservative analytics queue byte capacity", "Analytics wake-up or subscriber queue reservations rejected by the process-wide byte budget",
 		"Active analytics listener registrations reserved across the Engine process", "Process-wide analytics listener registration capacity", "Analytics listener registrations rejected by the process-wide subscription limit",
-		"Cached semantic analytics query results", "Semantic analytics query cache entry capacity", "Retained serialized semantic analytics result and key bytes", "Semantic analytics query cache byte capacity", "Cumulative semantic analytics cache evictions", "Cumulative semantic analytics results rejected by the cache byte budget",
 		"Session snapshot bytes retained across process and tenant session managers", "Shared process session snapshot byte capacity",
 		"Uploads admitted by process memory reservation", "Process-wide concurrent upload limit", "Conservative upload processing bytes reserved", "Process-wide conservative upload byte budget", "Upload requests rejected by process admission", "Configured resident tenant runtime capacity",
 		"Tenant runtime operations waiting for activation admission", "Tenant activation waiter capacity", "Cumulative tenant activation admission waits", "Cumulative tenant activation admission wait duration", "Tenant activation admission rejections",
 		"Registered analytics event listeners across resident tenants", "Configured analytics listener capacity across resident tenants", "Queued analytics listener events", "Conservative serialized-payload upper bound across analytics listener queues", "Conservative serialized-payload capacity across analytics listener queues", "Conservative upper bound on age of queued in-memory analytics subscriber events",
 		"Cold-tenant durable-work database probes", "Cold tenants found with due or pending durable work", "Cold-tenant durable-work probe failures", "Directory page or cursor failures in the durable-work scanner", "Tenant activation failures while waking durable work", "Durable-work scan capacity rejections", "Completed durable-work directory sweeps", "Time since last completed durable-work directory sweep",
 		"Durable scheduled occurrences currently executing", "Durable scheduled occurrences claimed", "Durable scheduled occurrence claim failures", "Durable scheduler lease renewal failures", "Durable scheduler claims fenced by lease loss", "Durable scheduled occurrences requiring reconciliation", "Durable scheduled occurrence completion failures", "Sampled pending durable scheduled occurrence count across resident tenants", "Oldest sampled pending durable scheduled occurrence age across resident tenants", "Cumulative durable scheduler backlog sample failures",
-		"Analytics rebuild jobs currently executing across resident tenants", "Analytics rebuild jobs claimed by resident workers", "Analytics rebuild claim query failures", "Analytics rebuild jobs deferred by active-work admission", "Analytics rebuild execution failures", "Analytics rebuild lease renewal failures", "Analytics rebuild worker claims lost to a newer fencing token", "Analytics rebuild durable completion or release failures",
 		"Sampled unpublished pending outbox rows across resident tenants; saturates at the per-state sample limit", "Sampled failed outbox rows across resident tenants; saturates at the per-state sample limit", "Sampled publishing outbox rows across resident tenants; saturates at the per-state sample limit", "Whether any resident tenant outbox state reached the bounded sample limit", "Age of the oldest sampled unpublished outbox event across resident tenants", "Cumulative outbox backlog metric refresh failures", "Cumulative outbox publisher claims fenced by a newer owner",
 		"Sampled blocked outbox rows across resident tenants; they wait for destination capacity and do not consume attempts", "Cumulative outbox deliveries refused for destination capacity", "Cumulative outbox deliveries that failed for a reason other than destination capacity", "Cumulative published outbox rows archived and deleted", "Cumulative outbox archive chunks that failed before deletion",
 		"Messages retained in the event stream", "Bytes retained in the event stream", "Event stream message limit", "Event stream byte limit", "Event stream bytes as basis points of the byte limit; zero when no byte limit is configured",
 		"Pending tenant-deletion cleanup attempts", "Pending tenant-deletion cleanup failures", "Pending tenant-deletion cleanup operations deferred by database admission",
-		"Whether any scanned analytics WAL backlog is pending", "Age of the oldest known persisted analytics WAL record", "Whether an oldest pending analytics WAL timestamp is unknown", "Bytes retained by resident analytics WAL files", "Whether resident analytics WAL bytes could not be fully measured", "Bytes retained by cold active tenant analytics WAL files in the last completed directory sweep", "Whether cold active tenant analytics WAL bytes could not be fully measured during the last completed sweep",
 		"Best-effort Cloud product telemetry events waiting in resident tenant relay queues", "Configured capacity of resident tenant Cloud product telemetry queues", "Cloud product telemetry events dropped because payloads were oversized, unsupported, or queues were full",
 	}
 	if len(descriptions) != len(names) {
@@ -135,8 +126,8 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 		"kora.db.work.wait_total": true, "kora.db.work.wait_duration_ns": true, "kora.db.work.rejected": true,
 		"kora.realtime.streams.rejected": true, "kora.realtime.nats.client_dropped_messages": true, "kora.async_hooks.queue.rejected_items": true,
 		"kora.uploads.rejected":                  true,
-		"kora.analytics.events.payload_rejected": true, "kora.analytics.events.wal_write_failures": true,
-		"kora.analytics.listeners.overflows": true, "kora.analytics.listeners.registration_rejected": true,
+		"kora.analytics.events.payload_rejected": true,
+		"kora.analytics.listeners.overflows":     true, "kora.analytics.listeners.registration_rejected": true,
 		"kora.analytics.process_queue_rejected":     true,
 		"kora.analytics.listeners.process_rejected": true,
 		"kora.tenant.activation.wait_total":         true, "kora.tenant.activation.wait_duration_ns": true, "kora.tenant.activation.rejected": true,
@@ -146,9 +137,6 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 		"kora.scheduler.durable.claims": true, "kora.scheduler.durable.claim_failures": true,
 		"kora.scheduler.durable.lease_renew_failures": true, "kora.scheduler.durable.lease_lost": true, "kora.scheduler.durable.uncertain_outcomes": true,
 		"kora.scheduler.durable.completion_failures": true, "kora.scheduler.durable.backlog_sample_failures": true,
-		"kora.analytics.rebuild.claims": true, "kora.analytics.rebuild.claim_failures": true,
-		"kora.analytics.rebuild.admission_deferrals": true, "kora.analytics.rebuild.execution_failures": true,
-		"kora.analytics.rebuild.lease_renew_failures": true, "kora.analytics.rebuild.lease_lost": true, "kora.analytics.rebuild.completion_failures": true,
 		"kora.outbox.metrics_refresh_failures": true, "kora.outbox.lease_lost": true,
 		"kora.outbox.publish_failures.full": true, "kora.outbox.publish_failures.other": true, "kora.outbox.archived_rows": true, "kora.outbox.archive_failures": true,
 		"kora.platform.deletion.cleanup_attempts": true, "kora.platform.deletion.cleanup_failures": true,
@@ -232,20 +220,6 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 			values["kora.tenant.durable_scan.capacity_rejections"] = int64(snapshot.CapacityRejections)
 			values["kora.tenant.durable_scan.completed_sweeps"] = int64(snapshot.CompletedSweeps)
 			values["kora.tenant.durable_scan.last_sweep_age_ns"] = snapshot.LastCompletedSweepAge.Nanoseconds()
-			if snapshot.ColdWALPending {
-				values["kora.analytics.wal.pending"] = 1
-			}
-			if snapshot.ColdWALBytesKnown {
-				values["kora.analytics.wal.cold_bytes"] = addMetricBytes(values["kora.analytics.wal.cold_bytes"], snapshot.ColdWALBytes)
-			} else {
-				values["kora.analytics.wal.cold_bytes_unknown"] = 1
-			}
-			if snapshot.ColdWALAgeUnknown {
-				values["kora.analytics.wal.age_unknown"] = 1
-			}
-			if snapshot.ColdWALOldestAge.Nanoseconds() > values["kora.analytics.wal.oldest_age_ns"] {
-				values["kora.analytics.wal.oldest_age_ns"] = snapshot.ColdWALOldestAge.Nanoseconds()
-			}
 		}
 		if source.DeletionWorker != nil {
 			snapshot := source.DeletionWorker.Snapshot()
@@ -312,17 +286,6 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 					}
 					values["kora.scheduler.durable.backlog_sample_failures"] += snapshot.BacklogFailures
 				}
-				if runner := loaded.RuntimeServiceSnapshot().AnalyticsRebuild; runner != nil {
-					snapshot := runner.MetricsSnapshot()
-					values["kora.analytics.rebuild.active"] += snapshot.Active
-					values["kora.analytics.rebuild.claims"] += snapshot.Claims
-					values["kora.analytics.rebuild.claim_failures"] += snapshot.ClaimFailures
-					values["kora.analytics.rebuild.admission_deferrals"] += snapshot.AdmissionDeferrals
-					values["kora.analytics.rebuild.execution_failures"] += snapshot.ExecutionFailures
-					values["kora.analytics.rebuild.lease_renew_failures"] += snapshot.LeaseRenewFailures
-					values["kora.analytics.rebuild.lease_lost"] += snapshot.LeaseLost
-					values["kora.analytics.rebuild.completion_failures"] += snapshot.CompletionFailures
-				}
 				addOutboxBacklog(values, loaded.RuntimeServiceSnapshot().OutboxBacklog)
 				if loaded.SessionManager != nil {
 					sessionCache := loaded.SessionManager.CacheSnapshot()
@@ -350,27 +313,8 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 					}); ok {
 						drops := snapshotter.DropCauses()
 						values["kora.analytics.events.payload_rejected"] += drops.PayloadRejected
-						values["kora.analytics.events.wal_write_failures"] += drops.WALWriteFailures
 						values["kora.analytics.listeners.overflows"] += drops.SubscriberOverflows
 						values["kora.analytics.listeners.registration_rejected"] += drops.SubscriberRegistrationsRejected
-					}
-				}
-				if snapshotter, ok := loaded.AnalyticsEventBus.(interface {
-					WALBacklog() eventbus.WALBacklogSnapshot
-				}); ok {
-					backlog := snapshotter.WALBacklog()
-					if backlog.Pending {
-						values["kora.analytics.wal.pending"] = 1
-						values["kora.analytics.wal.bytes"] = addMetricBytes(values["kora.analytics.wal.bytes"], backlog.Bytes)
-					}
-					if !backlog.BytesKnown {
-						values["kora.analytics.wal.bytes_unknown"] = 1
-					}
-					if !backlog.AgeKnown && backlog.Pending {
-						values["kora.analytics.wal.age_unknown"] = 1
-					}
-					if backlog.OldestAge.Nanoseconds() > values["kora.analytics.wal.oldest_age_ns"] {
-						values["kora.analytics.wal.oldest_age_ns"] = backlog.OldestAge.Nanoseconds()
 					}
 				}
 				if snapshotter, ok := loaded.AnalyticsEventBus.(interface {
@@ -405,15 +349,6 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 			values["kora.analytics.listeners.process_capacity"] = int64(snapshot.MaxListeners)
 			values["kora.analytics.listeners.process_rejected"] = int64(snapshot.RejectedListeners)
 		}
-		if source.AnalyticsQueryCache != nil {
-			snapshot := source.AnalyticsQueryCache.AnalyticsQueryCacheSnapshot()
-			values["kora.analytics.query_cache.entries"] = int64(snapshot.Entries)
-			values["kora.analytics.query_cache.max_entries"] = int64(snapshot.MaxEntries)
-			values["kora.analytics.query_cache.bytes"] = int64(snapshot.Bytes)
-			values["kora.analytics.query_cache.max_bytes"] = int64(snapshot.MaxBytes)
-			values["kora.analytics.query_cache.evictions"] = int64(snapshot.Evictions)
-			values["kora.analytics.query_cache.rejected"] = int64(snapshot.Rejected)
-		}
 		for index, instrument := range instruments {
 			observer.ObserveInt64(instrument, values[names[index]])
 		}
@@ -447,17 +382,6 @@ func resourceMetricUnit(name string) string {
 	default:
 		return "{item}"
 	}
-}
-
-func addMetricBytes(current, addition int64) int64 {
-	if addition <= 0 {
-		return current
-	}
-	maxInt64 := int64(^uint64(0) >> 1)
-	if addition > maxInt64-current {
-		return maxInt64
-	}
-	return current + addition
 }
 
 func (m *ResourceMetrics) Unregister() error {

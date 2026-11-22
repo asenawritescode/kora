@@ -32,13 +32,8 @@ func (b *capturingBus) Publish(e eventstream.ChangeEvent) error {
 	return nil
 }
 func (b *capturingBus) Subscribe() (<-chan eventstream.ChangeEvent, error) { return b.events, nil }
-func (b *capturingBus) DrainWAL(func(eventstream.ChangeEvent)) (int, error) {
-	return 0, nil
-}
-func (b *capturingBus) RotateWAL() (string, error)     { return "", nil }
-func (b *capturingBus) CommitWALRotation(string) error { return nil }
-func (b *capturingBus) Dropped() int64                 { return 0 }
-func (b *capturingBus) Close() error                   { return nil }
+func (b *capturingBus) Dropped() int64                                     { return 0 }
+func (b *capturingBus) Close() error                                       { return nil }
 
 // TestLocalProviderDeliveryAfterCommit proves the local durable provider path:
 // kernel commit → _kora_outbox → Publisher → LocalProvider → EventBus.

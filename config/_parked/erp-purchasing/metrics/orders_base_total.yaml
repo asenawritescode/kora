@@ -1,0 +1,11 @@
+name: orders_base_total
+label: Ordered in base currency
+type: simple
+model: Purchase Order
+measure:
+  agg: sum
+  field: base_total
+time: business_date
+good: up
+format: currency
+description: Purchase order totals in base currency, every status (sum).

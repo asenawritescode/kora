@@ -1,0 +1,9 @@
+name: properties_leases_count
+label: "Leases"
+type: balance
+model: "Lease"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Leases from the Lease records (count)."

@@ -31,7 +31,7 @@ func (p plan) summarySQL(d db.Dialect) (string, []any) {
 	group := []string{q("business_date")}
 	grain := ""
 	if len(p.dims) == 1 {
-		grain = p.dims[0]
+		grain = p.dims[0].name
 		sel = append(sel, q("grain_value"))
 		group = append(group, q("grain_value"))
 	}
@@ -46,13 +46,15 @@ func (p plan) summarySQL(d db.Dialect) (string, []any) {
 	where := append([]string{q("grain") + " = ?"}, p.rangeConds(d, "", &args)...)
 	where = append(where, p.scopeConds(d, "", false, &args)...)
 	where = append(where, p.filterConds(d, "", &args)...)
-	stmt := fmt.Sprintf("SELECT %s FROM %s WHERE %s GROUP BY %s",
-		strings.Join(sel, ", "), q(p.summaryTable()), strings.Join(where, " AND "), strings.Join(group, ", "))
+	having := p.keepGroups(d, "", true, &args)
+	stmt := fmt.Sprintf("SELECT %s FROM %s WHERE %s GROUP BY %s%s",
+		strings.Join(sel, ", "), q(p.summaryTable()), strings.Join(where, " AND "), strings.Join(group, ", "), having)
 	return stmt, args
 }
 
 // factsSQL aggregates the fact rows, header and line, per day and group. Measures sum over every row,
-// as the summary does. A count takes header rows only, so a record with lines counts once.
+// as the summary does. A count takes header rows only, so a record with lines counts once, unless the
+// query groups by a line dimension: then it reads the line rows only and counts distinct records.
 func (p plan) factsSQL(d db.Dialect) (string, []any) {
 	q := d.QuoteIdent
 	var args []any
@@ -60,46 +62,125 @@ func (p plan) factsSQL(d db.Dialect) (string, []any) {
 	sel := []string{f + q("business_date")}
 	group := []string{f + q("business_date")}
 	for _, dim := range p.dims {
-		sel = append(sel, f+q(dim))
-		group = append(group, f+q(dim))
+		sel = append(sel, f+q(dim.alias))
+		group = append(group, f+q(dim.alias))
 	}
 	for _, s := range p.series {
 		sel = append(sel, p.factsAggregate(d, f, s, &args))
 	}
-	parts := []string{p.factsPart(d, p.model.Facts.TableName(p.model), &args)}
-	if p.model.Facts.Lines != "" {
-		parts = append(parts, p.factsPart(d, p.model.Facts.LineTableName(p.model), &args))
-	}
-	stmt := fmt.Sprintf("SELECT %s FROM (%s) AS f GROUP BY %s",
-		strings.Join(sel, ", "), strings.Join(parts, " UNION ALL "), strings.Join(group, ", "))
+	union := p.factsUnion(d, &args)
+	having := p.keepGroups(d, f, false, &args)
+	stmt := fmt.Sprintf("SELECT %s FROM (%s) AS f GROUP BY %s%s",
+		strings.Join(sel, ", "), union, strings.Join(group, ", "), having)
 	return stmt, args
+}
+
+// keepGroups is the HAVING clause that keeps a group only when one of its rows meets the conditions of a
+// series, so a group no metric matches (a status a sales metric leaves out) is not shown at zero. It is
+// empty when a series has no conditions, because every row then matches. Its arguments are appended to args
+// after the ones already rendered, which is the order the statement reads them in.
+func (p plan) keepGroups(d db.Dialect, prefix string, summary bool, args *[]any) string {
+	conds := make([][]predicate, len(p.series))
+	for i, s := range p.series {
+		conds[i] = p.seriesConds(s, summary)
+		if len(conds[i]) == 0 {
+			return ""
+		}
+	}
+	parts := make([]string, 0, len(p.series))
+	for _, c := range conds {
+		parts = append(parts, "("+p.condition(d, prefix, c, args)+")")
+	}
+	return " HAVING MAX(CASE WHEN " + strings.Join(parts, " OR ") + " THEN 1 ELSE 0 END) = 1"
+}
+
+// seriesConds are the conditions a row must meet to feed a series, the same ones the aggregates use: a header
+// count takes header rows only, a count_distinct skips empty values. The summary has one row count and no
+// line_id, so its counts take the series' own conditions alone.
+func (p plan) seriesConds(s series, summary bool) []predicate {
+	switch s.agg {
+	case aggCount:
+		if summary || p.hasLineDim() {
+			return s.conds
+		}
+		return append([]predicate{{field: "line_id", op: "=", value: ""}}, s.conds...)
+	case aggCountDistinct:
+		return append([]predicate{{field: s.column, op: "!=", value: ""}}, s.conds...)
+	}
+	return s.conds
+}
+
+// factsUnion is the fact rows the query reads: the header rows unless a line dimension is grouped by,
+// and the line rows when the record type has lines. Its arguments are appended to args.
+func (p plan) factsUnion(d db.Dialect, args *[]any) string {
+	var parts []string
+	if !p.hasLineDim() {
+		parts = append(parts, p.factsPart(d, p.model.Facts.TableName(p.model), false, args))
+	}
+	if p.model.Facts.Lines != "" {
+		parts = append(parts, p.factsPart(d, p.model.Facts.LineTableName(p.model), true, args))
+	}
+	return strings.Join(parts, " UNION ALL ")
 }
 
 // factsAggregate renders one series over the derived table alias f.
 func (p plan) factsAggregate(d db.Dialect, f string, s series, args *[]any) string {
 	switch s.agg {
 	case aggCount:
-		header := append([]predicate{{field: "line_id", op: "=", value: ""}}, s.conds...)
-		return "SUM(" + p.caseWhen(d, f, header, "1", args) + ")"
+		if p.hasLineDim() {
+			// A line dimension reads line rows, so a record with several lines in one group counts once.
+			if len(s.conds) == 0 {
+				return "COUNT(DISTINCT " + f + d.QuoteIdent("record_id") + ")"
+			}
+			return "COUNT(DISTINCT CASE WHEN " + p.condition(d, f, s.conds, args) + " THEN " + f + d.QuoteIdent("record_id") + " ELSE NULL END)"
+		}
+		// Without a line dimension a count takes header rows only.
+		conds := append([]predicate{{field: "line_id", op: "=", value: ""}}, s.conds...)
+		return "SUM(" + p.caseWhen(d, f, conds, "1", args) + ")"
 	case aggSum:
 		return "SUM(" + p.withConds(d, f, s.conds, f+d.QuoteIdent(s.column), args) + ")"
 	}
 	// count_distinct: an empty value is not a value, so it is not counted.
 	conds := append([]predicate{{field: s.column, op: "!=", value: ""}}, s.conds...)
-	return "COUNT(DISTINCT " + p.caseWhen(d, f, conds, f+d.QuoteIdent(s.column), args) + ")"
+	// NULL, not 0, is the else branch: Postgres rejects a CASE that mixes a text value with an integer.
+	return "COUNT(DISTINCT CASE WHEN " + p.condition(d, f, conds, args) + " THEN " + f + d.QuoteIdent(s.column) + " ELSE NULL END)"
 }
 
-// factsPart selects the rows of one fact table that fall in the query's scope and range.
-func (p plan) factsPart(d db.Dialect, table string, args *[]any) string {
+// factsPart selects the rows of one fact table that fall in the query's scope and range. Fact columns
+// are qualified with the fact alias, because the joins of a path dimension bring in other tables with
+// the same column names. A line table part keeps only rows with a line id: a line row with an empty id
+// is never a header, so it cannot be counted as one.
+func (p plan) factsPart(d db.Dialect, table string, lines bool, args *[]any) string {
 	q := d.QuoteIdent
-	cols := []string{"business_date", "line_id", "status"}
+	var selects []string
+	for _, c := range p.factsColumns() {
+		selects = append(selects, factAlias+"."+q(c))
+	}
+	selects = append(selects, p.pathSelects(d)...)
+	where := p.factsWhere(d, args)
+	if lines {
+		where = append(where, factAlias+"."+q("line_id")+" <> ''")
+	}
+	from := q(table) + " AS " + factAlias + p.joinClauses(d)
+	return fmt.Sprintf("SELECT %s FROM %s WHERE %s", strings.Join(selects, ", "), from, strings.Join(where, " AND "))
+}
+
+// factsColumns lists the fact columns a fact part selects, each once: the fixed columns, the plain
+// dimensions, the measures and the columns the filters read.
+func (p plan) factsColumns() []string {
+	cols := []string{"record_id", "business_date", "line_id", "status"}
+	if p.records {
+		cols = append(cols, "occurred_at")
+	}
 	add := func(name string) {
 		if !slices.Contains(cols, name) {
 			cols = append(cols, name)
 		}
 	}
 	for _, dim := range p.dims {
-		add(dim)
+		if dim.leaf == "" {
+			add(dim.alias)
+		}
 	}
 	for _, s := range p.series {
 		if s.column != "" && s.agg != aggCount {
@@ -112,15 +193,27 @@ func (p plan) factsPart(d db.Dialect, table string, args *[]any) string {
 	for _, c := range p.where {
 		add(p.columnName(c.field))
 	}
-	quoted := make([]string, len(cols))
-	for i, c := range cols {
-		quoted[i] = q(c)
+	return cols
+}
+
+// pathSelects selects the leaf of each path dimension's last join under the dimension's alias.
+func (p plan) pathSelects(d db.Dialect) []string {
+	var out []string
+	for _, dim := range p.dims {
+		if dim.leaf != "" {
+			out = append(out, dim.lastAlias()+"."+d.QuoteIdent(dim.leaf)+" AS "+d.QuoteIdent(dim.alias))
+		}
 	}
-	where := append(p.rangeConds(d, "", args), q("deleted")+" = ?")
+	return out
+}
+
+// factsWhere holds a fact part to its range, its live rows, the caller's scope and the query's filters.
+func (p plan) factsWhere(d db.Dialect, args *[]any) []string {
+	const t = factAlias + "."
+	where := append(p.rangeConds(d, t, args), t+d.QuoteIdent("deleted")+" = ?")
 	*args = append(*args, db.BoolParam(d, false))
-	where = append(where, p.scopeConds(d, "", true, args)...)
-	where = append(where, p.filterConds(d, "", args)...)
-	return fmt.Sprintf("SELECT %s FROM %s WHERE %s", strings.Join(quoted, ", "), q(table), strings.Join(where, " AND "))
+	where = append(where, p.scopeConds(d, t, true, args)...)
+	return append(where, p.filterConds(d, t, args)...)
 }
 
 // rangeConds bounds business_date to From through To, both inclusive. An opening reads every day
@@ -168,11 +261,16 @@ func (p plan) withConds(d db.Dialect, prefix string, conds []predicate, value st
 
 // caseWhen renders CASE WHEN conds THEN value ELSE 0 END, appending the conditions' arguments.
 func (p plan) caseWhen(d db.Dialect, prefix string, conds []predicate, value string, args *[]any) string {
+	return "CASE WHEN " + p.condition(d, prefix, conds, args) + " THEN " + value + " ELSE 0 END"
+}
+
+// condition renders conds joined with AND, appending their arguments.
+func (p plan) condition(d db.Dialect, prefix string, conds []predicate, args *[]any) string {
 	parts := make([]string, len(conds))
 	for i, c := range conds {
 		parts[i] = p.predicateSQL(d, prefix, c, args)
 	}
-	return "CASE WHEN " + strings.Join(parts, " AND ") + " THEN " + value + " ELSE 0 END"
+	return strings.Join(parts, " AND ")
 }
 
 // predicateSQL renders one comparison. The operator was checked against a whitelist when planned.

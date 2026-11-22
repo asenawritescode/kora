@@ -93,3 +93,15 @@ fields:
     fieldtype: Text
     label: Note
     description: For example the card slip number or bank transfer reference.
+facts:
+  time: creation
+  currency_field: currency
+  measures:
+    - field: amount
+    - field: base_amount
+  dimensions:
+    - field: sale
+    - field: till_session
+    - field: currency
+    - field: method
+  status_field: status

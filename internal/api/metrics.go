@@ -19,6 +19,7 @@ import (
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/facts"
 	"github.com/asenawritescode/kora/internal/metrics"
 	"github.com/asenawritescode/kora/internal/tenanttime"
 )
@@ -33,18 +34,49 @@ type metricsAPI struct {
 	defs func(*gin.Context) ([]metrics.Metric, error)
 }
 
-// registerMetricsRoutes mounts GET /metrics, GET /metrics/:name, POST /metrics/query, POST /metrics/drill
-// and the dashboard routes, which read the same catalog.
-func registerMetricsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, dialect db.Dialect) {
-	defs := newVersionCache[[]metrics.Metric]()
+// registerMetricsRoutes mounts GET /metrics, GET /metrics/:name, POST /metrics/query, POST /metrics/drill,
+// the dashboard routes, which read the same catalog, and the saved Explore reports.
+//
+// It returns the metrics API, which the AI chat reads through the same handlers.
+func registerMetricsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, dialect db.Dialect) metricsAPI {
 	dashboardDefs := newVersionCache[[]metrics.Dashboard]()
-	api := metricsAPI{registry: registry, siteDB: siteDB, dialect: dialect, defs: func(c *gin.Context) ([]metrics.Metric, error) {
-		return cachedConfigValue(c, defs, getSiteDB(c, siteDB), siteDialectFromContext(c, dialect), readMetricDefs)
-	}}
-	api.mount(apiGroup.Group("/metrics"))
+	api := newMetricsAPI(registry, siteDB, dialect)
+	guard := insightsGuard(registry)
+	api.mount(apiGroup.Group("/metrics", guard))
 	dashboardsAPI{metricsAPI: api, loadDefs: func(c *gin.Context) ([]metrics.Dashboard, error) {
 		return cachedConfigValue(c, dashboardDefs, getSiteDB(c, siteDB), siteDialectFromContext(c, dialect), readDashboardDefs)
-	}}.mount(apiGroup.Group("/dashboards"))
+	}}.mount(apiGroup.Group("/dashboards", guard))
+	registerExploreRoutes(apiGroup, registry)
+	reportsAPI{metrics: api}.mount(apiGroup.Group("/explore/reports", guard))
+	return api
+}
+
+// insightsGuard admits a request only when its roles grant Insights. Every metrics, explore, dashboard, drill,
+// saved-report and pin route is behind it.
+func insightsGuard(registry *doctype.Registry) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !requireInsights(c, registry) {
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// insightsAllowed reports whether the verified caller's roles grant Insights.
+func insightsAllowed(c *gin.Context, registry *doctype.Registry) bool {
+	execution, valid := requestExecution(c)
+	return valid && analyticsRegistry(c, registry).InsightsAllowed(execution.Actor().Roles)
+}
+
+// requireInsights answers 403 metrics.insights_forbidden and reports false when the caller's roles do not grant
+// Insights.
+func requireInsights(c *gin.Context, registry *doctype.Registry) bool {
+	if insightsAllowed(c, registry) {
+		return true
+	}
+	writeError(c, http.StatusForbidden, "metrics.insights_forbidden", "Insights is not available for your role", nil)
+	return false
 }
 
 // versionCache keeps each site's parsed configuration with the version it came from. A request reads only
@@ -107,6 +139,15 @@ func activeConfigVersion(database *sql.DB, dialect db.Dialect, site string) (int
 		return 0, nil
 	}
 	return version, err
+}
+
+// newMetricsAPI is the metrics API of one process. Its definitions are cached per site and configuration version,
+// so one value serves every request for the site.
+func newMetricsAPI(registry *doctype.Registry, siteDB *sql.DB, dialect db.Dialect) metricsAPI {
+	defs := newVersionCache[[]metrics.Metric]()
+	return metricsAPI{registry: registry, siteDB: siteDB, dialect: dialect, defs: func(c *gin.Context) ([]metrics.Metric, error) {
+		return cachedConfigValue(c, defs, getSiteDB(c, siteDB), siteDialectFromContext(c, dialect), readMetricDefs)
+	}}
 }
 
 // mount binds the metric routes under group.
@@ -264,9 +305,9 @@ func (m metricsAPI) query(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation.invalid_json", "Invalid metrics query", nil)
 		return
 	}
-	q, err := queryFromContract(req)
-	if err != nil {
-		writeError(c, http.StatusBadRequest, "metrics.query_invalid", err.Error(), nil)
+	database := getSiteDB(c, m.siteDB)
+	period, q, ok := m.resolveQuery(c, req, database)
+	if !ok {
 		return
 	}
 	cat, err := m.catalog(c)
@@ -274,32 +315,193 @@ func (m metricsAPI) query(c *gin.Context) {
 		internalError(c, "loading metric definitions", err)
 		return
 	}
+	cat, adHoc, err := withAdHocMeasures(cat, req.Measures)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "metrics.query_invalid", err.Error(), nil)
+		return
+	}
+	q.Metrics = append(q.Metrics, adHoc...)
 	ms, refusal := m.authorizeQuery(c, cat, &q)
 	if refusal != nil {
 		writeError(c, refusal.status, refusal.code, refusal.message, nil)
 		return
 	}
-	database := getSiteDB(c, m.siteDB)
-	if database == nil {
-		writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Metrics not available for this site", nil)
+	engine, ready := m.readyEngine(c, database, cat, metrics.Models(ms), &period)
+	if !ready {
 		return
 	}
-	engine := metrics.Engine{DB: database, Dialect: siteDialectFromContext(c, m.dialect), Catalog: cat}
 	ctx := c.Request.Context()
 	res, err := engine.Query(ctx, q)
 	if err != nil {
 		metricsRunError(c, "running metric query", err)
 		return
 	}
-	seq, err := engine.SourceSequence(ctx, modelDocs(cat, metrics.Models(ms)))
+	models := metrics.Models(ms)
+	meta, err := queryMeta(ctx, engine, q, models)
 	if err != nil {
-		metricsRunError(c, "reading metric source sequence", err)
+		metricsRunError(c, "reading query metadata", err)
 		return
 	}
-	c.JSON(http.StatusOK, metricsEnvelope{
-		Data: resultOf(res),
-		Meta: contract.MetricsMeta{AsOf: time.Now().UTC().Format(time.RFC3339), Tier: "S", SourceSequence: seq},
-	})
+	meta = periodMeta(meta, period, res)
+	meta.OwnerOnly = q.Scope.Owner != ""
+	out := resultOf(res)
+	out.Labels = adHocLabels(cat, adHoc)
+	out.Formats = adHocFormats(cat, adHoc)
+	c.JSON(http.StatusOK, metricsEnvelope{Data: out, Meta: meta})
+}
+
+// readyEngine is the engine a query runs on. It writes the refusal and reports false when the site has no
+// database, or answers building and reports false when a record type the query reads has no fact tables yet.
+func (m metricsAPI) readyEngine(c *gin.Context, database *sql.DB, cat metrics.Catalog, models []string, period *queryPeriod) (metrics.Engine, bool) {
+	if database == nil {
+		writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Metrics not available for this site", nil)
+		return metrics.Engine{}, false
+	}
+	engine := metrics.Engine{DB: database, Dialect: siteDialectFromContext(c, m.dialect), Catalog: cat, Site: c.GetString("site_name")}
+	empty := resultOf(metrics.Result{})
+	empty.Rows = []contract.MetricRow{}
+	return engine, !answerBuilding(c, engine, models, period, empty)
+}
+
+// answerBuilding answers a query or drill whose record types have no fact tables yet. The sync creates them when
+// the tenant starts, so until it has run the honest answer is data with history building, never a server error.
+// period is nil for a drill, which has none. It writes the answer and reports true when it answered.
+func answerBuilding(c *gin.Context, engine metrics.Engine, models []string, period *queryPeriod, data any) bool {
+	building, err := facts.Unsynced(c.Request.Context(), engine.DB, engine.Dialect, models)
+	if err != nil {
+		internalError(c, "reading fact model sync state", err)
+		return true
+	}
+	if len(building) == 0 {
+		return false
+	}
+	meta := contract.MetricsMeta{AsOf: time.Now().UTC().Format(time.RFC3339), Tier: "S",
+		History: &contract.MetricsHistory{State: "building", Progress: 0}}
+	if period != nil {
+		meta = periodMeta(meta, *period, metrics.Result{})
+	}
+	c.JSON(http.StatusOK, metricsEnvelope{Data: data, Meta: meta})
+	return true
+}
+
+// drillEmpty is the empty drill answered while fact tables are being built.
+func drillEmpty() contract.MetricDrillResult {
+	out, _ := drillOf(metrics.DrillPage{}, false) // an empty page has no filters to decode, so drillOf cannot fail
+	return out
+}
+
+// businessClock is the tenant's business clock. Without a database the default clock serves: the query
+// then fails with store unavailable, after its shape and authorization are checked.
+func (m metricsAPI) businessClock(c *gin.Context, database *sql.DB) (tenanttime.Clock, error) {
+	if database == nil {
+		return tenanttime.Default(), nil
+	}
+	return tenanttime.Load(c.Request.Context(), database, siteDialectFromContext(c, m.dialect), c.GetString("site_name"))
+}
+
+// resolveQuery turns a query request into a query over its period, on the tenant's business clock. It
+// writes the refusal and reports false when the request is malformed.
+func (m metricsAPI) resolveQuery(c *gin.Context, req contract.MetricQueryRequest, database *sql.DB) (queryPeriod, metrics.Query, bool) {
+	clock, err := m.businessClock(c, database)
+	if err != nil {
+		internalError(c, "loading tenant business clock", err)
+		return queryPeriod{}, metrics.Query{}, false
+	}
+	period, err := queryPeriodOf(req, clock, time.Now().UTC())
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "metrics.query_invalid", err.Error(), nil)
+		return queryPeriod{}, metrics.Query{}, false
+	}
+	q, err := queryFromContract(req, period.span)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "metrics.query_invalid", err.Error(), nil)
+		return queryPeriod{}, metrics.Query{}, false
+	}
+	return period, q, true
+}
+
+// queryPeriod is the business period a query reads: its preset, custom when the request named From and To,
+// the inclusive dates it covers, and the tenant clock that resolved them.
+type queryPeriod struct {
+	preset metrics.Preset
+	span   metrics.Span
+	clock  tenanttime.Clock
+}
+
+// queryPeriodOf resolves the period of a query request. A preset resolves on the tenant clock at now and
+// takes no From or To; custom, or a request with no period, reads From and To.
+func queryPeriodOf(req contract.MetricQueryRequest, clock tenanttime.Clock, now time.Time) (queryPeriod, error) {
+	preset := metrics.PresetCustom
+	if req.Period != nil {
+		parsed, err := metrics.ParsePreset(req.Period.Preset)
+		if err != nil {
+			return queryPeriod{}, err
+		}
+		preset = parsed
+	}
+	if preset != metrics.PresetCustom {
+		if req.From != "" || req.To != "" {
+			return queryPeriod{}, fmt.Errorf("period %q takes no from or to", preset)
+		}
+		span, err := metrics.ResolvePeriod(clock, now, preset, metrics.Span{})
+		return queryPeriod{preset: preset, span: span, clock: clock}, err
+	}
+	from, to, err := parseMetricRange(req.From, req.To)
+	if err != nil {
+		return queryPeriod{}, err
+	}
+	return queryPeriod{preset: preset, span: metrics.Span{From: from, To: to}, clock: clock}, nil
+}
+
+// periodMeta adds the period, the comparison window, and the tenant's zone and day cutoff to a result's meta.
+func periodMeta(meta contract.MetricsMeta, period queryPeriod, res metrics.Result) contract.MetricsMeta {
+	meta.Period = contract.MetricsPeriod{Preset: string(period.preset), From: period.span.From.String(), To: period.span.To.String()}
+	if res.PreviousSpan != (metrics.Span{}) {
+		meta.Previous = &contract.MetricsSpan{From: res.PreviousSpan.From.String(), To: res.PreviousSpan.To.String()}
+	}
+	meta.TimeZone = period.clock.ZoneName()
+	meta.DayEnds = tenanttime.FormatCutoff(period.clock.Cutoff)
+	return meta
+}
+
+// queryMeta is the freshness and rebuild state a query result carries.
+func queryMeta(ctx context.Context, engine metrics.Engine, q metrics.Query, models []string) (contract.MetricsMeta, error) {
+	seq, err := engine.SourceSequence(ctx, modelDocs(engine.Catalog, models))
+	if err != nil {
+		return contract.MetricsMeta{}, fmt.Errorf("reading metric source sequence: %w", err)
+	}
+	history, err := queryHistory(ctx, engine.DB, engine.Dialect, models)
+	if err != nil {
+		return contract.MetricsMeta{}, fmt.Errorf("reading metric history progress: %w", err)
+	}
+	currencies, err := engine.Currencies(ctx, q)
+	if err != nil {
+		return contract.MetricsMeta{}, fmt.Errorf("reading query currencies: %w", err)
+	}
+	return contract.MetricsMeta{AsOf: time.Now().UTC().Format(time.RFC3339), Tier: "S", SourceSequence: seq, History: history, Currencies: currencies}, nil
+}
+
+// queryHistory reads the rebuild progress of the models a query reads and summarises it.
+func queryHistory(ctx context.Context, database *sql.DB, dialect db.Dialect, models []string) (*contract.MetricsHistory, error) {
+	progress, err := (&facts.JobStore{DB: database, Dialect: dialect}).Progress(ctx, models)
+	if err != nil {
+		return nil, err
+	}
+	return summariseHistory(progress), nil
+}
+
+// summariseHistory is building while any model is rebuilding, and its progress is the least of theirs.
+// No rebuilding model, or none read, is ready.
+func summariseHistory(progress map[string]facts.Progress) *contract.MetricsHistory {
+	h := &contract.MetricsHistory{State: "ready", Progress: 1}
+	for _, p := range progress {
+		if !p.Building {
+			continue
+		}
+		h.State = "building"
+		h.Progress = min(h.Progress, p.Fraction)
+	}
+	return h
 }
 
 // queryRefusal is a query the caller may not run or that does not compile, with its response.
@@ -316,23 +518,45 @@ func (m metricsAPI) authorizeQuery(c *gin.Context, cat metrics.Catalog, q *metri
 	if err != nil {
 		return nil, &queryRefusal{http.StatusBadRequest, "metrics.query_invalid", err.Error()}
 	}
-	scope, denial := metricScope(c, analyticsRegistry(c, m.registry), metrics.Models(ms))
+	reg := analyticsRegistry(c, m.registry)
+	scope, denial := metricScope(c, reg, metrics.Models(ms))
 	if denial != nil {
 		return nil, &queryRefusal{denial.status, "metrics.forbidden", denial.message}
 	}
+	scope.Joinable = m.joinable(c, reg, cat, q.Dimensions)
 	q.Scope = scope
 	if err := cat.Check(*q); err != nil {
-		code := "metrics.query_invalid"
-		if errors.Is(err, metrics.ErrRangeTooLarge) {
+		code, status := "metrics.query_invalid", http.StatusBadRequest
+		switch {
+		case errors.Is(err, metrics.ErrRangeTooLarge):
 			code = "metrics.range_too_large"
+		case errors.Is(err, metrics.ErrForbidden):
+			code, status = "metrics.forbidden", http.StatusForbidden
+		case errors.Is(err, metrics.ErrMeasureNotOnLines):
+			code = "metrics.measure_not_on_lines"
 		}
-		return nil, &queryRefusal{http.StatusBadRequest, code, err.Error()}
+		return nil, &queryRefusal{status, code, err.Error()}
 	}
 	return ms, nil
 }
 
-// drill answers POST /metrics/drill with the record list behind one number. The list endpoint
-// applies the caller's record scope when the filters are used.
+// joinable names the record types a query's dimension paths and labels may join to. It asks only when a
+// query groups by something, and reads every record type once.
+func (m metricsAPI) joinable(c *gin.Context, reg *doctype.Registry, cat metrics.Catalog, dims []string) map[string]bool {
+	if len(dims) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(cat.Models))
+	for name := range cat.Models {
+		if joinableRecordType(c, reg, name) {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+// drill answers POST /metrics/drill with the record list behind one number: its filters for the record
+// list, and one page of its records. The records apply the caller's record scope.
 func (m metricsAPI) drill(c *gin.Context) {
 	var req contract.MetricDrillRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -344,42 +568,108 @@ func (m metricsAPI) drill(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "metrics.drill_invalid", err.Error(), nil)
 		return
 	}
-	cat, err := m.catalog(c)
+	run, ok := m.resolveDrill(c, req)
+	if !ok {
+		return
+	}
+	if answerBuilding(c, run.engine, run.models, nil, drillEmpty()) {
+		return
+	}
+	page, err := run.engine.DrillRecords(c.Request.Context(), metrics.DrillRequest{Metric: run.name, From: from, To: to, Group: req.Group},
+		run.scope, run.clock, req.Cursor)
 	if err != nil {
-		internalError(c, "loading metric definitions", err)
+		drillError(c, err)
 		return
 	}
-	ms, err := cat.Closure([]string{req.Metric})
-	if err != nil {
-		writeError(c, http.StatusBadRequest, "metrics.drill_invalid", err.Error(), nil)
-		return
-	}
-	if _, denial := metricScope(c, analyticsRegistry(c, m.registry), metrics.Models(ms)); denial != nil {
-		writeError(c, denial.status, "metrics.forbidden", denial.message, nil)
-		return
-	}
-	database := getSiteDB(c, m.siteDB)
-	if database == nil {
-		writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Metrics not available for this site", nil)
-		return
-	}
-	dialect := siteDialectFromContext(c, m.dialect)
-	clock, err := tenanttime.Load(c.Request.Context(), database, dialect, c.GetString("site_name"))
-	if err != nil {
-		internalError(c, "loading tenant business clock", err)
-		return
-	}
-	drill, err := cat.Drill(metrics.DrillRequest{Metric: req.Metric, From: from, To: to, Group: req.Group}, clock)
-	if err != nil {
-		writeError(c, http.StatusUnprocessableEntity, "metrics.drill_invalid", err.Error(), nil)
-		return
-	}
-	out, err := drillOf(drill)
+	out, err := drillOf(page, page.ListOpenable && !run.registry.IsPrivateModuleResource(page.Doctype))
 	if err != nil {
 		internalError(c, "encoding metric drill", err)
 		return
 	}
 	c.JSON(http.StatusOK, Response{Data: out})
+}
+
+// drillRun is what one drill reads: the engine over the tenant's database, the metric or measure it names,
+// the caller's scope on it, the tenant's business clock and the registry that says which lists are open.
+type drillRun struct {
+	engine   metrics.Engine
+	name     string
+	scope    metrics.Scope
+	clock    tenanttime.Clock
+	registry *doctype.Registry
+	models   []string // the record types the drill reads
+}
+
+// resolveDrill resolves a drill's metric, the caller's scope on the record types it reads, and the clock. It writes
+// the refusal and reports false when the drill may not run.
+func (m metricsAPI) resolveDrill(c *gin.Context, req contract.MetricDrillRequest) (drillRun, bool) {
+	cat, err := m.catalog(c)
+	if err != nil {
+		internalError(c, "loading metric definitions", err)
+		return drillRun{}, false
+	}
+	cat, name, err := drillMetric(cat, req)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "metrics.drill_invalid", err.Error(), nil)
+		return drillRun{}, false
+	}
+	ms, err := cat.Closure([]string{name})
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "metrics.drill_invalid", err.Error(), nil)
+		return drillRun{}, false
+	}
+	registry := analyticsRegistry(c, m.registry)
+	scope, denial := metricScope(c, registry, metrics.Models(ms))
+	if denial != nil {
+		writeError(c, denial.status, "metrics.forbidden", denial.message, nil)
+		return drillRun{}, false
+	}
+	scope.Joinable = m.joinable(c, registry, cat, slices.Collect(maps.Keys(req.Group)))
+	database := getSiteDB(c, m.siteDB)
+	if database == nil {
+		writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Metrics not available for this site", nil)
+		return drillRun{}, false
+	}
+	dialect := siteDialectFromContext(c, m.dialect)
+	clock, err := tenanttime.Load(c.Request.Context(), database, dialect, c.GetString("site_name"))
+	if err != nil {
+		internalError(c, "loading tenant business clock", err)
+		return drillRun{}, false
+	}
+	engine := metrics.Engine{DB: database, Dialect: dialect, Catalog: cat, Site: c.GetString("site_name")}
+	return drillRun{engine: engine, name: name, scope: scope, clock: clock, registry: registry, models: metrics.Models(ms)}, true
+}
+
+// drillMetric names the metric a drill reads: the saved metric the request names, or the unsaved measure
+// it asks for, added to the catalog. A drill names exactly one of the two.
+func drillMetric(cat metrics.Catalog, req contract.MetricDrillRequest) (metrics.Catalog, string, error) {
+	switch {
+	case req.Metric != "" && req.Measure == nil:
+		return cat, req.Metric, nil
+	case req.Measure != nil && req.Metric == "":
+		out, names, err := withAdHocMeasures(cat, []contract.MetricAdHocMeasure{*req.Measure})
+		if err != nil {
+			return metrics.Catalog{}, "", err
+		}
+		return out, names[0], nil
+	}
+	return metrics.Catalog{}, "", errors.New("a drill names one metric or one measure")
+}
+
+// drillError answers a failed drill: a refused drill or group is 422, a forbidden path 403, a bad
+// cursor 400, a deadline a timeout, and anything else internal.
+func drillError(c *gin.Context, err error) {
+	var refusal metrics.DrillRefusal
+	switch {
+	case errors.Is(err, metrics.ErrForbidden):
+		writeError(c, http.StatusForbidden, "metrics.forbidden", err.Error(), nil)
+	case errors.Is(err, metrics.ErrBadCursor):
+		writeError(c, http.StatusBadRequest, "metrics.drill_invalid", err.Error(), nil)
+	case errors.As(err, &refusal):
+		writeError(c, http.StatusUnprocessableEntity, "metrics.drill_invalid", err.Error(), nil)
+	default:
+		metricsRunError(c, "running metric drill", err)
+	}
 }
 
 // metricsRunError answers a failed metric run: a deadline is a timeout, anything else is internal.
@@ -429,26 +719,68 @@ func filtersOf(in []metrics.Filter) ([]contract.MetricFilter, error) {
 	return out, nil
 }
 
-// queryFromContract validates the wire request's shape and converts it to a query. Scope is set by the caller.
-func queryFromContract(req contract.MetricQueryRequest) (metrics.Query, error) {
-	from, to, err := parseMetricRange(req.From, req.To)
+// queryFromContract converts the wire request to a query over span. Scope is set by the caller.
+func queryFromContract(req contract.MetricQueryRequest, span metrics.Span) (metrics.Query, error) {
+	filters, err := filtersFromContract(req.Filters)
 	if err != nil {
 		return metrics.Query{}, err
 	}
-	filters := make([]metrics.Filter, 0, len(req.Filters))
-	for _, f := range req.Filters {
+	return metrics.Query{
+		Metrics: req.Metrics, Dimensions: req.Dimensions, Filters: filters, From: span.From, To: span.To,
+		Grain: metrics.Grain(req.Grain), Compare: metrics.Compare(req.Compare), Top: req.Top,
+	}, nil
+}
+
+// filtersFromContract decodes wire filters, whose values are JSON scalars or arrays.
+func filtersFromContract(in []contract.MetricFilter) ([]metrics.Filter, error) {
+	filters := make([]metrics.Filter, 0, len(in))
+	for _, f := range in {
 		var value any
 		if len(f.Value) > 0 {
 			if err := json.Unmarshal(f.Value, &value); err != nil {
-				return metrics.Query{}, fmt.Errorf("filter on %q has an invalid value: %w", f.Field, err)
+				return nil, fmt.Errorf("filter on %q has an invalid value: %w", f.Field, err)
 			}
 		}
 		filters = append(filters, metrics.Filter{Field: f.Field, Op: f.Op, Value: value})
 	}
-	return metrics.Query{
-		Metrics: req.Metrics, Dimensions: req.Dimensions, Filters: filters, From: from, To: to,
-		Grain: metrics.Grain(req.Grain), Compare: metrics.Compare(req.Compare), Top: req.Top,
-	}, nil
+	return filters, nil
+}
+
+// withAdHocMeasures adds the request's unsaved measures to the catalog and returns their metric names.
+func withAdHocMeasures(cat metrics.Catalog, measures []contract.MetricAdHocMeasure) (metrics.Catalog, []string, error) {
+	adHoc := make([]metrics.AdHoc, 0, len(measures))
+	for _, a := range measures {
+		filters, err := filtersFromContract(a.Filters)
+		if err != nil {
+			return metrics.Catalog{}, nil, err
+		}
+		adHoc = append(adHoc, metrics.AdHoc{Model: a.RecordType, Agg: a.Agg, Field: a.Field, Filters: filters})
+	}
+	return cat.WithAdHoc(adHoc)
+}
+
+// adHocLabels maps each unsaved measure's name to its label; nil when the query has none.
+func adHocLabels(cat metrics.Catalog, names []string) map[string]string {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(names))
+	for _, name := range names {
+		out[name] = cat.Metrics[name].Label
+	}
+	return out
+}
+
+// adHocFormats maps each unsaved measure's name to its display format; nil when the query has none.
+func adHocFormats(cat metrics.Catalog, names []string) map[string]string {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(names))
+	for _, name := range names {
+		out[name] = cat.Metrics[name].Format
+	}
+	return out
 }
 
 // parseMetricRange reads an inclusive range of business dates written YYYY-MM-DD.
@@ -502,7 +834,8 @@ func rowsOf(rows []metrics.Row) []contract.MetricRow {
 		for _, v := range r.Values {
 			values = append(values, decimalJSON(v))
 		}
-		out = append(out, contract.MetricRow{Bucket: r.Period.String(), Group: append([]string{}, r.Group...), Label: r.Label, Values: values})
+		out = append(out, contract.MetricRow{Bucket: r.Period.String(), Group: append([]string{}, r.Group...), Label: r.Label,
+			Labels: r.Labels, Values: values})
 	}
 	return out
 }
@@ -515,11 +848,16 @@ func decimalJSON(v decimal.NullDecimal) json.RawMessage {
 	return json.RawMessage(strconv.Quote(v.Decimal.String()))
 }
 
-// drillOf encodes a drill's filters as wire filters.
-func drillOf(d metrics.Drill) (contract.MetricDrillResult, error) {
-	filters, err := filtersOf(d.Filters)
+// drillOf encodes a drill page as wire records and filters.
+func drillOf(page metrics.DrillPage, listOpenable bool) (contract.MetricDrillResult, error) {
+	filters, err := filtersOf(page.Filters)
 	if err != nil {
 		return contract.MetricDrillResult{}, err
 	}
-	return contract.MetricDrillResult{Doctype: d.Doctype, Filters: filters}, nil
+	rows := make([]contract.MetricDrillRecord, len(page.Records))
+	for i, r := range page.Records {
+		rows[i] = contract.MetricDrillRecord{Name: r.Name, Title: r.Title, OccurredAt: r.OccurredAt.UTC().Format(time.RFC3339), Value: r.Value.String()}
+	}
+	return contract.MetricDrillResult{Doctype: page.Doctype, Filters: filters, ListOpenable: listOpenable,
+		Total: page.Total.String(), Rows: rows, NextCursor: page.Next}, nil
 }

@@ -29,8 +29,7 @@ func TestEnvelopeOp(t *testing.T) {
 }
 
 func TestLocalProviderPublish(t *testing.T) {
-	tmpDir := t.TempDir()
-	bus := NewChannelBus(10, tmpDir+"/wal")
+	bus := NewChannelBus(10, 0)
 	defer bus.Close()
 
 	provider := NewLocalProvider(bus)

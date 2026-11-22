@@ -206,7 +206,12 @@ func runLinkTargets(t *testing.T, driver string, conn *sql.DB, dbName string) {
 	refused := func(what string, e *contract.Error) {
 		t.Helper()
 		if e == nil || !strings.Contains(string(e.Details), "no longer exists") {
-			t.Fatalf("%s: want a no-longer-exists refusal, got %+v details=%s", what, e, func() string { if e == nil { return "" }; return string(e.Details) }())
+			t.Fatalf("%s: want a no-longer-exists refusal, got %+v details=%s", what, e, func() string {
+				if e == nil {
+					return ""
+				}
+				return string(e.Details)
+			}())
 		}
 	}
 

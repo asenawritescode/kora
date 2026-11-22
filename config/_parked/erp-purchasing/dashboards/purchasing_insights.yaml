@@ -1,0 +1,18 @@
+name: purchasing_insights
+label: "Buying insights"
+description: "Figures and charts that reproduce the buying overview report."
+default_range: last_30_days
+tiles:
+  - metric: orders_base_total
+  - metric: bills_base_amount
+charts:
+  - id: orders_by_status
+    title: "Ordered by status"
+    kind: bar
+    metrics: [orders_base_total]
+    by: status
+  - id: bills_by_status
+    title: "Billed by status"
+    kind: bar
+    metrics: [bills_base_amount]
+    by: status

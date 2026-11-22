@@ -13,3 +13,4 @@ time: business_date
 good: up
 format: currency
 description: Profit on sales. Returns carry negative profit, so they reduce it.
+verified: true

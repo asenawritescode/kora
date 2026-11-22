@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/plugin"
 	"github.com/asenawritescode/kora/internal/policy"
+	"github.com/asenawritescode/kora/internal/projection"
 	"github.com/gin-gonic/gin"
 )
 
@@ -148,7 +148,7 @@ func (a projectionAccess) allows(operation string) bool {
 
 // actorScope authorizes operation and returns the row scope to apply to a
 // read, or nil when the grant covers every row.
-func (a projectionAccess) actorScope(operation string) (*analytics.ProjectionActorScope, *contract.Error) {
+func (a projectionAccess) actorScope(operation string) (*projection.ActorScope, *contract.Error) {
 	if !a.Execution.Valid() || a.Definition.OwnerModuleID == "" || a.Definition.ID == "" || contract.ValidateResourceBusinessScope(a.Scope, a.ScopePolicy) != nil {
 		return nil, contract.NewError(contract.CodePermissionDenied, "published projection scope is invalid")
 	}
@@ -182,10 +182,10 @@ func (a projectionAccess) actorScope(operation string) (*analytics.ProjectionAct
 			return nil, contract.NewError(contract.CodePermissionDenied, "projection assignment field is outside the published field contract")
 		}
 	}
-	return &analytics.ProjectionActorScope{SubjectID: subject, OwnerOnly: decision.OwnerOnly, OwnerField: a.Definition.OwnerField, AssignedFields: append([]string(nil), decision.AssignedFields...)}, nil
+	return &projection.ActorScope{SubjectID: subject, OwnerOnly: decision.OwnerOnly, OwnerField: a.Definition.OwnerField, AssignedFields: append([]string(nil), decision.AssignedFields...)}, nil
 }
 
-func filterPublishedProjectionRows(data json.RawMessage, scope analytics.ProjectionActorScope) (json.RawMessage, error) {
+func filterPublishedProjectionRows(data json.RawMessage, scope projection.ActorScope) (json.RawMessage, error) {
 	var rows []map[string]json.RawMessage
 	if err := json.Unmarshal(data, &rows); err != nil {
 		return nil, err

@@ -218,11 +218,11 @@ func TestExtensionReadExecutorRejectsMutationBeforeAuthentication(t *testing.T) 
 		t.Fatal("sqlmock.New:", err)
 	}
 	defer database.Close()
-	executor, err := NewExtensionReadExecutor(database, kdb.Resolve("mysql"), registryWithTask(), contract.TenantID("stable-tenant"), "tenant.example", "extension-token")
+	reader, err := NewExtensionReader(ExtensionReaderOptions{Database: database, Dialect: kdb.Resolve("mysql"), Registry: registryWithTask(), TenantID: contract.TenantID("stable-tenant"), Site: "tenant.example", Token: "extension-token"})
 	if err != nil {
-		t.Fatal("NewExtensionReadExecutor:", err)
+		t.Fatal("NewExtensionReader:", err)
 	}
-	_, err = executor(context.Background(), ai.ToolDescriptor{
+	_, err = reader.Execute(context.Background(), ai.ToolDescriptor{
 		ID: "tenant.task_create", Source: "tenant", Name: "task_create", Operation: "create", Doctype: "Task",
 	}, map[string]any{"title": "untrusted"})
 	if err == nil || !strings.Contains(err.Error(), "not an authorized DocType read") {
@@ -245,11 +245,11 @@ func TestMCPCommandsOnlyMutationCannotReachGenericExecutor(t *testing.T) {
 		ModuleOwnershipMode: string(contract.MutationCommands), BusinessScopePolicy: contract.ScopeTenantShared,
 		Fields: []doctype.Field{{Fieldname: "title", Fieldtype: "Data", Reqd: true}},
 	})
-	executor, err := NewExtensionReadExecutor(database, kdb.Resolve("mysql"), registry, contract.TenantID("stable-tenant"), "tenant.example", "extension-token")
+	reader, err := NewExtensionReader(ExtensionReaderOptions{Database: database, Dialect: kdb.Resolve("mysql"), Registry: registry, TenantID: contract.TenantID("stable-tenant"), Site: "tenant.example", Token: "extension-token"})
 	if err != nil {
-		t.Fatal("NewExtensionReadExecutor:", err)
+		t.Fatal("NewExtensionReader:", err)
 	}
-	server := NewWithExecutor(registry, "tenant.example", ModeExecutable, executor)
+	server := NewWithExecutor(registry, "tenant.example", ModeExecutable, reader.Execute)
 	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
 	serverSession, err := server.srv.Connect(context.Background(), serverTransport, nil)
 	if err != nil {
@@ -282,11 +282,11 @@ func TestExtensionReadExecutorRejectsRevokedCredential(t *testing.T) {
 	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token_hash = \\? AND is_active = 1").
 		WithArgs("tenant.example", auth.HashExtensionAccessToken("revoked-token")).
 		WillReturnRows(sqlmock.NewRows([]string{"name", "api_permissions"}))
-	executor, err := NewExtensionReadExecutor(database, kdb.Resolve("mysql"), registryWithTask(), contract.TenantID("stable-tenant"), "tenant.example", "revoked-token")
+	reader, err := NewExtensionReader(ExtensionReaderOptions{Database: database, Dialect: kdb.Resolve("mysql"), Registry: registryWithTask(), TenantID: contract.TenantID("stable-tenant"), Site: "tenant.example", Token: "revoked-token"})
 	if err != nil {
-		t.Fatal("NewExtensionReadExecutor:", err)
+		t.Fatal("NewExtensionReader:", err)
 	}
-	_, err = executor(context.Background(), ai.ToolDescriptor{
+	_, err = reader.Execute(context.Background(), ai.ToolDescriptor{
 		ID: "tenant.task_list", Source: "tenant", Name: "task_list", Operation: "list", Doctype: "Task",
 	}, map[string]any{})
 	if err == nil || !strings.Contains(err.Error(), "authentication failed") {
@@ -303,13 +303,13 @@ func TestExtensionReadExecutorWaitHonorsCallerCancellation(t *testing.T) {
 		t.Fatal("sqlmock.New:", err)
 	}
 	defer database.Close()
-	executor, err := NewExtensionReadExecutor(database, kdb.Resolve("mysql"), registryWithTask(), contract.TenantID("stable-tenant"), "tenant.example", "extension-token")
+	reader, err := NewExtensionReader(ExtensionReaderOptions{Database: database, Dialect: kdb.Resolve("mysql"), Registry: registryWithTask(), TenantID: contract.TenantID("stable-tenant"), Site: "tenant.example", Token: "extension-token"})
 	if err != nil {
-		t.Fatal("NewExtensionReadExecutor:", err)
+		t.Fatal("NewExtensionReader:", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = executor(ctx, ai.ToolDescriptor{
+	_, err = reader.Execute(ctx, ai.ToolDescriptor{
 		ID: "tenant.task_list", Source: "tenant", Name: "task_list", Operation: "list", Doctype: "Task",
 	}, map[string]any{})
 	if !errors.Is(err, context.Canceled) {

@@ -1,0 +1,11 @@
+name: farm_labor_hours
+label: Hours recorded
+type: simple
+model: Farm Labor Entry
+measure:
+  agg: sum
+  field: hours
+time: business_date
+good: up
+format: number
+description: Hours on the farm labor entries by work date (sum).

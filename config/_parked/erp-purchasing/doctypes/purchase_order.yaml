@@ -80,3 +80,10 @@ fields:
   - fieldname: notes
     fieldtype: Text
     label: Notes
+facts:
+  time: order_date
+  status_field: status
+  measures:
+    - field: base_total
+  dimensions:
+    - field: supplier

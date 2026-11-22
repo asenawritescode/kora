@@ -70,3 +70,11 @@ fields:
   - fieldname: notes
     fieldtype: Text
     label: Notes
+facts:
+  time: harvest_date
+  status_field: status
+  measures:
+    - field: quantity
+  dimensions:
+    - field: crop
+    - field: field

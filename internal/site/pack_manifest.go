@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/kernel"
 	"github.com/asenawritescode/kora/internal/metrics"
@@ -61,50 +60,13 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 	if len(files) == 0 {
 		add("files_required", "", "pack has no files")
 	}
-	if err := contract.ValidateScheduledJobDefinitions(manifest.ScheduledJobs); err != nil {
-		add("scheduled_jobs_invalid", "", err.Error())
-	}
-	if err := contract.ValidateScheduledJobModuleOwners(manifest.ScheduledJobs, manifest.Modules); err != nil {
-		add("scheduled_job_owner_invalid", "", err.Error())
-	}
-	if len(manifest.ScheduledJobs) > 64 {
-		add("scheduled_jobs_limit", "", "pack contains more than 64 scheduled jobs")
-	}
-	jobNames := map[string]bool{}
-	jobConfigBytes := 0
-	for _, job := range manifest.ScheduledJobs {
-		name := strings.TrimSpace(job.Name)
-		if name == "" || strings.TrimSpace(job.Type) == "" || strings.TrimSpace(job.Schedule) == "" {
-			add("scheduled_job_required", "", "scheduled jobs require name, type, and schedule")
-			continue
-		}
-		if jobNames[name] {
-			add("scheduled_job_duplicate", "", "scheduled job names must be unique")
-		}
-		jobNames[name] = true
-		if err := contract.ValidateCronSchedule(job.Schedule); err != nil {
-			add("scheduled_job_schedule", "", "scheduled job has an unsupported schedule: "+err.Error())
-		}
-		encoded, err := json.Marshal(job.Config)
-		if err != nil {
-			add("scheduled_job_config", "", "scheduled job config must contain JSON values only")
-			continue
-		}
-		trimmedConfig := strings.TrimSpace(string(job.Config))
-		if len(job.Config) > 0 && (trimmedConfig == "" || trimmedConfig[0] != '{') {
-			add("scheduled_job_config", "", "scheduled job config must be a JSON object")
-			continue
-		}
-		jobConfigBytes += len(encoded)
-	}
-	if jobConfigBytes > 64<<10 {
-		add("scheduled_job_config_limit", "", "scheduled job configuration exceeds 64 KiB")
-	}
+	checkScheduledJobs(manifest, add)
 	seen := map[string]bool{}
 	resources := newPackResourceNames()
 	userFields := map[string]map[string]bool{}
 	docTypes := map[string]*doctype.DocType{}
 	docTypePaths := map[string]string{}
+	var commands []packCommand
 	type assignmentRule struct{ path, doctype, role, field string }
 	var assignmentRules []assignmentRule
 	total := 0
@@ -122,7 +84,7 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 		if !validPackFileType(clean, file.ContentType) {
 			add("content_type", clean, "file extension and content type are not supported")
 		}
-		if err := validatePackFileSyntax(file); err != nil {
+		if err := validatePackFileContent(file); err != nil {
 			add("invalid_file", clean, err.Error())
 		} else if err := resources.add(file); err != nil {
 			add("resource_conflict", clean, err.Error())
@@ -139,6 +101,11 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 						userFields[definition.Name][field.Fieldname] = true
 					}
 				}
+			}
+		}
+		if file.ContentType == "command" {
+			if definition, err := kernel.ParseCommandResource([]byte(file.Content)); err == nil {
+				commands = append(commands, packCommand{path: clean, def: definition})
 			}
 		}
 		if file.ContentType == "permissions" {
@@ -186,6 +153,7 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 			}
 		}
 	}
+	checkActorWrites(commands, docTypes, add)
 	for _, rule := range assignmentRules {
 		if !userFields[rule.doctype][rule.field] {
 			add("assignment_scope_field", rule.path, fmt.Sprintf("if_assigned field %q for %s/%s must name a User field declared in the package", rule.field, rule.role, rule.doctype))
@@ -195,6 +163,54 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 		add("pack_too_large", "", "pack exceeds 2 MB")
 	}
 	return result, nil
+}
+
+// checkScheduledJobs reports the scheduled job definitions of a pack manifest.
+func checkScheduledJobs(manifest PackManifest, add func(code, file, message string)) {
+	if err := contract.ValidateScheduledJobDefinitions(manifest.ScheduledJobs); err != nil {
+		add("scheduled_jobs_invalid", "", err.Error())
+	}
+	if err := contract.ValidateScheduledJobModuleOwners(manifest.ScheduledJobs, manifest.Modules); err != nil {
+		add("scheduled_job_owner_invalid", "", err.Error())
+	}
+	if len(manifest.ScheduledJobs) > 64 {
+		add("scheduled_jobs_limit", "", "pack contains more than 64 scheduled jobs")
+	}
+	jobNames := map[string]bool{}
+	jobConfigBytes := 0
+	for _, job := range manifest.ScheduledJobs {
+		jobConfigBytes += checkScheduledJob(job, jobNames, add)
+	}
+	if jobConfigBytes > 64<<10 {
+		add("scheduled_job_config_limit", "", "scheduled job configuration exceeds 64 KiB")
+	}
+}
+
+// checkScheduledJob reports one scheduled job, records its name, and returns the size of its encoded config.
+func checkScheduledJob(job contract.ScheduledJobDefinition, names map[string]bool, add func(code, file, message string)) int {
+	name := strings.TrimSpace(job.Name)
+	if name == "" || strings.TrimSpace(job.Type) == "" || strings.TrimSpace(job.Schedule) == "" {
+		add("scheduled_job_required", "", "scheduled jobs require name, type, and schedule")
+		return 0
+	}
+	if names[name] {
+		add("scheduled_job_duplicate", "", "scheduled job names must be unique")
+	}
+	names[name] = true
+	if err := contract.ValidateCronSchedule(job.Schedule); err != nil {
+		add("scheduled_job_schedule", "", "scheduled job has an unsupported schedule: "+err.Error())
+	}
+	encoded, err := json.Marshal(job.Config)
+	if err != nil {
+		add("scheduled_job_config", "", "scheduled job config must contain JSON values only")
+		return 0
+	}
+	trimmedConfig := strings.TrimSpace(string(job.Config))
+	if len(job.Config) > 0 && (trimmedConfig == "" || trimmedConfig[0] != '{') {
+		add("scheduled_job_config", "", "scheduled job config must be a JSON object")
+		return 0
+	}
+	return len(encoded)
 }
 
 func isLinkTitleSearchableType(fieldType string) bool {
@@ -216,7 +232,6 @@ type packResourceNames struct {
 	workflows        map[string]string
 	views            map[string]string
 	scripts          map[string]string
-	reports          map[string]string
 	metrics          map[string]string
 	dashboards       map[string]string
 	queries          map[string]string
@@ -227,7 +242,7 @@ type packResourceNames struct {
 func newPackResourceNames() packResourceNames {
 	return packResourceNames{
 		doctypes: map[string]string{}, doctypeResources: map[string]string{}, roles: map[string]string{}, permissions: map[string]string{},
-		workflows: map[string]string{}, views: map[string]string{}, scripts: map[string]string{}, reports: map[string]string{}, metrics: map[string]string{},
+		workflows: map[string]string{}, views: map[string]string{}, scripts: map[string]string{}, metrics: map[string]string{},
 		dashboards: map[string]string{}, queries: map[string]string{}, commands: map[string]string{}, printFormats: map[string]string{},
 	}
 }
@@ -314,13 +329,13 @@ func (names packResourceNames) add(file PackFile) error {
 			return err
 		}
 		return register(names.printFormats, definition.Name, "print format")
-	case "report", "metric", "dashboard":
+	case "metric", "dashboard":
 		return names.addDefinition(file, register)
 	}
 	return nil
 }
 
-// addDefinition claims the names of a report (and its route), a metric or a dashboard definition.
+// addDefinition claims the names of a metric or a dashboard definition.
 func (names packResourceNames) addDefinition(file PackFile, register func(map[string]string, string, string) error) error {
 	switch file.ContentType {
 	case "metric":
@@ -336,16 +351,6 @@ func (names packResourceNames) addDefinition(file PackFile, register func(map[st
 		}
 		return register(names.dashboards, definition.Name, "dashboard")
 	}
-	definition, err := analytics.ParseReportYAML([]byte(file.Content), file.Path)
-	if err != nil {
-		return err
-	}
-	if err := register(names.reports, definition.Name, "report"); err != nil {
-		return err
-	}
-	if definition.Route != "" {
-		return register(names.views, "route:"+definition.Route, "report route")
-	}
 	return nil
 }
 
@@ -359,6 +364,15 @@ func decodeQueryDefinition(data []byte) (*query.Definition, error) {
 		return nil, fmt.Errorf("%s: %w", query.ErrInvalidDefinition, err)
 	}
 	return &d, nil
+}
+
+// validatePackFileContent checks one file of a package. A retired reports/ file from an older
+// release is accepted here; installs skip it (withoutRetiredReports).
+func validatePackFileContent(file PackFile) error {
+	if file.ContentType == "report" {
+		return nil
+	}
+	return validatePackFileSyntax(file)
 }
 
 func validatePackFileSyntax(file PackFile) error {
@@ -385,7 +399,7 @@ func validatePackFileSyntax(file PackFile) error {
 	case "view":
 		_, err := doctype.ParseViewYAML(data)
 		return err
-	case "report", "metric", "dashboard":
+	case "metric", "dashboard":
 		return validateYAMLDefinition(file.ContentType, file.Path, data)
 	case "command":
 		_, err := kernel.ParseCommandResource(data)
@@ -442,7 +456,7 @@ func ParsePackDigest(value string) error {
 	return contract.ParsePackDigest(value)
 }
 
-// validateYAMLDefinition checks a report, metric or dashboard document against its parser.
+// validateYAMLDefinition checks a metric or dashboard document against its parser.
 func validateYAMLDefinition(contentType, path string, data []byte) error {
 	switch contentType {
 	case "metric":
@@ -452,6 +466,5 @@ func validateYAMLDefinition(contentType, path string, data []byte) error {
 		_, err := metrics.ParseDashboardYAML(data, path)
 		return err
 	}
-	_, err := analytics.ParseReportYAML(data, path)
-	return err
+	return nil
 }

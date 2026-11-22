@@ -1,0 +1,9 @@
+name: grants_count
+label: "Grants"
+type: balance
+model: "Grant"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Grants from the Grant records (count)."

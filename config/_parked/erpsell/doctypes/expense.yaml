@@ -88,3 +88,11 @@ fields:
     fieldtype: User
     label: Recorded by
     read_only: true
+facts:
+  time: expense_date
+  measures:
+    - field: amount
+    - field: base_amount
+  dimensions:
+    - field: category
+    - field: payment_method

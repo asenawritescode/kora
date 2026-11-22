@@ -100,6 +100,12 @@
   write: false
   create: false
   delete: false
+- doctype: Item
+  role: Cashier
+  read: true
+  write: false
+  create: false
+  delete: false
 - doctype: Sale Line Balance
   role: Cashier
   read: true

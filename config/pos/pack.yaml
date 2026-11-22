@@ -1,4 +1,5 @@
 name: pos
+label: Till
 version: "1"
 requires:
   - package_id: inventory

@@ -1,6 +1,6 @@
 name: Shift
 module: Cash control
-title_field: cashier
+title_field: register
 search_fields: cashier, register, status
 sort_field: modified
 sort_order: DESC
@@ -18,10 +18,9 @@ fields:
     in_list_view: true
     in_standard_filter: true
   - fieldname: cashier
-    fieldtype: Data
+    fieldtype: User
     label: Cashier
     reqd: true
-    search_index: true
     in_list_view: true
   - fieldname: started_at
     fieldtype: Datetime

@@ -1,0 +1,14 @@
+name: crm_closed_deal_value
+label: "Closed deal value"
+type: balance
+model: "Deal"
+measure:
+  agg: sum
+  field: total
+filters:
+  - field: pipeline_stage
+    op: "in"
+    value: ["Closed Won", "Closed Lost"]
+time: business_date
+format: currency
+description: "Closed deal value from the Deal records (sum)."

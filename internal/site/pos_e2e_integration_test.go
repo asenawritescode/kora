@@ -459,9 +459,18 @@ func runPOSEndToEnd(t *testing.T, driver string, conn *sql.DB, dbName string) {
 		raw, _ := json.Marshal(payload)
 		return k.Execute(ctx, conn, reg, kernel.Operation{Command: command, Payload: raw, Context: opCtx(command, "cashier1", cashier, cexec)})
 	}
-	for _, dt := range []string{"Item", "Stock Balance", "Stock Entry"} {
+	for _, dt := range []string{"Stock Balance", "Stock Entry"} {
 		if ok, _ := reg.Permissions.UserCan([]string{"Cashier"}, dt, "read"); ok {
 			t.Fatalf("Cashier must not read %s", dt)
+		}
+	}
+	// Owner decision 2026-11-22: cashiers read Item (names in analytics) but cannot change it.
+	if ok, _ := reg.Permissions.UserCan([]string{"Cashier"}, "Item", "read"); !ok {
+		t.Fatal("Cashier must read Item")
+	}
+	for _, op := range []string{"write", "create", "delete"} {
+		if ok, _ := reg.Permissions.UserCan([]string{"Cashier"}, "Item", op); ok {
+			t.Fatalf("Cashier must not %s Item", op)
 		}
 	}
 	// open_session records the cashier on the till, so the cashier owns it. The

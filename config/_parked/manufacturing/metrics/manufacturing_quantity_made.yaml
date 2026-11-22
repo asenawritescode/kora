@@ -1,0 +1,10 @@
+name: manufacturing_quantity_made
+label: "Quantity made"
+type: simple
+model: "Production Run"
+measure:
+  agg: sum
+  field: quantity
+time: business_date
+format: number
+description: "Quantity made from the Production Run records (sum)."

@@ -20,17 +20,21 @@ type DrillRequest struct {
 }
 
 // Drill is the record list behind one number: the filters that list its records of the record type
-// Doctype. The list API applies the caller's own record scope.
+// Doctype. The list API applies the caller's own record scope. ListOpenable is false when a group
+// reads a path or a line: the list filters cannot name those, so the list would show another number.
 type Drill struct {
-	Doctype string
-	Filters []Filter
+	Doctype      string
+	Filters      []Filter
+	ListOpenable bool
 }
 
 // drillTimeLayout is the datetime text the list API compares the time field with: UTC, to the second.
 const drillTimeLayout = "2006-01-02 15:04:05"
 
-// Drill turns a simple sum or count into the record list it summarizes. Only a header measure
-// drills: a sum over a line field would list whole records, which does not add up to the number.
+// Drill turns a simple sum or count into the record list it summarizes: the records with at least one line
+// that the number counts, see DrillRecords. A distinct count cannot be listed, since its records are not
+// the rows it adds up. Groups may follow a path or name a line dimension, and a line measure sums lines; those
+// are not list filters, see Drill.ListOpenable.
 // Business days map to instants through clock, so the record time field is compared in UTC.
 func (c Catalog) Drill(req DrillRequest, clock tenanttime.Clock) (Drill, error) {
 	m, ok := c.Metrics[req.Metric]
@@ -45,19 +49,28 @@ func (c Catalog) Drill(req DrillRequest, clock tenanttime.Clock) (Drill, error) 
 		return Drill{}, fmt.Errorf("metric %q reads %q, which has no fact model", m.Name, m.Model)
 	}
 	f := dt.Facts
-	if m.Measure == nil || m.Measure.Agg == aggCountDistinct || (m.Measure.Agg == aggSum && lineField(f, m.Measure.Field)) {
+	if m.Measure == nil || m.Measure.Agg == aggCountDistinct {
 		return Drill{}, fmt.Errorf("metric %q does not drill to records", m.Name)
 	}
 	if toTime(req.To).Before(toTime(req.From)) {
 		return Drill{}, fmt.Errorf("range ends %s before it starts %s", req.To, req.From)
 	}
-	out := Drill{Doctype: dt.Name}
+	// A line measure counts lines the list filters cannot name, so its list would show another number.
+	out := Drill{Doctype: dt.Name, ListOpenable: !(m.Measure.Agg == aggSum && lineField(f, m.Measure.Field))}
 	out.Filters = append(out.Filters, m.Filters...)
 	for _, dim := range slices.Sorted(maps.Keys(req.Group)) {
-		if !headerDimension(f, dim) {
+		if _, _, ok := factDimOf(f, dim); !ok {
 			return Drill{}, fmt.Errorf("%q is not a record dimension of %q", dim, m.Model)
 		}
-		out.Filters = append(out.Filters, Filter{Field: dim, Op: "=", Value: req.Group[dim]})
+		if !headerDimension(f, dim) {
+			out.ListOpenable = false
+			continue
+		}
+		field := dim
+		if f.GroupsByStatus(dim) {
+			field = f.StatusField // the list filters on the status field, not the fact column
+		}
+		out.Filters = append(out.Filters, Filter{Field: field, Op: "=", Value: req.Group[dim]})
 	}
 	out.Filters = append(out.Filters, timeFilters(dt, f.Time, req.From, req.To, clock)...)
 	return out, nil
@@ -109,6 +122,9 @@ func (p fieldPath) isLine() bool {
 
 // headerDimension reports whether column is a dimension read from the record itself, not its lines.
 func headerDimension(f *doctype.FactModel, column string) bool {
+	if f.GroupsByStatus(column) {
+		return true
+	}
 	for _, d := range f.Dimensions {
 		if d.ColumnName() == column {
 			return !fieldPath(d.Field).isLine()

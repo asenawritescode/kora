@@ -638,15 +638,7 @@ func AnalyzeImpact(database *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype
 		if !exists {
 			continue
 		}
-		if oldF.Fieldtype != newF.Fieldtype {
-			change := TieredChange{
-				Tier:    "blocked",
-				DocType: oldDT.Name,
-				Field:   name,
-				Change:  fmt.Sprintf("Change field type %s → %s", oldF.Fieldtype, newF.Fieldtype),
-				Rows:    rowCount,
-				Message: fmt.Sprintf("Type change from %s to %s requires data conversion for %d rows", oldF.Fieldtype, newF.Fieldtype, rowCount),
-			}
+		if change, ok := typeChange(oldDT, oldF, newF, rowCount, dialect); ok {
 			preview.Changes = append(preview.Changes, change)
 		}
 		if change, ok := requirednessChange(oldDT, oldF, newF, rowCount, dialect); ok {
@@ -668,6 +660,33 @@ func AnalyzeImpact(database *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype
 	}
 
 	return preview
+}
+
+// typeChange classifies a field whose fieldtype changed. The change is blocked because it needs a data
+// conversion, unless it only relabels login text (see relabelsLoginText).
+func typeChange(oldDT *doctype.DocType, oldF, newF *doctype.Field, rowCount int, dialect db.Dialect) (TieredChange, bool) {
+	if oldF.Fieldtype == newF.Fieldtype || relabelsLoginText(oldF, newF, dialect) {
+		return TieredChange{}, false
+	}
+	return TieredChange{
+		Tier:    "blocked",
+		DocType: oldDT.Name,
+		Field:   newF.Fieldname,
+		Change:  fmt.Sprintf("Change field type %s → %s", oldF.Fieldtype, newF.Fieldtype),
+		Rows:    rowCount,
+		Message: fmt.Sprintf("Type change from %s to %s requires data conversion for %d rows", oldF.Fieldtype, newF.Fieldtype, rowCount),
+	}, true
+}
+
+// relabelsLoginText reports whether a Data field and a User field are relabelled into one another without
+// converting data. A User field stores a login, which is the text a Data field already holds, and both
+// share one column type, so no row changes and the change is not a blocked type conversion.
+func relabelsLoginText(oldF, newF *doctype.Field, dialect db.Dialect) bool {
+	loginText := func(fieldtype string) bool { return fieldtype == "Data" || fieldtype == "User" }
+	if !loginText(oldF.Fieldtype) || !loginText(newF.Fieldtype) {
+		return false
+	}
+	return dialect.ColumnType(oldF) == dialect.ColumnType(newF)
 }
 
 // requirednessChange classifies a field whose required flag changed. Making a

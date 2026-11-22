@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"maps"
 	"math/rand/v2"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -27,13 +26,15 @@ import (
 // Drift checker settings. driftDays is the business days sampled per model; driftWindowDays is how far
 // around a day the source is searched, which covers any tenant zone and business-day cutoff.
 const (
-	driftDays        = 7
-	driftWindowDays  = 2
-	driftMetricName  = "kora.facts.drift_days"
-	driftMetricLabel = "model"
-	driftLeaseTable  = "_kora_fact_drift_lease"
-	driftLeaseSecs   = 300
-	driftEvery       = 10 * time.Minute
+	driftDays       = 7
+	driftWindowDays = 2
+	// driftModelsPerRun bounds the models one run checks, so the cost does not grow with every record type.
+	driftModelsPerRun = 8
+	driftMetricName   = "kora.facts.drift_days"
+	driftMetricLabel  = "model"
+	driftLeaseTable   = "_kora_fact_drift_lease"
+	driftLeaseSecs    = 300
+	driftEvery        = 10 * time.Minute
 )
 
 // errDriftLeaseLost means another replica holds the drift lease now, so this run must not mark anything.
@@ -70,6 +71,8 @@ type DriftChecker struct {
 	mu    sync.Mutex
 	ready bool
 	token int64 // fencing token of the lease this run holds
+	// cursor is where the next run starts in the generated models it rotates through.
+	cursor int
 }
 
 // RunDue checks every model once and reports how many sampled days drifted. A full maintenance lane or another
@@ -93,7 +96,7 @@ func (c *DriftChecker) RunDue(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	drifted := 0
-	for _, dt := range c.models() {
+	for _, dt := range c.runModels() {
 		n, err := c.checkModel(ctx, dt, days)
 		drifted += n
 		if err != nil {
@@ -111,21 +114,8 @@ func (c *DriftChecker) RunDue(ctx context.Context) (int, error) {
 func (c *DriftChecker) drainRebuilds(ctx context.Context) error {
 	store := &JobStore{DB: c.DB, Dialect: c.Dialect}
 	rebuilder := &Rebuilder{DB: c.DB, Dialect: c.Dialect, Registry: c.Registry, Site: c.Site, Store: store}
-	for _, dt := range c.models() {
-		for {
-			job, err := store.Claim(ctx, dt.Name, c.Owner)
-			if err != nil {
-				return err
-			}
-			if job == nil {
-				break
-			}
-			if err := rebuilder.Run(ctx, job); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	_, err := drainRebuildJobs(ctx, store, rebuilder, c.Owner, c.models())
+	return err
 }
 
 // Run checks until ctx ends, pausing driftEvery plus up to half of it as jitter.
@@ -143,16 +133,45 @@ func (c *DriftChecker) Run(ctx context.Context) {
 	}
 }
 
-// models lists the fact models in name order, so each run visits them the same way.
-func (c *DriftChecker) models() []*doctype.DocType {
-	var out []*doctype.DocType
-	for _, dt := range c.Registry.All() {
-		if dt.Facts != nil {
-			out = append(out, dt)
+// runModels picks the models one run checks. Declared models are checked every run while they fit in
+// driftModelsPerRun; the remaining slots rotate through the generated models, so each one is checked
+// within a bounded number of runs.
+func (c *DriftChecker) runModels() []*doctype.DocType {
+	var declared, generated []*doctype.DocType
+	for _, dt := range c.models() {
+		if dt.Facts.Generated {
+			generated = append(generated, dt)
+		} else {
+			declared = append(declared, dt)
 		}
 	}
-	slices.SortFunc(out, func(a, b *doctype.DocType) int { return strings.Compare(a.Name, b.Name) })
+	if len(declared) >= driftModelsPerRun {
+		return c.rotate(declared, driftModelsPerRun)
+	}
+	return append(declared, c.rotate(generated, driftModelsPerRun-len(declared))...)
+}
+
+// rotate returns n models of list from the cursor, and advances the cursor past them. A list that fits is
+// returned whole and the cursor is left alone.
+func (c *DriftChecker) rotate(list []*doctype.DocType, n int) []*doctype.DocType {
+	if n <= 0 {
+		return nil
+	}
+	if len(list) <= n {
+		return list
+	}
+	start := c.cursor % len(list)
+	out := make([]*doctype.DocType, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, list[(start+i)%len(list)])
+	}
+	c.cursor = (start + n) % len(list)
 	return out
+}
+
+// models lists the fact models in name order, so each run visits them the same way.
+func (c *DriftChecker) models() []*doctype.DocType {
+	return factModels(c.Registry)
 }
 
 // checkModel compares the sampled days of one model and marks each drifting day dirty.
@@ -311,7 +330,10 @@ func (c *DriftChecker) expectedHeaders(ctx context.Context, tx *sql.Tx, dt *doct
 	}
 	for _, name := range names {
 		row := records[name]
-		head, _ := Map(dt, Change{RecordID: name, Owner: text(row["owner"]), Created: instant(row["creation"]), Data: row}, clock)
+		head, _, err := Map(dt, Change{RecordID: name, Owner: text(row["owner"]), Created: instant(row["creation"]), Data: row}, clock)
+		if err != nil {
+			return nil, fmt.Errorf("facts: %s %s: %w", dt.Name, name, err)
+		}
 		if head.BusinessDate == day && !head.Deleted {
 			expected[name] = canonicalHeader(dt, head)
 		}

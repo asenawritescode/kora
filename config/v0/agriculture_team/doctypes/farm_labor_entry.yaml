@@ -61,3 +61,11 @@ fields:
       Cancelled
     default: Recorded
     in_list_view: true
+facts:
+  time: work_date
+  status_field: status
+  measures:
+    - field: hours
+    - field: completed_quantity
+  dimensions:
+    - field: crop_plan

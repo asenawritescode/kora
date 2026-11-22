@@ -2,6 +2,7 @@ package doctype
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/asenawritescode/kora/contract"
@@ -91,9 +92,6 @@ func TestToSExpr_AllSections(t *testing.T) {
 	if len(parsed.Permissions) != len(snapshot.Permissions) {
 		t.Errorf("permissions: got %d, want %d", len(parsed.Permissions), len(snapshot.Permissions))
 	}
-	if len(parsed.AnalyticsMetrics) != len(snapshot.AnalyticsMetrics) {
-		t.Errorf("analytics_metrics: got %d, want %d", len(parsed.AnalyticsMetrics), len(snapshot.AnalyticsMetrics))
-	}
 	if len(parsed.Scripts) != len(snapshot.Scripts) {
 		t.Errorf("scripts: got %d, want %d", len(parsed.Scripts), len(snapshot.Scripts))
 	}
@@ -118,18 +116,20 @@ func TestToSExpr_AllSections(t *testing.T) {
 	}
 }
 
-func TestToSExpr_RoundTripReports(t *testing.T) {
-	snapshot := &ConfigSnapshot{Reports: []json.RawMessage{json.RawMessage(`{"name":"cake_profit","label":"Cake profit","queries":[]}`)}}
-	sexpr := ToSExpr(snapshot)
-	parsed, err := FromSExpr(sexpr)
-	if err != nil {
-		t.Fatalf("FromSExpr error = %v", err)
+func TestConfigSnapshotIgnoresLegacyReports(t *testing.T) {
+	// Snapshots stored before the analytics removal carry a reports field. It is
+	// ignored on decode, both as JSON and as an S-expression section.
+	var fromJSON ConfigSnapshot
+	legacyJSON := `{"doctypes":[],"reports":[{"name":"cake_profit"}],"analytics_metrics":[{"name":"total_sales"}]}`
+	if err := json.Unmarshal([]byte(legacyJSON), &fromJSON); err != nil {
+		t.Fatalf("JSON snapshot with legacy reports and analytics_metrics: %v", err)
 	}
-	if len(parsed.Reports) != 1 || string(parsed.Reports[0]) != string(snapshot.Reports[0]) {
-		t.Fatalf("reports were not preserved: %#v", parsed.Reports)
+	base := strings.TrimSuffix(strings.TrimSpace(ToSExpr(&ConfigSnapshot{})), ")")
+	legacy := base + "\n  (reports\n    (report-json \"{}\"))\n  (analytics-metrics\n    (metric-json \"{}\")))"
+	if _, err := FromSExpr(legacy); err != nil {
+		t.Fatalf("S-expression snapshot with legacy reports and analytics-metrics: %v", err)
 	}
 }
-
 func TestToSExpr_RoundTripsScheduledJobDefinitions(t *testing.T) {
 	snapshot := &ConfigSnapshot{ScheduledJobs: []contract.ScheduledJobDefinition{{
 		Name: "invoice-generation", Type: "subscription_invoice", Schedule: "0 0 * * *",
@@ -436,15 +436,6 @@ func buildFullTestSnapshot() *ConfigSnapshot {
 		Permissions: []*Permission{
 			{Doctype: "Invoice", Role: "Administrator", Read: true, Write: true, Create: true, Delete: true, Submit: true},
 			{Doctype: "Invoice", Role: "Guest", Read: true, IfAssigned: []string{"assignee_user"}},
-		},
-		AnalyticsMetrics: []*AnalyticsMetricConfig{
-			{
-				Name:      "total_revenue",
-				Label:     "Total Revenue",
-				Type:      "sum",
-				DocType:   "Invoice",
-				FieldName: "amount",
-			},
 		},
 		Scripts: []*ScriptSnapshot{
 			{

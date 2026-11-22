@@ -12,7 +12,7 @@ Account, Accounting Period, Journal Entry (+ Journal Line). Role: Accountant
 Not here yet: **nothing creates journal entries automatically**. A sale, bill or
 payment does not post. That needs the posting work in the Engine (a time-boxed
 spike first). Today entries are made by a person. No chart of accounts is
-preloaded, no period-close lock, no trial balance report.
+preloaded, no period-close lock, no trial balance.
 
 Checks: `go test ./doctype -run TestERP`, and
 `go test -tags integration ./api -run TestERP` (needs MySQL, see `KORA_TEST_DSN`).

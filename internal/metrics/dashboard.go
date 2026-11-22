@@ -3,6 +3,8 @@ package metrics
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -14,8 +16,10 @@ import (
 // Dashboard lays out metrics by name: tiles for single values and charts over time or a dimension.
 // It never names SQL, models or fields. One dashboard is one YAML document in a pack's dashboards/ directory.
 type Dashboard struct {
-	Name         string  `yaml:"name" json:"name"`
-	Label        string  `yaml:"label" json:"label"`
+	Name  string `yaml:"name" json:"name"`
+	Label string `yaml:"label" json:"label"`
+	// Pack is the display label of the pack that ships the dashboard, set from its pack.yaml when the pack loads.
+	Pack         string  `yaml:"-" json:"pack,omitempty"`
 	Description  string  `yaml:"description,omitempty" json:"description,omitempty"`
 	DefaultRange string  `yaml:"default_range" json:"default_range"`
 	Tiles        []Tile  `yaml:"tiles,omitempty" json:"tiles,omitempty"`
@@ -51,8 +55,8 @@ var (
 	dashboardKeys = yamlKeys(Dashboard{})
 	tileKeys      = yamlKeys(Tile{})
 	chartKeys     = yamlKeys(Chart{})
-	rangeNames    = []string{"today", "last_7_days", "last_30_days", "this_month", "last_month"}
-	compareNames  = []string{"", "none", "previous_period"}
+	rangeNames    = presetNames()
+	compareNames  = []string{"", "none", "previous_period", "week_before"}
 	chartKinds    = []string{"bar", "line", "table"}
 	grainNames    = []string{"day", "week", "month"}
 )
@@ -65,6 +69,41 @@ func ValidDashboardRange(name string) bool {
 // ParseDashboardDirectory reads the dashboard documents of a pack's dashboards/ directory. A missing directory has none.
 func ParseDashboardDirectory(dir string) ([]Dashboard, error) {
 	return readYAMLDir(dir, ParseDashboardYAML)
+}
+
+// ParsePackDashboards reads a pack directory's dashboards and labels each with the pack's display label from its
+// pack.yaml. A pack without a label leaves Pack empty.
+func ParsePackDashboards(packDir string) ([]Dashboard, error) {
+	dashboards, err := ParseDashboardDirectory(filepath.Join(packDir, "dashboards"))
+	if err != nil {
+		return nil, err
+	}
+	body, err := os.ReadFile(filepath.Join(packDir, "pack.yaml"))
+	if errors.Is(err, os.ErrNotExist) {
+		return dashboards, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read pack.yaml: %w", err)
+	}
+	label, err := PackLabel(body)
+	if err != nil {
+		return nil, err
+	}
+	for i := range dashboards {
+		dashboards[i].Pack = label
+	}
+	return dashboards, nil
+}
+
+// PackLabel reads the optional display label of a pack from its pack.yaml bytes.
+func PackLabel(body []byte) (string, error) {
+	var head struct {
+		Label string `yaml:"label"`
+	}
+	if err := goyaml.Unmarshal(body, &head); err != nil {
+		return "", fmt.Errorf("pack.yaml: %w", err)
+	}
+	return head.Label, nil
 }
 
 // ParseDashboardYAML decodes one dashboard document; source names it in errors.
@@ -207,23 +246,27 @@ func (ch Chart) checkAxis() error {
 	return nil
 }
 
-// checkDimension checks that every fact model a metric reads declares column as a dimension.
+// checkDimension checks that every fact model a metric reads declares column as a dimension, and that a
+// header total is not split by a line dimension: the same rule a query applies.
 func (c catalog) checkDimension(name, column string) error {
-	models, err := c.leafModels(name, map[string]bool{})
+	leaves, err := c.leafMetrics(name, map[string]bool{})
 	if err != nil {
 		return err
 	}
-	for _, model := range models {
-		if dt := c.models[model]; dt == nil || dt.Facts == nil || !isDimension(dt.Facts, column) {
+	for _, m := range leaves {
+		dt := c.models[m.Model]
+		if dt == nil || dt.Facts == nil || !isDimension(dt.Facts, column) {
 			return fmt.Errorf("%q is not a dimension of metric %q", column, name)
+		}
+		if !headerDimension(dt.Facts, column) && m.Measure != nil && m.Measure.Agg == aggSum && !lineField(dt.Facts, m.Measure.Field) {
+			return fmt.Errorf("%w: %q is a header total and cannot be split by %s; use a line measure", ErrMeasureNotOnLines, name, column)
 		}
 	}
 	return nil
 }
 
-// leafModels lists the fact models a metric reads, through its ratio and derived references.
-// seen holds the metrics on the current path, so a cycle is reported rather than followed.
-func (c catalog) leafModels(name string, seen map[string]bool) ([]string, error) {
+// leafMetrics lists the simple metrics name is computed from: itself, or the leaves of its ratio or derived refs.
+func (c catalog) leafMetrics(name string, seen map[string]bool) ([]Metric, error) {
 	m, ok := c.metrics[name]
 	if !ok {
 		return nil, fmt.Errorf("unknown metric %q", name)
@@ -232,17 +275,17 @@ func (c catalog) leafModels(name string, seen map[string]bool) ([]string, error)
 		return nil, fmt.Errorf("metric %q is part of a cycle", name)
 	}
 	if m.Model != "" {
-		return []string{m.Model}, nil
+		return []Metric{m}, nil
 	}
 	seen[name] = true
 	defer delete(seen, name)
-	var models []string
+	var leaves []Metric
 	for _, ref := range m.refs() {
-		refModels, err := c.leafModels(ref, seen)
+		refLeaves, err := c.leafMetrics(ref, seen)
 		if err != nil {
 			return nil, err
 		}
-		models = append(models, refModels...)
+		leaves = append(leaves, refLeaves...)
 	}
-	return models, nil
+	return leaves, nil
 }

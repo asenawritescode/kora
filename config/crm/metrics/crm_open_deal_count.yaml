@@ -1,0 +1,13 @@
+name: crm_open_deal_count
+label: "Open deals"
+type: balance
+model: "Deal"
+measure:
+  agg: count
+filters:
+  - field: pipeline_stage
+    op: "in"
+    value: ["Lead", "Qualified", "Proposal", "Negotiation"]
+time: business_date
+format: number
+description: "Open deals from the Deal records (count)."

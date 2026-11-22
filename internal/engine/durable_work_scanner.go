@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/asenawritescode/kora/internal/eventbus"
 	"log/slog"
 	"sort"
 	"strings"
@@ -15,7 +14,6 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/configstore"
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/net"
@@ -45,7 +43,6 @@ type DurableWorkScannerConfig struct {
 		Acquire(context.Context) (func(), error)
 	}, error)
 	Common              *site.CommonConfig
-	Analytics           *analytics.Config
 	CellID              string
 	DirectoryConsumerID string
 	PageSize            uint16
@@ -78,39 +75,23 @@ type DurableWorkScanner struct {
 	tenantWorkAdmission func(*site.Config) (interface {
 		Acquire(context.Context) (func(), error)
 	}, error)
-	common                 *site.CommonConfig
-	analytics              *analytics.Config
-	cellID                 string
-	scanKey                string
-	pageSize               uint16
-	probeWait              time.Duration
-	pageYield              time.Duration
-	interval               time.Duration
-	archiveHorizon         time.Duration
-	probes                 atomic.Uint64
-	due                    atomic.Uint64
-	probeFails             atomic.Uint64
-	scanFails              atomic.Uint64
-	wakeFails              atomic.Uint64
-	capacity               atomic.Uint64
-	sweeps                 atomic.Uint64
-	lastMu                 sync.RWMutex
-	lastSweep              time.Time
-	walMu                  sync.Mutex
-	walPending             bool
-	walUnknown             bool
-	walOldest              time.Duration
-	walObservedAt          time.Time
-	walBytes               int64
-	walBytesKnown          bool
-	walScanActive          bool
-	walPublished           bool
-	walPublishedPending    bool
-	walPublishedUnknown    bool
-	walPublishedOldest     time.Duration
-	walPublishedAt         time.Time
-	walPublishedBytes      int64
-	walPublishedBytesKnown bool
+	common         *site.CommonConfig
+	cellID         string
+	scanKey        string
+	pageSize       uint16
+	probeWait      time.Duration
+	pageYield      time.Duration
+	interval       time.Duration
+	archiveHorizon time.Duration
+	probes         atomic.Uint64
+	due            atomic.Uint64
+	probeFails     atomic.Uint64
+	scanFails      atomic.Uint64
+	wakeFails      atomic.Uint64
+	capacity       atomic.Uint64
+	sweeps         atomic.Uint64
+	lastMu         sync.RWMutex
+	lastSweep      time.Time
 }
 
 type DurableWorkScannerSnapshot struct {
@@ -123,11 +104,6 @@ type DurableWorkScannerSnapshot struct {
 	CompletedSweeps       uint64
 	LastCompletedSweep    time.Time
 	LastCompletedSweepAge time.Duration
-	ColdWALPending        bool
-	ColdWALAgeUnknown     bool
-	ColdWALOldestAge      time.Duration
-	ColdWALBytes          int64
-	ColdWALBytesKnown     bool
 }
 
 func NewDurableWorkScanner(config DurableWorkScannerConfig) (*DurableWorkScanner, error) {
@@ -163,7 +139,7 @@ func NewDurableWorkScanner(config DurableWorkScannerConfig) (*DurableWorkScanner
 		store:  store, directory: config.Directory, tenants: config.Tenants, coordinator: config.Coordinator,
 		workAdmission:       config.WorkAdmission,
 		tenantWorkAdmission: config.TenantWorkAdmission,
-		common:              config.Common, analytics: config.Analytics, cellID: strings.TrimSpace(config.CellID), scanKey: scanKey,
+		common:              config.Common, cellID: strings.TrimSpace(config.CellID), scanKey: scanKey,
 		pageSize: config.PageSize, probeWait: config.ProbeTimeout, pageYield: config.PageYield, interval: config.Interval,
 		archiveHorizon: config.ArchiveHorizon,
 		done:           make(chan struct{}),
@@ -259,7 +235,6 @@ func (s *DurableWorkScanner) scanPage(ctx context.Context) (bool, error) {
 		}
 		s.lastMu.Unlock()
 	}
-	s.beginColdWALScan(cursor)
 	var page []site.Descriptor
 	err = s.withWork(ctx, func() error {
 		var pageErr error
@@ -274,7 +249,6 @@ func (s *DurableWorkScanner) scanPage(ctx context.Context) (bool, error) {
 	}
 	for _, descriptor := range page {
 		if err := ctx.Err(); err != nil {
-			s.markColdWALBytesUnknown()
 			return false, err
 		}
 		if !activeScanDescriptor(descriptor, s.cellID) {
@@ -288,7 +262,6 @@ func (s *DurableWorkScanner) scanPage(ctx context.Context) (bool, error) {
 		cancel()
 		s.probes.Add(1)
 		if probeErr != nil {
-			s.markColdWALBytesUnknown()
 			s.probeFails.Add(1)
 			// A future full sweep retries this tenant; do not let one unavailable
 			// tenant pin the cursor and starve the rest of the assigned directory.
@@ -315,16 +288,12 @@ func (s *DurableWorkScanner) scanPage(ctx context.Context) (bool, error) {
 		next = page[len(page)-1].SiteID
 	}
 	if err := s.withWork(ctx, func() error { return s.store.Advance(ctx, s.scanKey, cursor, next, completed) }); err != nil {
-		if len(page) > 0 {
-			s.markColdWALBytesUnknown()
-		}
 		return false, err
 	}
 	if completed {
 		s.lastMu.Lock()
 		s.lastSweep = time.Now().UTC()
 		s.lastMu.Unlock()
-		s.publishColdWALSnapshot()
 		s.sweeps.Add(1)
 	}
 	return completed, nil
@@ -417,7 +386,7 @@ func (s *DurableWorkScanner) probeTenant(ctx context.Context, descriptor site.De
 	}
 	// The page descriptor may be stale by the time this cold probe runs.
 	// Recheck the current assignment fetched with the tenant coordinates before
-	// examining WAL or opening its tenant database.
+	// examining the tenant database.
 	if !site.BelongsToDeployment(info.RuntimeCellID, s.cellID) {
 		return false, nil
 	}
@@ -425,19 +394,6 @@ func (s *DurableWorkScanner) probeTenant(ctx context.Context, descriptor site.De
 		return false, nil
 	}
 	config := site.ReconstructSiteConfigFromDBInfo(info, s.common)
-	if s.analytics != nil && strings.TrimSpace(s.analytics.WALDir) != "" && strings.TrimSpace(info.SiteID) != "" {
-		backlog, walErr := eventbus.InspectWALBacklog(AnalyticsTenantWALDir(s.analytics.WALDir, info.SiteID))
-		if walErr != nil {
-			slog.Warn("analytics WAL probe failed", "tenant_id", descriptor.SiteID, "error", walErr)
-		}
-		s.recordColdWALBacklog(backlog)
-		if backlog.Pending {
-			return true, nil
-		}
-		if walErr != nil {
-			return false, walErr
-		}
-	}
 	var admission interface {
 		Acquire(context.Context) (func(), error)
 	}
@@ -455,18 +411,6 @@ func (s *DurableWorkScanner) probeTenant(ctx context.Context, descriptor site.De
 	})
 	if err != nil || due {
 		return due, err
-	}
-	if s.analytics != nil && strings.TrimSpace(s.analytics.WALDir) != "" && strings.TrimSpace(info.SiteID) != "" {
-		backlog, walErr := eventbus.InspectWALBacklog(AnalyticsTenantWALDir(s.analytics.WALDir, info.SiteID))
-		if walErr != nil {
-			if backlog.Pending {
-				s.recordColdWALBacklog(backlog)
-				return true, nil
-			}
-			return false, fmt.Errorf("probe tenant analytics WAL: %w", walErr)
-		}
-		s.recordColdWALBacklog(backlog)
-		return backlog.Pending, nil
 	}
 	return false, nil
 }
@@ -488,86 +432,6 @@ func withTenantProbeAdmission(ctx context.Context, admission interface {
 	return work()
 }
 
-func (s *DurableWorkScanner) recordColdWALBacklog(backlog eventbus.WALBacklogSnapshot) {
-	if s == nil {
-		return
-	}
-	s.walMu.Lock()
-	defer s.walMu.Unlock()
-	if !backlog.BytesKnown || !s.walBytesKnown {
-		s.walBytesKnown = false
-	} else {
-		const maxInt64 = int64(^uint64(0) >> 1)
-		if backlog.Bytes < 0 || backlog.Bytes > maxInt64-s.walBytes {
-			s.walBytesKnown = false
-		} else {
-			s.walBytes += backlog.Bytes
-		}
-	}
-	if !backlog.Pending {
-		return
-	}
-	s.walPending = true
-	if !backlog.AgeKnown {
-		s.walUnknown = true
-	} else {
-		currentAge := s.walOldest
-		if !s.walObservedAt.IsZero() {
-			currentAge += time.Since(s.walObservedAt)
-		}
-		if s.walObservedAt.IsZero() || backlog.OldestAge > currentAge {
-			s.walOldest = backlog.OldestAge
-			s.walObservedAt = time.Now().UTC()
-		}
-	}
-}
-
-func (s *DurableWorkScanner) beginColdWALScan(cursor string) {
-	if s == nil {
-		return
-	}
-	s.walMu.Lock()
-	defer s.walMu.Unlock()
-	if cursor == "" {
-		s.walPending, s.walUnknown, s.walOldest, s.walObservedAt = false, false, 0, time.Time{}
-		s.walBytes, s.walBytesKnown, s.walScanActive = 0, true, true
-		return
-	}
-	if !s.walScanActive {
-		// The persisted cursor outlived the process, but the in-memory sum for
-		// earlier pages did not. Keep this partial-sweep sample explicitly unknown.
-		s.walBytes, s.walBytesKnown, s.walScanActive = 0, false, true
-	}
-}
-
-func (s *DurableWorkScanner) markColdWALBytesUnknown() {
-	if s == nil {
-		return
-	}
-	s.walMu.Lock()
-	s.walBytesKnown = false
-	s.walMu.Unlock()
-}
-
-func (s *DurableWorkScanner) publishColdWALSnapshot() {
-	if s == nil {
-		return
-	}
-	s.walMu.Lock()
-	defer s.walMu.Unlock()
-	s.walPublished = true
-	s.walPublishedPending = s.walPending
-	s.walPublishedUnknown = s.walUnknown
-	s.walPublishedOldest = s.walOldest
-	if s.walPending && !s.walObservedAt.IsZero() {
-		s.walPublishedOldest += time.Since(s.walObservedAt)
-	}
-	s.walPublishedAt = time.Now().UTC()
-	s.walPublishedBytes = s.walBytes
-	s.walPublishedBytesKnown = s.walBytesKnown
-	s.walScanActive = false
-}
-
 func hasDueTenantWork(ctx context.Context, database *sql.DB, dialect db.Dialect, archiveHorizon time.Duration) (bool, error) {
 	now := dialect.NowTimestamp()
 	checks := []struct {
@@ -586,7 +450,6 @@ func hasDueTenantWork(ctx context.Context, database *sql.DB, dialect db.Dialect,
 		{[]string{"_kora_workflow_signal", "_kora_workflow_signal_receipt", "_kora_workflow_subscription", "_kora_workflow_instance"}, `SELECT 1 FROM _kora_workflow_signal s JOIN _kora_workflow_subscription sub ON sub.tenant_id=s.tenant_id AND sub.event_type=s.event_type JOIN _kora_workflow_instance i ON i.tenant_id=sub.tenant_id AND i.id=sub.instance_id AND i.current_step=sub.step_id AND i.status='waiting' LEFT JOIN _kora_workflow_signal_receipt r ON r.tenant_id=s.tenant_id AND r.event_id=s.event_id AND r.instance_id=i.id WHERE r.event_id IS NULL LIMIT 1`},
 		{[]string{"_kora_request"}, `SELECT 1 FROM _kora_request WHERE status='pending' AND due_at IS NOT NULL AND due_at<=` + now + ` LIMIT 1`},
 		{[]string{"_kora_notification_delivery"}, `SELECT 1 FROM _kora_notification_delivery WHERE (status='pending' AND available_at<=` + now + `) OR (status='sending' AND lease_until<=` + now + `) LIMIT 1`},
-		{[]string{"_kora_analytics_rebuild_job", "_kora_analytics_rebuild_lease"}, `SELECT 1 FROM _kora_analytics_rebuild_job j LEFT JOIN _kora_analytics_rebuild_lease l ON l.site=j.site AND l.job_id=j.id WHERE j.status IN ('queued','running') AND (l.job_id IS NULL OR l.lease_until<=` + now + `) LIMIT 1`},
 	}
 	needed := make(map[string]struct{})
 	for _, check := range checks {
@@ -701,23 +564,10 @@ func (s *DurableWorkScanner) Snapshot() DurableWorkScannerSnapshot {
 	if !last.IsZero() {
 		age = time.Since(last)
 	}
-	s.walMu.Lock()
-	walPending, walUnknown, walOldest, walObservedAt := s.walPending, s.walUnknown, s.walOldest, s.walObservedAt
-	walBytes, walBytesKnown := int64(0), false
-	if s.walPublished {
-		walPending, walUnknown, walOldest, walObservedAt = s.walPublishedPending, s.walPublishedUnknown, s.walPublishedOldest, s.walPublishedAt
-		walBytes, walBytesKnown = s.walPublishedBytes, s.walPublishedBytesKnown
-	}
-	s.walMu.Unlock()
-	if walPending && !walObservedAt.IsZero() {
-		walOldest += time.Since(walObservedAt)
-	}
 	return DurableWorkScannerSnapshot{
 		Probes: s.probes.Load(), DueTenants: s.due.Load(), ProbeFailures: s.probeFails.Load(),
 		ScanFailures: s.scanFails.Load(), WakeFailures: s.wakeFails.Load(), CapacityRejections: s.capacity.Load(),
 		CompletedSweeps: s.sweeps.Load(), LastCompletedSweep: last, LastCompletedSweepAge: age,
-		ColdWALPending: walPending, ColdWALAgeUnknown: walUnknown, ColdWALOldestAge: walOldest,
-		ColdWALBytes: walBytes, ColdWALBytesKnown: walBytesKnown,
 	}
 }
 

@@ -319,7 +319,7 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				t.Fatalf("issue entries = %s, want 1", got)
 			}
 			sale1 := one("SELECT name FROM " + tbl("Sale"))
-			// #337: a Cashier (who cannot read Item) prints the sale and gets the
+			// #337: a Cashier prints the sale and gets the
 			// item name, not the record id.
 			rec = serve("Cashier", http.MethodGet, "/print/sale_record_receipt?as=text&record=Sale&name="+sale1, "")
 			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Maize") || strings.Contains(rec.Body.String(), "ITM-1") {
@@ -389,8 +389,10 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 					t.Errorf("%s %s %s = %d, want 403: %s", role, method, path, rec.Code, rec.Body.String())
 				}
 			}
-			deny("Cashier", http.MethodGet, "/r/Item/ITM-1", "")
-			deny("Cashier", http.MethodGet, "/r/Item", "")
+			// Owner decision 2026-11-22: cashiers read Item (names in analytics) but cannot change it.
+			deny("Cashier", http.MethodPost, "/r/Item", `{"item_name":"X"}`)
+			deny("Cashier", http.MethodPut, "/r/Item/ITM-1", `{"item_name":"X"}`)
+			deny("Cashier", http.MethodDelete, "/r/Item/ITM-1", "")
 			deny("Cashier", http.MethodGet, "/r/Stock%20Balance/SB-1", "")
 			deny("Cashier", http.MethodGet, "/r/Stock%20Balance", "")
 			deny("Cashier", http.MethodPost, "/r/Sale", saleBody(till, 1, "x"))
@@ -409,8 +411,8 @@ func TestPOSCashierDayAcrossDialects(t *testing.T) {
 				t.Error("sale deleted")
 			}
 
-			// 5. Cashier can read Sale and Till Session records.
-			for _, p := range []string{"/r/Sale/" + sale1, "/r/Till%20Session/" + till} {
+			// 5. Cashier can read Sale, Till Session and Item records.
+			for _, p := range []string{"/r/Sale/" + sale1, "/r/Till%20Session/" + till, "/r/Item/ITM-1", "/r/Item"} {
 				if rec := serve("Cashier", http.MethodGet, p, ""); rec.Code != http.StatusOK {
 					t.Errorf("GET %s = %d: %s", p, rec.Code, rec.Body.String())
 				}

@@ -12,3 +12,4 @@ filters:
 time: business_date
 format: number
 description: Net change in stock from stock adjustments, by reason.
+verified: true

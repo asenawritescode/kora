@@ -1,0 +1,10 @@
+name: shipments_charge
+label: "Charge"
+type: balance
+model: "Shipment"
+measure:
+  agg: sum
+  field: charge
+time: business_date
+format: currency
+description: "Charge from the Shipment records (sum)."

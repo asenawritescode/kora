@@ -1,0 +1,9 @@
+name: appointments_count
+label: "Appointments"
+type: balance
+model: "Appointment"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Appointments from the Appointment records (count)."

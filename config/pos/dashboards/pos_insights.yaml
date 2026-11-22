@@ -1,7 +1,7 @@
 name: pos_insights
 label: Insights
 description: Sales and receipts at the till.
-default_range: last_30_days
+default_range: today
 tiles:
   - metric: sales
     compare: previous_period

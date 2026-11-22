@@ -1,0 +1,9 @@
+name: members_count
+label: "Members"
+type: balance
+model: "Member"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Members from the Member records (count)."

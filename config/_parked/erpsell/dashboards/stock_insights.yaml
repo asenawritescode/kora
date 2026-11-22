@@ -1,0 +1,11 @@
+name: stock_insights
+label: Stock insights
+description: Stock adjustments by reason.
+default_range: today
+charts:
+  - id: stock_adjustments
+    title: Stock adjustments
+    kind: table
+    metrics: [stock_adjusted]
+    by: reason
+    compare: none

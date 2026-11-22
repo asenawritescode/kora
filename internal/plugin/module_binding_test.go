@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
+	"github.com/asenawritescode/kora/internal/projection"
 )
 
 func TestResolveModulesRequiresExplicitSelectionAndEnforcesScope(t *testing.T) {
@@ -286,12 +286,12 @@ func TestFreshModuleCompositionModeMatrix(t *testing.T) {
 }
 
 type testProjectionStore struct {
-	snapshot analytics.PublishedProjectionSnapshot
+	snapshot projection.Snapshot
 	saved    bool
 	stale    bool
 }
 
-func (s *testProjectionStore) Save(_ context.Context, snapshot analytics.PublishedProjectionSnapshot) error {
+func (s *testProjectionStore) Save(_ context.Context, snapshot projection.Snapshot) error {
 	s.snapshot, s.saved = snapshot, true
 	return nil
 }

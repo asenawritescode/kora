@@ -103,18 +103,6 @@ func TestLivePostgresConfigStoreLifecycle(t *testing.T) {
 		t.Fatalf("loaded views = %#v, want Inventory at /inventory", loadedViews)
 	}
 
-	metric := &doctype.AnalyticsMetricConfig{Name: "stock_count", Label: "Stock Count", Type: "count", DocType: dt.Name}
-	if err := store.SaveAnalyticsMetrics([]*doctype.AnalyticsMetricConfig{metric}, "tenant.example.test"); err != nil {
-		t.Fatal("save PostgreSQL analytics metric:", err)
-	}
-	loadedMetrics, err := store.LoadAnalyticsMetrics("tenant.example.test")
-	if err != nil {
-		t.Fatal("load PostgreSQL analytics metrics:", err)
-	}
-	if len(loadedMetrics) != 1 || loadedMetrics[0].Name != metric.Name {
-		t.Fatalf("loaded analytics metrics = %#v, want stock_count", loadedMetrics)
-	}
-
 	script := &doctype.ScriptSnapshot{Name: "inventory_check", ScriptType: "api_method", MethodPath: "inventory.check", IsActive: true, Source: "return true"}
 	if err := store.SaveScripts([]*doctype.ScriptSnapshot{script}, map[string]string{script.ScriptHash: script.Source}, "tenant.example.test"); err != nil {
 		t.Fatal("save PostgreSQL script:", err)

@@ -1,10 +1,13 @@
 package doctype
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -24,7 +27,15 @@ func SetAdminRole(role string) { AdminRole = role }
 type Role struct {
 	Name            string `yaml:"name"        json:"name"`
 	WorkspaceAccess bool   `yaml:"workspace_access" json:"workspace_access"`
-	Description     string `yaml:"description" json:"description"`
+	// InsightsAccess is nil when the role does not say; a role that does not say keeps Insights.
+	InsightsAccess *bool  `yaml:"insights_access,omitempty" json:"insights_access,omitempty"`
+	Description    string `yaml:"description" json:"description"`
+}
+
+// InsightsAllowed reports whether the role grants Insights (metrics, explore, dashboards, saved reports).
+// A role that leaves insights_access unset grants it.
+func (r Role) InsightsAllowed() bool {
+	return r.InsightsAccess == nil || *r.InsightsAccess
 }
 
 // Permission definition from permissions.yaml
@@ -371,6 +382,25 @@ func permissionAllows(p *Permission, operation string) bool {
 	}
 }
 
+// InsightsAllowed reports whether userRoles grant Insights. The admin role always does. An identity with no
+// roles (an extension, for example) is not denied by a role flag: record read permissions still apply. Otherwise
+// the identity is denied only when every one of its roles sets insights_access: false; a role the matrix does
+// not define grants it by default, as an unset insights_access does.
+func (pm *PermissionMatrix) InsightsAllowed(userRoles []string) bool {
+	if len(userRoles) == 0 {
+		return true
+	}
+	for _, name := range userRoles {
+		if name == AdminRole {
+			return true
+		}
+		if role := pm.GetRole(name); role == nil || role.InsightsAllowed() {
+			return true
+		}
+	}
+	return false
+}
+
 // AllRoles returns all registered roles.
 func (pm *PermissionMatrix) AllRoles() []*Role {
 	if pm == nil {
@@ -498,7 +528,9 @@ func ParseRolesFile(path string) ([]*Role, error) {
 // ParseRolesYAML parses roles from YAML data in memory.
 func ParseRolesYAML(data []byte) ([]*Role, error) {
 	var roles []*Role
-	if err := yaml.Unmarshal(data, &roles); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&roles); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parsing roles: %w", err)
 	}
 	for _, r := range roles {

@@ -1,0 +1,9 @@
+name: produce_deliveries_count
+label: "Deliveries"
+type: simple
+model: "Produce Delivery"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Deliveries from the Produce Delivery records (count)."

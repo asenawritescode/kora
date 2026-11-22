@@ -6,7 +6,7 @@ import (
 	"context"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
+	"github.com/asenawritescode/kora/internal/cloudrelay"
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/email"
@@ -17,6 +17,7 @@ import (
 	"github.com/asenawritescode/kora/internal/plugin"
 	"github.com/asenawritescode/kora/internal/policy"
 	"github.com/asenawritescode/kora/internal/print"
+	"github.com/asenawritescode/kora/internal/projection"
 	"github.com/asenawritescode/kora/internal/query"
 	"github.com/asenawritescode/kora/internal/recon"
 	"github.com/asenawritescode/kora/internal/requests"
@@ -49,7 +50,7 @@ type Services struct {
 	ExecutePublishedOperation      func(context.Context, policy.Execution, contract.BusinessScope, contract.ModuleID, contract.PublishedOperation, contract.SchemaRef, contract.CommandMeta, []byte) (contract.OperationReceipt, error)
 	LookupPublishedOperation       func(context.Context, policy.Execution, contract.BusinessScope, contract.ModuleID, contract.PublishedOperation, contract.IdempotencyKey) (contract.OperationReceipt, bool, error)
 	LookupPublishedOperationByID   func(context.Context, policy.Execution, contract.BusinessScope, contract.OperationID) (contract.OperationReceipt, bool, error)
-	PublishedProjections           *analytics.PublishedProjectionStore
+	PublishedProjections           *projection.Store
 	BusinessReconciliation         *recon.BusinessReconciliationService
 	WorkAdmission                  *dbaccess.Admission
 	RealtimeAdmission              interface {
@@ -60,8 +61,7 @@ type Services struct {
 	}
 	EventBus                  eventstream.Bus
 	Mailer                    *email.Sender
-	AnalyticsRelay            *analytics.CloudRelay
-	AnalyticsRebuild          *analytics.RebuildRunner
+	AnalyticsRelay            *cloudrelay.Relay
 	Realtime                  *natsprovider.Provider
 	ScriptStore               *script.Store
 	AsyncHookInvocations      script.AsyncHookInvocationStore
@@ -93,7 +93,7 @@ type ModuleOpenWorkInspector struct {
 // EnqueueCloudProductEvent submits best-effort telemetry to the tenant-owned
 // relay. A missing relay or a full queue drops telemetry without affecting the
 // caller's business operation.
-func (s Services) EnqueueCloudProductEvent(event analytics.CloudProductEventDTO, dedupeKey string) bool {
+func (s Services) EnqueueCloudProductEvent(event cloudrelay.ProductEvent, dedupeKey string) bool {
 	return s.AnalyticsRelay != nil && s.AnalyticsRelay.EnqueueProductEvent(event, dedupeKey)
 }
 

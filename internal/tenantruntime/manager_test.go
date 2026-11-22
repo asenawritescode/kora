@@ -133,7 +133,9 @@ func TestManagerCloseJoinsAddRetirementBeforeClosingTenantDatabase(t *testing.T)
 	old.DatabaseIdentity = "old-resource"
 	old.DB = oldDB
 	worker := &blockedRuntimeWorker{entered: make(chan struct{}), release: make(chan struct{})}
-	old.AnalyticsWorker = worker
+	if !old.StartWorker(context.Background(), func(context.Context) { close(worker.entered); <-worker.release }) {
+		t.Fatal("start blocked tenant worker")
+	}
 	manager, err := NewManager([]*Runtime{old}, 1)
 	if err != nil {
 		t.Fatal("create tenant manager:", err)
@@ -179,15 +181,6 @@ type blockedRuntimeWorker struct {
 	entered chan struct{}
 	release chan struct{}
 }
-
-func (*blockedRuntimeWorker) StartAsyncContext(context.Context) {}
-func (w *blockedRuntimeWorker) Stop() {
-	close(w.entered)
-	<-w.release
-}
-func (*blockedRuntimeWorker) InvalidateMetrics(string) {}
-func (*blockedRuntimeWorker) InvalidateAllMetrics()    {}
-func (*blockedRuntimeWorker) Flush() error             { return nil }
 
 func TestManagerFailedActivationPreservesCurrentSnapshot(t *testing.T) {
 	current := runtimeFixture("tenant-1", "tenant.example", 5, 10)

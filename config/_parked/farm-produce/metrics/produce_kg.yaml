@@ -1,0 +1,10 @@
+name: produce_kg
+label: "Kilograms"
+type: simple
+model: "Produce Delivery"
+measure:
+  agg: sum
+  field: quantity_kg
+time: business_date
+format: number
+description: "Kilograms from the Produce Delivery records (sum)."

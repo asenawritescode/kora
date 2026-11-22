@@ -17,9 +17,15 @@ type FactModel struct {
 	Measures    []FactMeasure   `yaml:"measures" json:"measures"`
 	Dimensions  []FactDimension `yaml:"dimensions,omitempty" json:"dimensions,omitempty"`
 	StatusField string          `yaml:"status_field,omitempty" json:"status_field,omitempty"`
+	// CurrencyField names a header dimension whose value is a Currency link. Query results then list the
+	// currencies their rows carry, so a caller can show a mixed-currency note. Empty means the base currency.
+	CurrencyField string `yaml:"currency_field,omitempty" json:"currency_field,omitempty"`
 	// ExcludeStatus lists statuses whose records have no fact rows: they are tombstoned until they
 	// move to a status outside this list. Each value must be an option of StatusField.
 	ExcludeStatus []string `yaml:"exclude_status,omitempty" json:"exclude_status,omitempty"`
+	// Generated marks a model built from the record type's fields because its pack declares none.
+	// It lives in memory only: the JSON, YAML and s-expression forms of the record type omit it.
+	Generated bool `yaml:"-" json:"-"`
 }
 
 // FactMeasure is a number summed by metrics. Field is "name" on the record, or
@@ -74,6 +80,16 @@ func (m FactMeasure) ColumnName() string {
 
 // ColumnName is the dimension's output column: the leaf of Field.
 func (d FactDimension) ColumnName() string { return factPath(d.Field).leaf() }
+
+// StatusColumn is the fact column that holds the value of the status field. On a model with a status field
+// it is also a dimension every query can group by, without a declared dimension.
+const StatusColumn = "status"
+
+// GroupsByStatus reports whether column names the status dimension: the status field's value, on a model
+// that has a status field.
+func (f *FactModel) GroupsByStatus(column string) bool {
+	return f != nil && f.StatusField != "" && column == StatusColumn
+}
 
 // TableName is the fact table of a record type.
 func (f *FactModel) TableName(dt *DocType) string {
@@ -142,7 +158,24 @@ func (f *FactModel) Validate(dt *DocType, reg map[string]*DocType) []CrossFileEr
 	f.checkMeasures(c)
 	f.checkDimensions(c)
 	f.checkStatus(c)
+	f.checkCurrency(c)
 	return c.errs
+}
+
+func (f *FactModel) checkCurrency(c *factChecks) {
+	if f.CurrencyField == "" {
+		return
+	}
+	for _, d := range f.Dimensions {
+		if d.ColumnName() == f.CurrencyField {
+			if fld, _ := f.column(c.dt, c.lines, factPath(d.Field)); fld != nil && fld.Fieldtype == "Link" && fld.Options == "Currency" {
+				return
+			}
+			c.bad("facts.currency_field", fmt.Sprintf("facts currency_field %q must be a Link to Currency", f.CurrencyField))
+			return
+		}
+	}
+	c.bad("facts.currency_field", fmt.Sprintf("facts currency_field %q must name a dimension", f.CurrencyField))
 }
 
 func (f *FactModel) checkTime(c *factChecks) {
@@ -168,9 +201,6 @@ func (f *FactModel) checkLines(c *factChecks, reg map[string]*DocType) {
 }
 
 func (f *FactModel) checkMeasures(c *factChecks) {
-	if len(f.Measures) == 0 {
-		c.bad("facts.measures", "facts needs at least one measure")
-	}
 	for _, m := range f.Measures {
 		fld, why := f.column(c.dt, c.lines, factPath(m.Field))
 		if why != "" {
@@ -191,8 +221,8 @@ func (f *FactModel) checkDimensions(c *factChecks) {
 			c.bad("facts.dimensions", why)
 			continue
 		}
-		if fld == nil || !(fld.Fieldtype == "Link" || fld.Fieldtype == "Select" || fld.Fieldtype == "Data" || fld.Fieldtype == "Check") {
-			c.bad("facts.dimensions", fmt.Sprintf("facts dimension %q must be a Link, Select, Data or Check field", d.Field))
+		if fld == nil || !(fld.Fieldtype == "Link" || fld.Fieldtype == "User" || fld.Fieldtype == "Select" || fld.Fieldtype == "Data" || fld.Fieldtype == "Check") {
+			c.bad("facts.dimensions", fmt.Sprintf("facts dimension %q must be a Link, User, Select, Data or Check field", d.Field))
 		}
 		c.claim("facts.dimensions", d.ColumnName())
 	}

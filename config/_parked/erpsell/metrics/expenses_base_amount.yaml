@@ -1,0 +1,11 @@
+name: expenses_base_amount
+label: Expenses in base currency
+type: simple
+model: Expense
+measure:
+  agg: sum
+  field: base_amount
+time: business_date
+good: down
+format: currency
+description: Expenses in base currency from the Expense records (sum).

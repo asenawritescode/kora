@@ -26,8 +26,8 @@ This draft is intentionally outside the repository. It models the workbook as Ki
 
 The spreadsheet's flavour/size lookup is represented by selecting a `Cake Recipe` Link on each order. Flavour, size, price, and cost then populate from that linked recipe. This is deterministic and uses the backend's actual link behavior rather than Excel cross-sheet lookup syntax.
 
-The `reports/` directory defines the governed analytics intent for the workbook's cross-DocType reporting. It is kept separate from DocType import until the report registry is wired into site provisioning.
+The `metrics/` and `dashboards/` directories hold the workbook's cross-DocType reporting (the former `reports/` folder, converted). Metrics are governed definitions, not DocType import, and are kept separate from it.
 
 ## Import note
 
-This is a review draft only. Do not run `kora config import` until the model and naming are approved. The repository's current CLI import reads DocTypes, roles, permissions, workflows, and views; reporting definitions should be added through the appropriate analytics/report mechanism in a later integration step.
+This is a review draft only. Do not run `kora config import` until the model and naming are approved. The repository's current CLI import reads DocTypes, roles, permissions, workflows, and views; reporting definitions should be added as metrics and dashboards in a later integration step.

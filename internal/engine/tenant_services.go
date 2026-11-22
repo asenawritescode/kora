@@ -6,14 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/asenawritescode/kora/internal/eventbus"
 	"log/slog"
 	"math/rand/v2"
 	"sort"
 	"time"
 
+	"github.com/asenawritescode/kora/internal/cloudrelay"
+	"github.com/asenawritescode/kora/internal/eventbus"
+	"github.com/asenawritescode/kora/internal/projection"
+
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/api"
 	"github.com/asenawritescode/kora/internal/application/process"
 	"github.com/asenawritescode/kora/internal/auth"
@@ -51,8 +53,8 @@ import (
 type TenantServiceConfig struct {
 	ProcessContext          context.Context
 	Common                  *site.CommonConfig
-	Analytics               *analytics.Config
-	CloudRelay              *analytics.CloudRelayConfig
+	Analytics               *eventbus.Config
+	CloudRelay              *cloudrelay.Config
 	CloudUsage              *usage.Config
 	AnalyticsQueueAdmission *eventbus.QueueAdmission
 	NATS                    *natsprovider.Provider
@@ -116,7 +118,7 @@ func NewTenantServiceInstaller(config TenantServiceConfig) (func(site.DBSiteInfo
 		return nil, errors.New("tenant storage resolver is required")
 	}
 	if config.Analytics == nil {
-		config.Analytics = analytics.LoadConfig()
+		config.Analytics = eventbus.LoadConfig()
 	}
 	if config.ProcessContext == nil {
 		config.ProcessContext = context.Background()
@@ -365,7 +367,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	services.LookupPublishedOperationByID = func(ctx context.Context, execution policy.Execution, scope contract.BusinessScope, id contract.OperationID) (contract.OperationReceipt, bool, error) {
 		return moduleStore.LoadPublishedOperationReceipt(ctx, scope.TenantID, id, execution.Actor(), scope)
 	}
-	services.PublishedProjections = &analytics.PublishedProjectionStore{DB: loaded.DB, Dialect: dialect, Site: loaded.SiteID}
+	services.PublishedProjections = &projection.Store{DB: loaded.DB, Dialect: dialect, Site: loaded.SiteID}
 	workAdmission, err := site.ConnectionAdmission(cfg)
 	if err != nil {
 		return fmt.Errorf("resolve tenant work admission: %w", err)
@@ -456,15 +458,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	}
 	services.RealtimeAdmission = config.RealtimeAdmission
 	services.UploadAdmission = config.UploadAdmission
-	bootstrapCtx, cancelBootstrap := context.WithTimeout(config.ProcessContext, 30*time.Second)
-	err = withTenantWorkAdmission(bootstrapCtx, workAdmission, "bootstrap analytics schema", func() error {
-		return analytics.BootstrapTables(bootstrapCtx, loaded.DB, dialect)
-	})
-	cancelBootstrap()
-	if err != nil {
-		return fmt.Errorf("bootstrap tenant analytics tables: %w", err)
-	}
-	baseBus := eventbus.NewChannelBusWithLimits(config.Analytics.ChannelSize, config.Analytics.MaxEventBytes, config.Analytics.MaxQueuedBytes, AnalyticsTenantWALDir(config.Analytics.WALDir, loaded.SiteID))
+	baseBus := eventbus.NewChannelBus(config.Analytics.ChannelSize, config.Analytics.MaxEventBytes)
 	if config.AnalyticsQueueAdmission != nil {
 		queueAware, ok := baseBus.(interface {
 			SetQueueAdmission(*eventbus.QueueAdmission) error
@@ -492,15 +486,6 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	loaded.AnalyticsEventBus = multiBus
 	if err := registerTenantWorkerStart(config, func() error { return multiBus.Start() }); err != nil {
 		return fmt.Errorf("register tenant event fanout for %s: %w", loaded.Name, err)
-	}
-	analyticsWorker := analytics.NewWorker(multiBus, loaded.DB, dialect, loaded.Registry, loaded.Name, config.Analytics)
-	analyticsWorker.SetWorkAdmission(workAdmission)
-	loaded.AnalyticsWorker = analyticsWorker
-	if err := registerTenantWorkerStart(config, func() error {
-		loaded.AnalyticsWorker.StartAsyncContext(loaded.WorkerContext(config.ProcessContext))
-		return nil
-	}); err != nil {
-		return fmt.Errorf("register analytics worker for tenant %s: %w", loaded.Name, err)
 	}
 	services.EventBus = multiBus
 	workflowConfig := config.Workflow
@@ -549,16 +534,6 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	if cloudErr := registerCloudWorkers(config, loaded, &services, multiBus, dialect); cloudErr != nil {
 		return cloudErr
 	}
-	runner := analytics.NewRebuildRunner(loaded.DB, dialect, loaded.Name, loaded.Registry, services.WorkAdmission)
-	services.AnalyticsRebuild = runner
-	if err := registerTenantWorkerStart(config, func() error {
-		if !loaded.StartWorker(config.ProcessContext, runner.Run) {
-			return fmt.Errorf("tenant runtime is stopping")
-		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("register analytics rebuild runner for tenant %s: %w", loaded.Name, err)
-	}
 	if config.NATS != nil {
 		services.Realtime = config.NATS
 		if err := registerTenantWorkerStart(config, func() error {
@@ -570,16 +545,6 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 			return nil
 		}); err != nil {
 			return fmt.Errorf("register realtime bridge for tenant %s: %w", loaded.Name, err)
-		}
-		if err := registerTenantWorkerStart(config, func() error {
-			if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
-				RunAnalyticsRebuildConsumer(ctx, loaded.Name, config.NATS, runner)
-			}) {
-				return fmt.Errorf("tenant runtime is stopping")
-			}
-			return nil
-		}); err != nil {
-			return fmt.Errorf("register analytics rebuild notification consumer for tenant %s: %w", loaded.Name, err)
 		}
 	}
 	if outboxErr := registerOutboxWorkers(config, loaded, &services, dialect); outboxErr != nil {
@@ -924,7 +889,7 @@ func withTenantWorkAdmission(ctx context.Context, admission interface {
 // configured: the analytics relay and the usage reporter.
 func registerCloudWorkers(config TenantServiceConfig, loaded *knet.LoadedSite, services *tenantruntime.Services, bus *eventbus.MultiBus, dialect kdb.Dialect) error {
 	if config.CloudRelay != nil {
-		relay := analytics.NewCloudRelay(bus, loaded.Name, *config.CloudRelay)
+		relay := cloudrelay.New(bus, loaded.Name, *config.CloudRelay)
 		services.AnalyticsRelay = relay
 		if err := registerTenantWorkerStart(config, func() error { relay.Start(); return nil }); err != nil {
 			return fmt.Errorf("register analytics relay for tenant %s: %w", loaded.Name, err)

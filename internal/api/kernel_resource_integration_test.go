@@ -926,13 +926,6 @@ func (b workflowActionScriptMutationBus) Publish(eventstream.ChangeEvent) error 
 func (workflowActionScriptMutationBus) Subscribe() (<-chan eventstream.ChangeEvent, error) {
 	return make(chan eventstream.ChangeEvent), nil
 }
-func (workflowActionScriptMutationBus) DrainWAL(func(eventstream.ChangeEvent)) (int, error) {
-	return 0, nil
-}
-func (workflowActionScriptMutationBus) RotateWAL() (string, error)     { return "", nil }
-func (workflowActionScriptMutationBus) CommitWALRotation(string) error { return nil }
-func (workflowActionScriptMutationBus) Dropped() int64                 { return 0 }
-func (workflowActionScriptMutationBus) Close() error                   { return nil }
 
 func (s *captureAsyncWorkflowSink) Enqueue(_ context.Context, request orm.AsyncHookRequest) error {
 	if s.err != nil {

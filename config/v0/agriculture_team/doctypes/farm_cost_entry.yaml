@@ -68,3 +68,11 @@ fields:
       Cancelled
     default: Recorded
     in_list_view: true
+facts:
+  time: incurred_on
+  status_field: status
+  measures:
+    - field: amount
+  dimensions:
+    - field: cost_category
+    - field: crop_plan

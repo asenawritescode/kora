@@ -47,10 +47,9 @@ fields:
     fieldtype: Data
     label: Note
   - fieldname: cashier
-    fieldtype: Data
+    fieldtype: User
     label: Cashier
     read_only: true
-    search_index: true
 doc_constraints:
   - type: predicate
     predicate: '(if (== direction "Out") (<= amount 1000) 1)'

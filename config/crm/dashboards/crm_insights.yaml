@@ -1,0 +1,29 @@
+name: crm_insights
+label: "CRM insights"
+description: "Figures and charts that reproduce the crm overview report."
+default_range: last_30_days
+tiles:
+  - metric: crm_open_deal_count
+  - metric: crm_open_deal_value
+  - metric: crm_activities_count
+charts:
+  - id: activities_by_status
+    title: "Activities by status"
+    kind: bar
+    metrics: [crm_activities_count]
+    by: status
+  - id: pipeline_by_stage
+    title: "Open pipeline value by stage"
+    kind: bar
+    metrics: [crm_open_deal_value]
+    by: pipeline_stage
+  - id: closed_deals_by_outcome
+    title: "Closed deals by outcome"
+    kind: bar
+    metrics: [crm_closed_deal_count, crm_closed_deal_value]
+    by: pipeline_stage
+  - id: leads_by_stage
+    title: "Leads by lifecycle stage"
+    kind: bar
+    metrics: [crm_leads_count]
+    by: lifecycle_stage

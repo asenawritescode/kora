@@ -33,6 +33,7 @@ func ParsePackFile(dir string) (contract.PackManifest, bool, error) {
 func parsePackManifest(body []byte, dirName string) (contract.PackManifest, bool, error) {
 	var raw struct {
 		Name     string                     `yaml:"name"`
+		Label    string                     `yaml:"label"` // display label, read by metrics.PackLabel
 		Version  string                     `yaml:"version"`
 		Requires []contract.ManifestPackRef `yaml:"requires"`
 	}
@@ -148,7 +149,7 @@ func mergePackSnapshot(dst, next *doctype.ConfigSnapshot, names map[string]bool)
 	dst.DocTypes = append(dst.DocTypes, next.DocTypes...)
 	dst.Permissions = append(dst.Permissions, next.Permissions...)
 	dst.Views = append(dst.Views, next.Views...)
-	dst.Reports, dst.Metrics, dst.Dashboards = append(dst.Reports, next.Reports...), append(dst.Metrics, next.Metrics...), append(dst.Dashboards, next.Dashboards...)
+	dst.Metrics, dst.Dashboards = append(dst.Metrics, next.Metrics...), append(dst.Dashboards, next.Dashboards...)
 	dst.Commands = append(dst.Commands, next.Commands...)
 	dst.Modules = append(dst.Modules, next.Modules...)
 	dst.Queries = append(dst.Queries, next.Queries...)

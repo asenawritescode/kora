@@ -1,0 +1,11 @@
+name: harvest_quantity
+label: Harvest quantity
+type: simple
+model: Harvest Batch
+measure:
+  agg: sum
+  field: quantity
+time: business_date
+good: up
+format: number
+description: Quantity of the harvest batches by harvest date (sum).

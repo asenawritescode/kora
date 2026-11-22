@@ -1,0 +1,9 @@
+name: dispensary_prescriptions_count
+label: "Prescriptions"
+type: balance
+model: "Prescription"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Prescriptions from the Prescription records (count)."

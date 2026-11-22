@@ -74,3 +74,10 @@ fields:
     in_list_view: true
   - fieldname: notes
     fieldtype: Text
+facts:
+  time: expense_date
+  measures:
+    - field: total_cost
+  dimensions:
+    - field: item
+    - field: payment_method

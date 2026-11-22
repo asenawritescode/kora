@@ -1,0 +1,17 @@
+name: documents_insights
+label: "Documents insights"
+description: "Figures and charts that reproduce the documents overview report."
+default_range: last_30_days
+tiles:
+  - metric: documents_count
+charts:
+  - id: documents_by_status
+    title: "Documents by status"
+    kind: bar
+    metrics: [documents_count]
+    by: status
+  - id: documents_by_category
+    title: "Documents by category"
+    kind: bar
+    metrics: [documents_count]
+    by: category

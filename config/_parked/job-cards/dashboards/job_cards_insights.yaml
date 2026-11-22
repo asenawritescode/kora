@@ -1,0 +1,13 @@
+name: job_cards_insights
+label: "Workshop insights"
+description: "Figures and charts that reproduce the workshop overview report."
+default_range: last_30_days
+tiles:
+  - metric: job_cards_count
+  - metric: job_cards_labour_charge
+charts:
+  - id: job_cards_by_status
+    title: "Job cards by status"
+    kind: bar
+    metrics: [job_cards_count]
+    by: status

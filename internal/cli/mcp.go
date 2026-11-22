@@ -72,11 +72,11 @@ Configure Claude Desktop to use it:
 			if tenantID == "" {
 				return fmt.Errorf("--tenant-id is required when KORA_MCP_EXTENSION_TOKEN is configured")
 			}
-			executor, err := mcp.NewExtensionReadExecutor(db, kdb.Resolve(cfg.DBType), reg, contract.TenantID(tenantID), siteName, token)
+			reader, err := mcp.NewExtensionReader(mcp.ExtensionReaderOptions{Database: db, Dialect: kdb.Resolve(cfg.DBType), Registry: reg, TenantID: contract.TenantID(tenantID), Site: siteName, Token: token})
 			if err != nil {
 				return fmt.Errorf("configuring authenticated read-only MCP tools: %w", err)
 			}
-			server = mcp.NewReadOnlyWithExecutor(reg, siteName, executor)
+			server = mcp.NewReadOnlyWithExecutor(reg, siteName, reader.Execute, mcp.WithMetrics(reader.Metrics))
 		}
 		return server.Run(context.Background())
 	},

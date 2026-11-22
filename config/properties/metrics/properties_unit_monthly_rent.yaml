@@ -1,0 +1,10 @@
+name: properties_unit_monthly_rent
+label: "Unit monthly rent"
+type: balance
+model: "Unit"
+measure:
+  agg: sum
+  field: monthly_rent
+time: business_date
+format: currency
+description: "Unit monthly rent from the Unit records (sum)."

@@ -14,6 +14,9 @@ import (
 	"github.com/asenawritescode/kora/internal/tenanttime"
 )
 
+// factDirtyTable is the table of business days whose summaries are not yet recomputed: _kora_fact_dirty.
+const factDirtyTable = "_kora_fact_dirty"
+
 // defaultTimeout bounds one metrics query, previous period included, when the Engine sets no Timeout.
 const defaultTimeout = 10 * time.Second
 
@@ -30,6 +33,8 @@ type Engine struct {
 	Dialect db.Dialect
 	Catalog Catalog
 	Timeout time.Duration // zero means defaultTimeout
+	// Site is the tenant the query runs for; a dimension of user logins is labelled with that site's users.
+	Site string
 }
 
 // bucketKey identifies one bucket of one group.
@@ -66,6 +71,14 @@ type aggregate struct {
 	groups map[string][]string
 }
 
+// timeout is the bound on one query, zero Timeout meaning defaultTimeout.
+func (e Engine) timeout() time.Duration {
+	if e.Timeout <= 0 {
+		return defaultTimeout
+	}
+	return e.Timeout
+}
+
 // Query compiles q and runs it. A metric or shape this compiler does not run yet fails with
 // ErrNotSupported before any SQL is sent.
 func (e Engine) Query(ctx context.Context, q Query) (Result, error) {
@@ -73,11 +86,7 @@ func (e Engine) Query(ctx context.Context, q Query) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	timeout := e.Timeout
-	if timeout <= 0 {
-		timeout = defaultTimeout
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, e.timeout())
 	defer cancel()
 	cur, err := e.run(ctx, p)
 	if err != nil {
@@ -86,13 +95,25 @@ func (e Engine) Query(ctx context.Context, q Query) (Result, error) {
 	if p.top > 0 {
 		cur = cur.fold(p.topKeys(cur, p.top))
 	}
+	return e.result(ctx, p, cur)
+}
+
+// result labels an aggregate's groups and builds its rows, with the previous period when the query
+// compares.
+func (e Engine) result(ctx context.Context, p plan, cur aggregate) (Result, error) {
 	keys := p.keys(cur)
-	res := Result{Metrics: p.metricNames(), Dimensions: slices.Clone(p.dims), Rows: p.rows(cur, keys, p.from, p.to)}
-	if p.compare == ComparePreviousPeriod {
-		res.Previous, err = e.previousRows(ctx, p, cur, keys)
+	labels, err := e.labelsOf(ctx, p, cur, keys)
+	if err != nil {
+		return Result{}, err
+	}
+	res := Result{Metrics: p.metricNames(), Dimensions: p.dimNames(), Rows: p.rows(cur, keys, p.from, p.to, labels)}
+	if p.compares() {
+		res.Previous, err = e.previousRows(ctx, p, cur, keys, labels)
 		if err != nil {
 			return Result{}, err
 		}
+		from, to := p.previousRange()
+		res.PreviousSpan = Span{from, to}
 	}
 	return res, nil
 }
@@ -100,6 +121,10 @@ func (e Engine) Query(ctx context.Context, q Query) (Result, error) {
 // run sums the plan's range. A plan with a balance also sums the days before the range, as the
 // opening bucket, so the balance can start from it.
 func (e Engine) run(ctx context.Context, p plan) (aggregate, error) {
+	p, err := e.settled(ctx, p)
+	if err != nil {
+		return aggregate{}, err
+	}
 	agg, err := e.sumRows(ctx, p)
 	if err != nil || !p.needsOpening() {
 		return agg, err
@@ -117,6 +142,33 @@ func (e Engine) run(ctx context.Context, p plan) (aggregate, error) {
 		agg.groups[key] = group
 	}
 	return agg, nil
+}
+
+// settled reads the fact rows instead of the summary when a day the plan reads is dirty. Summaries are
+// recomputed per dirty day, so a dirty day's summary can be older than its fact rows, and the result's
+// source sequence claims the fact rows. Clean days are current, so the summary stays the source otherwise.
+func (e Engine) settled(ctx context.Context, p plan) (plan, error) {
+	if !p.summary {
+		return p, nil
+	}
+	dirty, err := e.hasDirtyDays(ctx, p.model.Name, p.to)
+	if err != nil {
+		return plan{}, err
+	}
+	p.summary = !dirty
+	return p, nil
+}
+
+// hasDirtyDays reports whether a business day of model up to and including through is marked dirty in the
+// fact dirty table, which internal/facts writes. It reads the table here, as summaryTable names the summaries,
+// because facts imports nothing from metrics.
+func (e Engine) hasDirtyDays(ctx context.Context, model string, through tenanttime.Date) (bool, error) {
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE model = ? AND business_date <= ?", e.Dialect.QuoteIdent(factDirtyTable)) //nolint:gosec // identifiers only, quoted by the dialect
+	var n int64
+	if err := e.DB.QueryRowContext(ctx, db.Rebind(e.Dialect, query), model, through.String()).Scan(&n); err != nil {
+		return false, fmt.Errorf("metrics: read dirty days of %s: %w", model, err)
+	}
+	return n > 0, nil
 }
 
 // sumRows sends the plan's statement and sums the rows it returns.
@@ -232,8 +284,8 @@ func (p plan) keys(agg aggregate) []string {
 
 // rows gap-fills every key across [from, to] and computes each requested metric from its component
 // sums. Rows come out key by key, bucket by bucket, so two calls with equal keys and equal bucket
-// counts line up by position.
-func (p plan) rows(agg aggregate, keys []string, from, to tenanttime.Date) []Row {
+// counts line up by position. labels is nil or one map per dimension, from labelsOf.
+func (p plan) rows(agg aggregate, keys []string, from, to tenanttime.Date, labels []map[string]string) []Row {
 	starts := bucketStarts(from, to, p.grain)
 	out := make([]Row, 0, len(keys)*len(starts))
 	for _, key := range keys {
@@ -241,6 +293,9 @@ func (p plan) rows(agg aggregate, keys []string, from, to tenanttime.Date) []Row
 		for i, start := range starts {
 			period := toDate(start)
 			row := Row{Period: period, Group: agg.groups[key], Values: p.values(settled[i])}
+			if labels != nil {
+				row.Labels = groupLabels(labels, agg.groups[key])
+			}
 			if key == otherGroup {
 				row.Label = otherLabel
 			}

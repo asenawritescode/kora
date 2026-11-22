@@ -134,18 +134,24 @@ type overrideAudit struct {
 	payloadHash string
 }
 
-// readDashboardOverrides returns every stored override by dashboard name.
-func readDashboardOverrides(ctx context.Context, database *sql.DB) (map[string]contract.DashboardOverride, error) {
-	rows, err := database.QueryContext(ctx, `SELECT name, hidden, display_order, default_range FROM _kora_dashboard_override`)
+// dashboardLayout is the stored state of one dashboard: the tenant's override and its pinned tiles.
+type dashboardLayout struct {
+	override contract.DashboardOverride
+	pinned   []contract.DashboardPin
+}
+
+// readDashboardLayouts returns the stored layout of every dashboard that has one, by dashboard name.
+func readDashboardLayouts(ctx context.Context, database *sql.DB) (map[string]dashboardLayout, error) {
+	rows, err := database.QueryContext(ctx, `SELECT name, hidden, display_order, default_range, pinned FROM _kora_dashboard_override`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }() // read-only query; a close error after a full read changes nothing
-	out := map[string]contract.DashboardOverride{}
+	out := map[string]dashboardLayout{}
 	for rows.Next() {
-		var name, hidden, order string
+		var name, hidden, order, pinned string
 		var o contract.DashboardOverride
-		if err := rows.Scan(&name, &hidden, &order, &o.DefaultRange); err != nil {
+		if err := rows.Scan(&name, &hidden, &order, &o.DefaultRange, &pinned); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(hidden), &o.Hidden); err != nil {
@@ -154,7 +160,11 @@ func readDashboardOverrides(ctx context.Context, database *sql.DB) (map[string]c
 		if err := json.Unmarshal([]byte(order), &o.Order); err != nil {
 			return nil, fmt.Errorf("decode order of dashboard %q: %w", name, err)
 		}
-		out[name] = o
+		pins, err := decodePins(pinned)
+		if err != nil {
+			return nil, fmt.Errorf("decode pins of dashboard %q: %w", name, err)
+		}
+		out[name] = dashboardLayout{override: o, pinned: pins}
 	}
 	return out, rows.Err()
 }
@@ -175,7 +185,7 @@ func (s overrideStore) save(ctx context.Context, name string, o contract.Dashboa
 	if err != nil {
 		return err
 	}
-	query := db.Rebind(s.dialect, `INSERT INTO _kora_dashboard_override (name, hidden, display_order, default_range, modified, modified_by) VALUES (?, ?, ?, ?, ?, ?) `+
+	query := db.Rebind(s.dialect, `INSERT INTO _kora_dashboard_override (name, hidden, display_order, default_range, pinned, modified, modified_by) VALUES (?, ?, ?, ?, '[]', ?, ?) `+
 		s.dialect.UpsertClause([]string{"name"}, []string{"hidden", "display_order", "default_range", "modified", "modified_by"}))
 	return s.withAudit(ctx, "dashboard.override.save", name, audit, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, query, name, string(hidden), string(order), o.DefaultRange, time.Now().UTC(), audit.actor.SubjectUserID)
@@ -183,11 +193,13 @@ func (s overrideStore) save(ctx context.Context, name string, o contract.Dashboa
 	})
 }
 
-// reset removes the override of one dashboard. Resetting a dashboard without an override succeeds, and the
-// reset is audited either way.
+// reset restores the pack layout of one dashboard: the hidden tiles, the order and the default range. Pinned
+// tiles are not layout and stay. Resetting a dashboard without an override succeeds, and the reset is audited
+// either way.
 func (s overrideStore) reset(ctx context.Context, name string, audit overrideAudit) error {
 	return s.withAudit(ctx, "dashboard.override.reset", name, audit, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, db.Rebind(s.dialect, `DELETE FROM _kora_dashboard_override WHERE name = ?`), name)
+		_, err := tx.ExecContext(ctx, db.Rebind(s.dialect, `UPDATE _kora_dashboard_override SET hidden = '[]', display_order = '[]', default_range = '', modified = ?, modified_by = ? WHERE name = ?`),
+			time.Now().UTC(), audit.actor.SubjectUserID, name)
 		return err
 	})
 }

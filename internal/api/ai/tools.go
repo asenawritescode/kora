@@ -447,7 +447,7 @@ func holdForApproval(tx *orm.TxManager, target ApprovalTarget, owner, stepID str
 
 func classifyToolSafety(name string) string {
 	switch {
-	case strings.HasSuffix(name, "_find"), strings.HasSuffix(name, "_list"), strings.HasSuffix(name, "_get"), name == "list_doctypes", strings.Contains(name, "analytics"):
+	case strings.HasSuffix(name, "_find"), strings.HasSuffix(name, "_list"), strings.HasSuffix(name, "_get"), name == "list_doctypes", name == toolListMetrics, name == toolQueryMetrics, name == toolDrillMetrics, name == toolAskChoice:
 		return "safe"
 	case strings.HasSuffix(name, "_create"), strings.HasSuffix(name, "_update"):
 		return "guarded"
@@ -631,13 +631,8 @@ fields:
     computed: (* quantity unit_price)
     read_only: true`
 
-	return []map[string]any{
+	return append([]map[string]any{
 		mutateRecordsToolDef(registry),
-		analyticsToolDef(),
-		analyticsCatalogToolDef(),
-		analyticsQueryToolDef(),
-		analyticsReportsToolDef(),
-		runReportToolDef(),
 		{
 			"type": "function",
 			"function": map[string]any{
@@ -828,7 +823,7 @@ fields:
 				},
 			},
 		},
-	}
+	}, metricsToolDefs()...)
 }
 
 // ---------------------------------------------------------------------------
@@ -845,6 +840,7 @@ type toolCallBatch struct {
 	StepID         string
 	ConversationID string
 	Execution      policy.Execution
+	Turn           *answerTurn
 }
 
 // executeToolCallsForAI runs the model's tool calls and returns results in
@@ -940,7 +936,7 @@ func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.
 			continue
 		}
 
-		result := executeSingleTool(tx, reg, toolInvocation{Name: name, Args: args, Owner: batch.Owner, Site: batch.Site, RunID: batch.RunID, StepID: batch.StepID, IdempotencyKey: aiToolMutationIdempotencyKey(batch.Site, batch.RunID, batch.StepID, id), Execution: batch.Execution}) //nolint:contextcheck // the context travels in tx.Context
+		result := executeSingleTool(tx, reg, toolInvocation{Name: name, Args: args, Owner: batch.Owner, Site: batch.Site, RunID: batch.RunID, StepID: batch.StepID, IdempotencyKey: aiToolMutationIdempotencyKey(batch.Site, batch.RunID, batch.StepID, id), Execution: batch.Execution, Turn: batch.Turn}) //nolint:contextcheck // the context travels in tx.Context
 		status := "completed"
 		if isToolError(result) {
 			status = "failed"
@@ -979,6 +975,7 @@ type toolInvocation struct {
 	StepID         string
 	IdempotencyKey string
 	Execution      policy.Execution
+	Turn           *answerTurn
 }
 
 // executeSingleTool is the production tool path. DocType tools use the same
@@ -1009,17 +1006,8 @@ func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, inv toolInvocat
 	case "validate_doctype_yaml":
 		yamlStr, _ := args["yaml"].(string)
 		return executeValidateYAML(yamlStr)
-	case "get_analytics_catalog":
-		return executeAnalyticsCatalog(reg, tx, siteName, execution)
-	case "query_analytics":
-		return executeAnalyticsQuery(reg, tx, siteName, args, execution)
-	case "list_analytics_reports":
-		return executeAnalyticsReports(reg, tx, siteName, execution)
-	case "run_analytics_report":
-		return executeAnalyticsReport(reg, tx, siteName, args, execution)
-	case "get_analytics_insights", "analytics_insights":
-		doctypeName, _ := args["doctype"].(string)
-		return executeAnalyticsInsights(tx, reg, doctypeName, siteName, execution)
+	case toolListMetrics, toolQueryMetrics, toolDrillMetrics, toolAskChoice:
+		return executeMetricsTool(inv.Turn, toolName, args)
 	case "create_doctype_draft":
 		yamlStr, _ := args["yaml"].(string)
 		if msg, held := holdForApproval(tx, approval, owner, stepID); held {

@@ -3,14 +3,15 @@ package cli
 import (
 	"context"
 	"fmt"
-	"github.com/asenawritescode/kora/internal/eventbus"
 	"log/slog"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/asenawritescode/kora/internal/analytics"
+	"github.com/asenawritescode/kora/internal/cloudrelay"
+	"github.com/asenawritescode/kora/internal/eventbus"
+
 	purchasingengine "github.com/asenawritescode/kora/internal/application/purchasing/engineadapter"
 	subscriptionjobs "github.com/asenawritescode/kora/internal/application/subscriptions/engineadapter"
 	"github.com/asenawritescode/kora/internal/auth"
@@ -187,6 +188,8 @@ func sessionCacheBudgetFromEnv() (uint64, error) {
 // analyticsOutboxFromEnv reads the analytics queue budget and subscriber limit
 // and the outbox archive horizon.
 func analyticsOutboxFromEnv() (uint64, int, time.Duration, error) {
+	// Startup-only: report files left by the retired analytics WAL once.
+	eventbus.LogLegacyWALDir(eventbus.LegacyWALDir)
 	queueBudget, err := analyticsQueueBudgetFromEnv()
 	if err != nil {
 		return 0, 0, 0, err
@@ -430,7 +433,7 @@ func runServe() error {
 		config := natsprovider.FromEnv()
 		natsConfig = &config
 	}
-	cloudRelayConfig := analytics.LoadCloudRelayConfig()
+	cloudRelayConfig := cloudrelay.LoadConfig()
 	cloudUsageConfig, err := usage.LoadConfig(os.Getenv)
 	if err != nil {
 		return fmt.Errorf("configure Cloud usage reporting: %w", err)
@@ -454,7 +457,7 @@ func runServe() error {
 		KernelCommands: kernelCommands, HTTPAllowlist: httpAllowlist, CloudRelay: cloudRelayConfig, CloudUsage: cloudUsageConfig,
 		CORSAllowedOrigins:   splitHTTPOrigins(os.Getenv("KORA_CORS_ALLOWED_ORIGINS")),
 		Workflow:             engine.SelfHostedWorkflowConfig(),
-		Analytics:            analytics.LoadConfig(),
+		Analytics:            eventbus.LoadConfig(),
 		OutboxEnabled:        outboxEnabledFromEnv(os.Getenv("KORA_OUTBOX"), natsEnabled()),
 		OutboxArchiveHorizon: outboxArchiveHorizon,
 		PlatformDBUser:       common.DBUser, PlatformDBPassword: common.DBPassword,

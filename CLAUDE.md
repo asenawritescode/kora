@@ -12,6 +12,7 @@ Standing rules for every agent ticket (source: the M1 tracker, #123). They overr
 - Stay inside the ticket. Out-of-scope bugs or ideas become a new issue (labels `m1-next,blocked`, plus a "Depends on" list), never a side fix.
 - Spec gap or unclear ticket: comment the question on the ticket, label it `blocked`, stop. Never invent design.
 - No hard-coding: verticals (POS, inventory) are config packages on generic core features. No vertical names in Engine or client code.
+- Internal users are referenced only through a User field (link to the person), never as text.
 
 **Code and verification**
 - All SQL goes through the dialect (`internal/db/`). Changes must pass Integration (MySQL) and Integration (Postgres).
@@ -181,7 +182,7 @@ The `schema.AnalyzeImpact()` function compares old vs new doctype, counts affect
 | `internal/scheduler/` | Cron-style background jobs |
 | `internal/secret/` | Encrypted API key storage (AES-256-GCM) for AI provider keys (settable in Studio: Settings → Secrets) |
 | `internal/storage/` | Pluggable attachment blob storage — local filesystem + S3-compatible (MinIO/AWS/R2/Garage) backends with AWS SigV4 signing, presigned URLs, range reads |
-| `internal/analytics/` | EventBus + Worker + Query Engine — real-time CDC, daily/monthly rollup tables, time-series/funnel/duration queries, auto-generated metrics |
+| `internal/metrics/`, `internal/facts/`, `internal/projection/` | Metrics engine, fact tables and module projection storage (`_kora_analytics_module_projection`, `_kora_analytics_rebuild_lock`). The old counter and rollup engine was removed |
 | `internal/mcp/` | Model Context Protocol server — auto-generates tools from doctype registry for Claude Desktop |
 | `internal/api/ai/` | AI Chat handlers, AI config, tool execution loop, token accounting |
 | `internal/script/` | JS script runtime — sandboxed execution engine for extensions |
@@ -427,7 +428,10 @@ No YAML files for site config. `CommonConfigFromEnv()` builds all config from `K
 Key environment variables for extensibility and analytics:
 - `KORA_SCRIPTS_ENABLED` — Enable the JS script engine (default: `false`)
 - `KORA_SCRIPTS_MAX_RAM` — Max RAM per script in MB (default: `64`)
-- `KORA_ANALYTICS` — Enable analytics event bus and rollup tables (default: `false`)
+- `KORA_ANALYTICS_CHANNEL_SIZE` — Per-tenant in-memory change-event queue capacity (default: `1000`, max `10000`)
+- `KORA_ANALYTICS_MAX_EVENT_BYTES` — Largest encoded change event accepted by the bus (default: `1048576`)
+- `KORA_ANALYTICS_MAX_SUBSCRIBERS` — Process-wide listener limit on the in-memory bus (default: `4096`)
+- `KORA_ANALYTICS_PROCESS_MAX_QUEUED_BYTES` — Process-wide byte budget for queued change events (default: `512 MiB`, max `4 GiB`; falls back to `KORA_ANALYTICS_MAX_QUEUED_BYTES`)
 - `KORA_NATS_SUBJECT_PREFIX` — Event subject tree `<prefix>.>` captured by the JetStream event stream (default: `kora`)
 - `KORA_NATS_DEAD_LETTER` — Literal dead-letter subject, stored by the event stream but outside every consumer filter (default: `<prefix>_deadletter`; was `kora.deadletter`). Startup rejects a value the consumer filter (default `<prefix>.>`) matches, which would re-consume dead letters in a loop
 - `KORA_STORAGE_BACKEND` — Attachment storage backend: `local` or `s3` (default: `local`)

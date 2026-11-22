@@ -27,6 +27,8 @@ func (d dashboardsAPI) mount(group *gin.RouterGroup) {
 	group.GET("/:name", d.describe)
 	group.PUT("/:name/override", d.saveOverride)
 	group.DELETE("/:name/override", d.resetOverride)
+	group.POST("/:name/pins", d.addPin)
+	group.DELETE("/:name/pins/:id", d.removePin)
 }
 
 // list answers GET /dashboards with every dashboard the caller can read anything of, by name.
@@ -64,7 +66,7 @@ func (d dashboardsAPI) describe(c *gin.Context) {
 
 // load reads what every dashboard request needs: the metric catalog, the dashboard definitions and the
 // tenant's overrides. It writes the error response and reports false when one of them is unavailable.
-func (d dashboardsAPI) load(c *gin.Context) (metrics.Catalog, []metrics.Dashboard, map[string]contract.DashboardOverride, bool) {
+func (d dashboardsAPI) load(c *gin.Context) (metrics.Catalog, []metrics.Dashboard, map[string]dashboardLayout, bool) {
 	cat, err := d.catalog(c)
 	if err != nil {
 		internalError(c, "loading metric definitions", err)
@@ -80,9 +82,9 @@ func (d dashboardsAPI) load(c *gin.Context) (metrics.Catalog, []metrics.Dashboar
 		writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Dashboards not available for this site", nil)
 		return metrics.Catalog{}, nil, nil, false
 	}
-	overrides, err := readDashboardOverrides(c.Request.Context(), database)
+	overrides, err := readDashboardLayouts(c.Request.Context(), database)
 	if err != nil {
-		internalError(c, "reading dashboard overrides", err)
+		internalError(c, "reading dashboard layouts", err)
 		return metrics.Catalog{}, nil, nil, false
 	}
 	return cat, dashboards, overrides, true
@@ -90,7 +92,7 @@ func (d dashboardsAPI) load(c *gin.Context) (metrics.Catalog, []metrics.Dashboar
 
 // view is the dashboard as the caller sees it. Tiles and charts the caller cannot read are dropped, and a
 // dashboard left with neither is not visible. The tenant's override is applied last.
-func (d dashboardsAPI) view(c *gin.Context, cat metrics.Catalog, dash metrics.Dashboard, overrides map[string]contract.DashboardOverride) (contract.DashboardDefinition, bool) {
+func (d dashboardsAPI) view(c *gin.Context, cat metrics.Catalog, dash metrics.Dashboard, layouts map[string]dashboardLayout) (contract.DashboardDefinition, bool) {
 	tiles := []contract.DashboardTile{}
 	for _, t := range dash.Tiles {
 		if d.readable(c, cat, t.Metric) {
@@ -103,14 +105,16 @@ func (d dashboardsAPI) view(c *gin.Context, cat metrics.Catalog, dash metrics.Da
 			charts = append(charts, chartOf(ch))
 		}
 	}
-	if len(tiles) == 0 && len(charts) == 0 {
+	layout := layouts[dash.Name]
+	pinned := d.visiblePins(c, cat, layout.pinned)
+	if len(tiles) == 0 && len(charts) == 0 && len(pinned) == 0 {
 		return contract.DashboardDefinition{}, false
 	}
 	def := contract.DashboardDefinition{
-		Name: dash.Name, Label: dash.Label, Description: dash.Description, DefaultRange: dash.DefaultRange,
-		Tiles: tiles, Charts: charts,
+		Name: dash.Name, Label: dash.Label, Pack: dash.Pack, Description: dash.Description, DefaultRange: dash.DefaultRange,
+		Pinned: pinned, Tiles: tiles, Charts: charts,
 	}
-	return applyDashboardOverride(def, overrides[dash.Name]), true
+	return applyDashboardOverride(def, layout.override), true
 }
 
 // readableAll reports whether the caller may read every named metric.

@@ -42,6 +42,7 @@ func (r *Registry) Register(dt *DocType) {
 	defer r.mu.Unlock()
 	dt.NormalizePublicAccess()
 	dt.RebuildDerivedMetadata()
+	dt.refreshGeneratedFacts()
 	dt.ResourceName = normalizeResourceName(dt.ResourceName, dt.Name)
 	r.doctypes[dt.Name] = dt
 	r.aliases[dt.ResourceName] = dt.Name
@@ -172,6 +173,7 @@ func (r *Registry) LoadFull(doctypes []*DocType, roles []*Role, permissions []*P
 	for _, dt := range doctypes {
 		dt.NormalizePublicAccess()
 		dt.RebuildDerivedMetadata()
+		dt.refreshGeneratedFacts()
 		dt.ResourceName = normalizeResourceName(dt.ResourceName, dt.Name)
 		r.doctypes[dt.Name] = dt
 		r.aliases[dt.ResourceName] = dt.Name
@@ -202,6 +204,15 @@ func (r *Registry) Remove(name string) {
 // CanUser checks permission for a user with given roles.
 func (r *Registry) CanUser(userRoles []string, doctype, operation string) (allowed bool, ownerOnly bool) {
 	return r.Permissions.UserCan(userRoles, doctype, operation)
+}
+
+// InsightsAllowed reports whether any of userRoles grants Insights in the tenant permission matrix. A nil
+// registry grants nothing.
+func (r *Registry) InsightsAllowed(userRoles []string) bool {
+	if r == nil {
+		return false
+	}
+	return r.Permissions.InsightsAllowed(userRoles)
 }
 
 // RowScopeFor returns operation-specific row restrictions from the current

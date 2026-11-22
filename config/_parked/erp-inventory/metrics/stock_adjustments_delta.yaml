@@ -1,0 +1,11 @@
+name: stock_adjustments_delta
+label: Net quantity adjusted
+type: simple
+model: Stock Adjustment
+measure:
+  agg: sum
+  field: delta
+time: business_date
+good: up
+format: number
+description: Quantity added (positive) and removed (negative) by Stock Adjustment records (sum).

@@ -5,7 +5,7 @@ Medicine Batch. Medicines are `Product` records from the Selling pack (`erpsell`
 pack needs erpsell installed. Roles: **Pharmacist** (everything) and **Dispensing
 Assistant** (reads patients and batches, creates and edits prescriptions, cannot delete).
 One view, **Dispensary** at `/dispensary` (prescriptions waiting, and the batches table),
-and a `dispensary_overview` report (prescriptions by status, batches by medicine).
+and a `batch_expiry_insights` dashboard (prescriptions by status, batches by medicine).
 
 - Prescription references and batch numbers are unique; patients are found by name or phone.
 - A prescription line needs a medicine and a quantity; a batch needs an expiry date and cannot

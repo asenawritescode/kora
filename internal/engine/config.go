@@ -5,12 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/asenawritescode/kora/internal/eventbus"
 	"net/http"
 	"runtime"
 	"time"
 
-	"github.com/asenawritescode/kora/internal/analytics"
+	"github.com/asenawritescode/kora/internal/cloudrelay"
+	"github.com/asenawritescode/kora/internal/eventbus"
+
 	"github.com/asenawritescode/kora/internal/application/process"
 	"github.com/asenawritescode/kora/internal/auth"
 	"github.com/asenawritescode/kora/internal/configstore"
@@ -63,9 +64,9 @@ type Config struct {
 	SchedulerExecutionResolverFactory ScheduledJobExecutionResolverFactory
 	HTTPAllowlist                     []string
 	CORSAllowedOrigins                []string
-	CloudRelay                        *analytics.CloudRelayConfig
+	CloudRelay                        *cloudrelay.Config
 	CloudUsage                        *usage.Config
-	Analytics                         *analytics.Config
+	Analytics                         *eventbus.Config
 	OutboxEnabled                     bool
 	SystemGuard                       *auth.SystemGuard
 	PlatformDBUser                    string
@@ -258,14 +259,14 @@ func newEngine(ctx context.Context, config Config, deps engineAssemblyDependenci
 		shared.ScriptRunner = budgeted
 		resources.ScriptRunner = budgeted
 	}
-	var relay *analytics.CloudRelayConfig
+	var relay *cloudrelay.Config
 	if config.CloudRelay != nil {
 		copy := *config.CloudRelay
 		relay = &copy
 	}
 	analyticsConfig := config.Analytics
 	if analyticsConfig == nil {
-		analyticsConfig = &analytics.Config{}
+		analyticsConfig = &eventbus.Config{}
 	}
 	directoryWorkAdmission, err := dbaccess.AdmissionFor(config.DBDriver, config.DBDSN)
 	if err != nil {
@@ -385,7 +386,7 @@ func newEngine(ctx context.Context, config Config, deps engineAssemblyDependenci
 	if config.Telemetry.MetricsEnabled {
 		var budgetedScripts *script.BudgetedRunner
 		budgetedScripts, _ = shared.ScriptRunner.(*script.BudgetedRunner)
-		resourceMetrics, metricsErr := RegisterResourceMetrics(tenantAssembly.Tenants, httpAssembly.AsyncHookWorker, budgetedScripts, ResourceMetricSources{PlatformDB: startup.Platform.DB, RealtimeStreams: resources.RealtimeStreams, SessionCache: resources.SessionCacheBudget, Uploads: resources.UploadAdmission, AnalyticsQueueAdmission: resources.AnalyticsQueueAdmission, NATSRealtime: shared.NATSProvider, TenantActivation: tenantAssembly.Coordinator, DurableWorkScan: tenantAssembly.DurableWorkScanner, DeletionWorker: resources.DeletionWorker, AnalyticsQueryCache: httpAssembly.Application.AnalyticsCache})
+		resourceMetrics, metricsErr := RegisterResourceMetrics(tenantAssembly.Tenants, httpAssembly.AsyncHookWorker, budgetedScripts, ResourceMetricSources{PlatformDB: startup.Platform.DB, RealtimeStreams: resources.RealtimeStreams, SessionCache: resources.SessionCacheBudget, Uploads: resources.UploadAdmission, AnalyticsQueueAdmission: resources.AnalyticsQueueAdmission, NATSRealtime: shared.NATSProvider, TenantActivation: tenantAssembly.Coordinator, DurableWorkScan: tenantAssembly.DurableWorkScanner, DeletionWorker: resources.DeletionWorker})
 		if metricsErr != nil {
 			return nil, fmt.Errorf("register Engine resource metrics: %w", metricsErr)
 		}

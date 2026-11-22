@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/configstore"
 	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
@@ -278,7 +277,7 @@ func TestLivePostgresConfigVersionRoutes(t *testing.T) {
 	}
 
 	_, err = database.Exec(`CREATE TABLE _kora_user (roles TEXT NOT NULL);
-		CREATE TABLE _kora_role (name TEXT PRIMARY KEY, workspace_access SMALLINT NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '', site TEXT NOT NULL DEFAULT '');
+		CREATE TABLE _kora_role (name TEXT PRIMARY KEY, workspace_access SMALLINT NOT NULL DEFAULT 0, insights_access SMALLINT NOT NULL DEFAULT 1, description TEXT NOT NULL DEFAULT '', site TEXT NOT NULL DEFAULT '');
 		CREATE TABLE _kora_permission (role TEXT NOT NULL);
 		INSERT INTO _kora_user (roles) VALUES ('Store Manager,Manager'), ('Assistant Store Manager');
 		INSERT INTO _kora_role (name) VALUES ('Store Manager');
@@ -389,93 +388,6 @@ func postgresRouteContext(recorder *httptest.ResponseRecorder, database *sql.DB,
 	ctx.Set("user", "test-user")
 	ctx.Set("user_roles", []string{"Administrator"})
 	return ctx
-}
-
-func TestLivePostgresAnalyticsMetadataQueries(t *testing.T) {
-	dsn := os.Getenv("KORA_API_LIVE_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set KORA_API_LIVE_POSTGRES_DSN to test analytics metadata queries against a disposable PostgreSQL database")
-	}
-	database, err := sql.Open("postgres", dsn)
-	if err != nil {
-		t.Fatal("open disposable PostgreSQL database:", err)
-	}
-	defer database.Close()
-	database.SetMaxOpenConns(1)
-	if err := database.Ping(); err != nil {
-		t.Fatal("ping disposable PostgreSQL database:", err)
-	}
-	schemaName := fmt.Sprintf("kora_api_analytics_%d", time.Now().UnixNano())
-	if _, err := database.Exec(`CREATE SCHEMA "` + schemaName + `"`); err != nil {
-		t.Fatal("create isolated PostgreSQL schema:", err)
-	}
-	defer func() { _, _ = database.Exec(`DROP SCHEMA "` + schemaName + `" CASCADE`) }()
-	if _, err := database.Exec(`SET search_path TO "` + schemaName + `"`); err != nil {
-		t.Fatal("select isolated PostgreSQL schema:", err)
-	}
-	if _, err := database.Exec(`CREATE TABLE _kora_config_version (site TEXT NOT NULL, status TEXT NOT NULL, version INTEGER NOT NULL, config TEXT NOT NULL)`); err != nil {
-		t.Fatal("create config-version fixture:", err)
-	}
-	if _, err := database.Exec(`CREATE TABLE _kora_analytics_metric (site TEXT NOT NULL, name TEXT NOT NULL, label TEXT NOT NULL, type TEXT NOT NULL, doctype TEXT NOT NULL, field_name TEXT NOT NULL, link_field TEXT NOT NULL, group_by_field TEXT NOT NULL, UNIQUE (site, name))`); err != nil {
-		t.Fatal("create analytics metric fixture:", err)
-	}
-	if _, err := database.Exec(`CREATE TABLE _kora_analytics_daily (site TEXT NOT NULL, doctype TEXT NOT NULL, metric TEXT NOT NULL, dimension TEXT NOT NULL, date DATE NOT NULL, scope_kind TEXT NOT NULL DEFAULT 'tenant', legal_entity_id TEXT NOT NULL DEFAULT '', value DOUBLE PRECISION NOT NULL)`); err != nil {
-		t.Fatal("create analytics daily fixture:", err)
-	}
-	if _, err := database.Exec(`INSERT INTO _kora_analytics_metric (site, name, label, type, doctype, field_name, link_field, group_by_field) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, "site-pg", "sales_total", "Sales Total", "sum", "Sale", "total", "", ""); err != nil {
-		t.Fatal("insert analytics metric fixture:", err)
-	}
-	if _, err := database.Exec(`INSERT INTO _kora_analytics_daily (site, doctype, metric, dimension, date, value) VALUES ($1,$2,$3,$4,CURRENT_DATE,$5)`, "site-pg", "Sale", "sales_total", "", 27.5); err != nil {
-		t.Fatal("insert analytics rollup fixture:", err)
-	}
-	registry := doctype.NewRegistry()
-	ctx := postgresRouteContext(httptest.NewRecorder(), database, registry, http.MethodGet)
-	reports, err := loadSemanticReports(ctx, database, kdb.Resolve("postgres"))
-	if err != nil {
-		t.Fatalf("live PostgreSQL semantic report lookup failed: %v", err)
-	}
-	if len(reports) != 0 {
-		t.Fatalf("semantic report lookup returned %d unexpected reports", len(reports))
-	}
-	metrics := resolveMetrics(ctx, registry, kdb.Resolve("postgres"))
-	if len(metrics) != 1 || metrics[0].Name != "sales_total" {
-		t.Fatalf("live PostgreSQL custom metrics = %#v, want sales_total", metrics)
-	}
-	today := time.Now().Format("2006-01-02")
-	result, err := (&analytics.QueryEngine{DB: database, SiteName: "site-pg", Dialect: kdb.Resolve("postgres")}).Resolve(metrics[0], analytics.QueryRequest{From: today, To: today})
-	if err != nil {
-		t.Fatalf("live PostgreSQL analytics rollup query failed: %v", err)
-	}
-	if result.Total != 1 || len(result.Rows) != 1 || result.Rows[0]["value"] != float64(27.5) {
-		t.Fatalf("live PostgreSQL analytics result = %#v, want value 27.5", result)
-	}
-
-	analyticsRouter := gin.New()
-	analyticsRouter.Use(func(c *gin.Context) {
-		c.Set("site_db", database)
-		c.Set("site_registry", registry)
-		c.Set("site_name", "site-pg")
-		c.Set("site_db_type", "postgres")
-		c.Set("user", "admin@example.test")
-		c.Set("user_roles", []string{doctype.AdminRole})
-		c.Set("policy_execution", postgresTestExecution(t, "site-pg", "admin@example.test", []string{doctype.AdminRole}))
-		c.Next()
-	})
-	RegisterAnalyticsRoutes(analyticsRouter.Group("/api"), registry, database, kdb.Resolve("postgres"), AnalyticsOptions{})
-	createMetric := httptest.NewRecorder()
-	createMetricRequest := httptest.NewRequest(http.MethodPost, "/api/analytics/metrics", strings.NewReader(`{"name":"units_sold","label":"Units Sold","type":"sum","doctype":"Sale","field":"quantity"}`))
-	createMetricRequest.Header.Set("Content-Type", "application/json")
-	analyticsRouter.ServeHTTP(createMetric, createMetricRequest)
-	if createMetric.Code != http.StatusCreated {
-		t.Fatalf("live PostgreSQL custom metric create returned HTTP %d: %s", createMetric.Code, createMetric.Body.String())
-	}
-	var metricLabel string
-	if err := database.QueryRow(`SELECT label FROM _kora_analytics_metric WHERE site = $1 AND name = $2`, "site-pg", "units_sold").Scan(&metricLabel); err != nil {
-		t.Fatal("read inserted PostgreSQL custom metric:", err)
-	}
-	if metricLabel != "Units Sold" {
-		t.Fatalf("stored PostgreSQL custom metric label = %q, want Units Sold", metricLabel)
-	}
 }
 
 func postgresConfigVersionContext(recorder *httptest.ResponseRecorder, database *sql.DB, registry *doctype.Registry, method string) *gin.Context {

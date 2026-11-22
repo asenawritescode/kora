@@ -42,6 +42,11 @@ func (c Clock) location() *time.Location {
 	return c.Location
 }
 
+// ZoneName is the IANA name of the clock's zone.
+func (c Clock) ZoneName() string {
+	return c.location().String()
+}
+
 // BusinessDate returns the business day that contains t.
 func (c Clock) BusinessDate(t time.Time) Date {
 	year, month, day := t.In(c.location()).Add(-c.Cutoff).Date()

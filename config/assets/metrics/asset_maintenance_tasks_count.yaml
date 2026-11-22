@@ -1,0 +1,9 @@
+name: asset_maintenance_tasks_count
+label: "Maintenance tasks"
+type: balance
+model: "Maintenance Task"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Maintenance tasks from the Maintenance Task records (count)."

@@ -23,7 +23,7 @@ type plan struct {
 	grain     Grain
 	from      tenanttime.Date
 	to        tenanttime.Date
-	dims      []string    // dimension columns the result is grouped by
+	dims      []dimension // dimensions the result is grouped by, in request order
 	series    []series    // one aggregate per simple metric, shared by every metric that uses it
 	metrics   []output    // every metric the query computes; a metric follows the metrics it reads
 	requested []int       // index into metrics of each requested metric, in request order
@@ -32,6 +32,7 @@ type plan struct {
 	top       int
 	compare   Compare
 	opening   bool // read only the days before from: the opening of every balance series
+	records   bool // a drill lists records: the fact rows also carry occurred_at
 }
 
 // series is one aggregate of one metric. Its own filters apply only to that series.
@@ -40,6 +41,7 @@ type series struct {
 	kind   Kind // simple, balance or cumulative: the bucket sums are settled per kind
 	agg    string
 	column string // measure column for sum, dimension for count_distinct, empty for count
+	line   bool   // a sum of a child line field; a header sum cannot be split by a line dimension
 	conds  []predicate
 }
 
@@ -93,7 +95,10 @@ func planQuery(cat Catalog, q Query) (plan, error) {
 		}
 		c.plan.requested = append(c.plan.requested, i)
 	}
-	if err := c.plan.addGrouping(q); err != nil {
+	if err := c.plan.addGrouping(cat, q); err != nil {
+		return plan{}, err
+	}
+	if err := c.plan.checkLineSplit(); err != nil {
 		return plan{}, err
 	}
 	c.plan.summary = c.plan.fitsSummary()
@@ -109,8 +114,8 @@ func checkShape(q Query) error {
 		return fmt.Errorf("grain %q must be day, week, month or range", q.Grain)
 	case toTime(q.To).Before(toTime(q.From)):
 		return fmt.Errorf("range ends %s before it starts %s", q.To, q.From)
-	case q.Compare != "" && q.Compare != CompareNone && q.Compare != ComparePreviousPeriod:
-		return fmt.Errorf("compare %q must be none or previous_period", q.Compare)
+	case q.Compare != "" && q.Compare != CompareNone && q.Compare != ComparePreviousPeriod && q.Compare != CompareWeekBefore:
+		return fmt.Errorf("compare %q must be none, previous_period or week_before", q.Compare)
 	case q.Top < 0:
 		return fmt.Errorf("top %d must not be negative", q.Top)
 	case q.Top > 0 && len(q.Dimensions) != 1:
@@ -252,6 +257,7 @@ func (c *planner) addSeries(m Metric) (int, error) {
 	switch m.Measure.Agg {
 	case aggSum, aggCountDistinct:
 		s.column = m.Measure.Field
+		s.line = lineField(dt.Facts, s.column)
 	case aggCount:
 	default:
 		return 0, fmt.Errorf("metric %q: agg %q is not sum, count or count_distinct", m.Name, m.Measure.Agg)
@@ -268,16 +274,17 @@ func (c *planner) addSeries(m Metric) (int, error) {
 	return c.series[m.Name], nil
 }
 
-// addGrouping checks the dimensions and query filters against the model.
-func (p *plan) addGrouping(q Query) error {
+// addGrouping resolves the dimensions and checks the query filters against the model.
+func (p *plan) addGrouping(cat Catalog, q Query) error {
 	if p.model == nil {
 		return errors.New("no metric reads a record type")
 	}
 	for _, name := range q.Dimensions {
-		if !isDimension(p.model.Facts, name) {
-			return fmt.Errorf("dimension %q is not a facts dimension of %s", name, p.model.Name)
+		dim, err := p.dimensionOf(cat, name, len(p.dims))
+		if err != nil {
+			return err
 		}
-		p.dims = append(p.dims, name)
+		p.dims = append(p.dims, dim)
 	}
 	for _, f := range q.Filters {
 		if err := f.validate(p.model.Facts); err != nil {
@@ -288,14 +295,41 @@ func (p *plan) addGrouping(q Query) error {
 	return nil
 }
 
+// checkLineSplit refuses a query that splits a header sum by a line dimension. A header total repeats on
+// every line of its record, so split by product it would count the sale once per line of the product.
+// Counts and distinct counts split by a line dimension stay allowed: they count records.
+func (p plan) checkLineSplit() error {
+	if !p.hasLineDim() {
+		return nil
+	}
+	for _, s := range p.series {
+		if s.agg == aggSum && !s.line {
+			return fmt.Errorf("%w: %q is a header total and cannot be split by %s; use a line measure",
+				ErrMeasureNotOnLines, s.metric, p.lineDimName())
+		}
+	}
+	return nil
+}
+
+// lineDimName is the first dimension of the plan that is on the child table.
+func (p plan) lineDimName() string {
+	for _, dim := range p.dims {
+		if dim.line {
+			return dim.name
+		}
+	}
+	return ""
+}
+
 // fitsSummary reports whether the summary table can answer the plan. Summaries are per day, per
-// status, and per one declared dimension, and they carry no owner. Distinct counts need the facts.
+// status, and per one declared dimension, and they carry no owner. Distinct counts and dimension paths
+// need the facts.
 func (p plan) fitsSummary() bool {
-	if p.scope.Owner != "" || len(p.dims) > 1 {
+	if p.scope.Owner != "" || len(p.dims) > 1 || p.hasJoins() || p.hasLineDim() || p.groupsByStatus() || p.groupsByOwner() {
 		return false
 	}
 	usable := func(field string) bool {
-		return field == p.model.Facts.StatusField || (len(p.dims) == 1 && field == p.dims[0])
+		return field == p.model.Facts.StatusField || (len(p.dims) == 1 && field == p.dims[0].name)
 	}
 	for _, s := range p.series {
 		if s.agg == aggCountDistinct {
@@ -332,4 +366,24 @@ func (p plan) metricNames() []string {
 		names[i] = p.metrics[r].metric
 	}
 	return names
+}
+
+// groupsByOwner reports whether a dimension is the record owner, which only the fact tables carry.
+func (p plan) groupsByOwner() bool {
+	for _, d := range p.dims {
+		if d.alias == ownerColumn && d.name == ownerColumn {
+			return true
+		}
+	}
+	return false
+}
+
+// groupsByStatus reports whether a dimension of the plan is the status field's value.
+func (p plan) groupsByStatus() bool {
+	for _, d := range p.dims {
+		if p.model.Facts.GroupsByStatus(d.name) {
+			return true
+		}
+	}
+	return false
 }

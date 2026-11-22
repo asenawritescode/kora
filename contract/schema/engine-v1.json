@@ -120,6 +120,157 @@
       ],
       "type": "object"
     },
+    "AnswerAction": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "question": {
+          "x-open-json-value": true
+        },
+        "visibility": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "question"
+      ],
+      "type": "object"
+    },
+    "AnswerCard": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/AnswerAction"
+          },
+          "type": "array"
+        },
+        "change": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/AnswerMeta"
+        },
+        "previous": {
+          "type": "string"
+        },
+        "previous_label": {
+          "type": "string"
+        },
+        "progress": {
+          "type": "number",
+          "x-optional-pointer": true
+        },
+        "record_type": {
+          "type": "string"
+        },
+        "record_type_label": {
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/AnswerRow"
+          },
+          "type": "array"
+        },
+        "scope_note": {
+          "type": "string"
+        },
+        "sparkline": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "meta",
+        "verified"
+      ],
+      "type": "object"
+    },
+    "AnswerMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "type": "string"
+        },
+        "compared": {
+          "type": "string"
+        },
+        "day_ends": {
+          "type": "string"
+        },
+        "period": {
+          "type": "string"
+        },
+        "shown": {
+          "type": "integer"
+        },
+        "time_zone": {
+          "type": "string"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "zone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of",
+        "day_ends",
+        "period",
+        "zone"
+      ],
+      "type": "object"
+    },
+    "AnswerRow": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "type": "object"
+    },
     "Approval": {
       "additionalProperties": false,
       "properties": {
@@ -339,6 +490,41 @@
       },
       "required": [
         "ref"
+      ],
+      "type": "object"
+    },
+    "ChoiceOption": {
+      "additionalProperties": false,
+      "properties": {
+        "hint": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hint",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ChoiceQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "choices": {
+          "items": {
+            "$ref": "#/$defs/ChoiceOption"
+          },
+          "type": "array"
+        },
+        "question": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "choices",
+        "question"
       ],
       "type": "object"
     },
@@ -608,6 +794,15 @@
         "name": {
           "type": "string"
         },
+        "pack": {
+          "type": "string"
+        },
+        "pinned": {
+          "items": {
+            "$ref": "#/$defs/DashboardPin"
+          },
+          "type": "array"
+        },
         "tiles": {
           "items": {
             "$ref": "#/$defs/DashboardTile"
@@ -620,6 +815,7 @@
         "default_range",
         "label",
         "name",
+        "pinned",
         "tiles"
       ],
       "type": "object"
@@ -646,6 +842,42 @@
       "required": [
         "hidden",
         "order"
+      ],
+      "type": "object"
+    },
+    "DashboardPin": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "question"
+      ],
+      "type": "object"
+    },
+    "DashboardPinRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        }
+      },
+      "required": [
+        "label",
+        "question"
       ],
       "type": "object"
     },
@@ -878,6 +1110,102 @@
       ],
       "type": "object"
     },
+    "ExploreDimension": {
+      "additionalProperties": false,
+      "properties": {
+        "group": {
+          "type": "string"
+        },
+        "hops": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hops",
+        "kind",
+        "label",
+        "path"
+      ],
+      "type": "object"
+    },
+    "ExploreMeasure": {
+      "additionalProperties": false,
+      "properties": {
+        "agg": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agg",
+        "key",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ExploreRecordType": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "dimensions": {
+          "items": {
+            "$ref": "#/$defs/ExploreDimension"
+          },
+          "type": "array"
+        },
+        "label": {
+          "type": "string"
+        },
+        "measures": {
+          "items": {
+            "$ref": "#/$defs/ExploreMeasure"
+          },
+          "type": "array"
+        },
+        "record_type": {
+          "type": "string"
+        },
+        "time_field": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dimensions",
+        "label",
+        "measures",
+        "record_type",
+        "time_field"
+      ],
+      "type": "object"
+    },
     "FieldHint": {
       "additionalProperties": false,
       "properties": {
@@ -1069,6 +1397,31 @@
       ],
       "type": "object"
     },
+    "MetricAdHocMeasure": {
+      "additionalProperties": false,
+      "properties": {
+        "agg": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "filters": {
+          "items": {
+            "$ref": "#/$defs/MetricFilter"
+          },
+          "type": "array"
+        },
+        "record_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agg",
+        "record_type"
+      ],
+      "type": "object"
+    },
     "MetricDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -1127,9 +1480,36 @@
       ],
       "type": "object"
     },
+    "MetricDrillRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "occurred_at": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "occurred_at",
+        "title",
+        "value"
+      ],
+      "type": "object"
+    },
     "MetricDrillRequest": {
       "additionalProperties": false,
       "properties": {
+        "cursor": {
+          "type": "string"
+        },
         "from": {
           "type": "string"
         },
@@ -1138,6 +1518,10 @@
             "type": "string"
           },
           "type": "object"
+        },
+        "measure": {
+          "$ref": "#/$defs/MetricAdHocMeasure",
+          "x-optional-pointer": true
         },
         "metric": {
           "type": "string"
@@ -1148,7 +1532,6 @@
       },
       "required": [
         "from",
-        "metric",
         "to"
       ],
       "type": "object"
@@ -1164,11 +1547,29 @@
             "$ref": "#/$defs/MetricFilter"
           },
           "type": "array"
+        },
+        "list_openable": {
+          "type": "boolean"
+        },
+        "next_cursor": {
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/MetricDrillRecord"
+          },
+          "type": "array"
+        },
+        "total": {
+          "type": "string"
         }
       },
       "required": [
         "doctype",
-        "filters"
+        "filters",
+        "list_openable",
+        "rows",
+        "total"
       ],
       "type": "object"
     },
@@ -1207,6 +1608,18 @@
       ],
       "type": "object"
     },
+    "MetricPeriod": {
+      "additionalProperties": false,
+      "properties": {
+        "preset": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "preset"
+      ],
+      "type": "object"
+    },
     "MetricQueryRequest": {
       "additionalProperties": false,
       "properties": {
@@ -1231,11 +1644,21 @@
         "grain": {
           "type": "string"
         },
+        "measures": {
+          "items": {
+            "$ref": "#/$defs/MetricAdHocMeasure"
+          },
+          "type": "array"
+        },
         "metrics": {
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "period": {
+          "$ref": "#/$defs/MetricPeriod",
+          "x-optional-pointer": true
         },
         "to": {
           "type": "string"
@@ -1245,10 +1668,8 @@
         }
       },
       "required": [
-        "from",
         "grain",
-        "metrics",
-        "to"
+        "metrics"
       ],
       "type": "object"
     },
@@ -1260,6 +1681,18 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "formats": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
         },
         "metrics": {
           "items": {
@@ -1301,6 +1734,12 @@
         },
         "label": {
           "type": "string"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "values": {
           "items": {
@@ -1352,23 +1791,104 @@
       ],
       "type": "object"
     },
+    "MetricsHistory": {
+      "additionalProperties": false,
+      "properties": {
+        "progress": {
+          "type": "number"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "progress",
+        "state"
+      ],
+      "type": "object"
+    },
     "MetricsMeta": {
       "additionalProperties": false,
       "properties": {
         "as_of": {
           "type": "string"
         },
+        "currencies": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "day_ends": {
+          "type": "string"
+        },
+        "history": {
+          "$ref": "#/$defs/MetricsHistory",
+          "x-optional-pointer": true
+        },
+        "owner_only": {
+          "type": "boolean"
+        },
+        "period": {
+          "$ref": "#/$defs/MetricsPeriod"
+        },
+        "previous": {
+          "$ref": "#/$defs/MetricsSpan",
+          "x-optional-pointer": true
+        },
         "source_sequence": {
           "type": "integer"
         },
         "tier": {
           "type": "string"
+        },
+        "time_zone": {
+          "type": "string"
         }
       },
       "required": [
         "as_of",
+        "day_ends",
+        "period",
         "source_sequence",
-        "tier"
+        "tier",
+        "time_zone"
+      ],
+      "type": "object"
+    },
+    "MetricsPeriod": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "preset": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "preset",
+        "to"
+      ],
+      "type": "object"
+    },
+    "MetricsSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
       ],
       "type": "object"
     },
@@ -2126,6 +2646,166 @@
         "name",
         "namespace",
         "version"
+      ],
+      "type": "object"
+    },
+    "SavedQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "ad_hoc": {
+          "$ref": "#/$defs/MetricAdHocMeasure",
+          "x-optional-pointer": true
+        },
+        "by": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "compare": {
+          "type": "string"
+        },
+        "filters": {
+          "items": {
+            "$ref": "#/$defs/MetricFilter"
+          },
+          "type": "array"
+        },
+        "from": {
+          "type": "string"
+        },
+        "grain": {
+          "type": "string"
+        },
+        "measure": {
+          "type": "string"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "period": {
+          "type": "string"
+        },
+        "record_type": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "top": {
+          "type": "integer"
+        },
+        "view": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SavedReport": {
+      "additionalProperties": false,
+      "properties": {
+        "broken": {
+          "$ref": "#/$defs/SavedReportBroken",
+          "x-optional-pointer": true
+        },
+        "broken_at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "modified": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "owner_name": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        },
+        "record_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "modified",
+        "name",
+        "owner",
+        "owner_name",
+        "question",
+        "record_types",
+        "visibility"
+      ],
+      "type": "object"
+    },
+    "SavedReportBroken": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "record_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "label"
+      ],
+      "type": "object"
+    },
+    "SavedReportCopyRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "visibility"
+      ],
+      "type": "object"
+    },
+    "SavedReportRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "question",
+        "visibility"
       ],
       "type": "object"
     },
@@ -2528,6 +3208,157 @@
       ],
       "type": "object"
     },
+    "AnswerAction": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "question": {
+          "x-open-json-value": true
+        },
+        "visibility": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "question"
+      ],
+      "type": "object"
+    },
+    "AnswerCard": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/AnswerAction"
+          },
+          "type": "array"
+        },
+        "change": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/AnswerMeta"
+        },
+        "previous": {
+          "type": "string"
+        },
+        "previous_label": {
+          "type": "string"
+        },
+        "progress": {
+          "type": "number",
+          "x-optional-pointer": true
+        },
+        "record_type": {
+          "type": "string"
+        },
+        "record_type_label": {
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/AnswerRow"
+          },
+          "type": "array"
+        },
+        "scope_note": {
+          "type": "string"
+        },
+        "sparkline": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "meta",
+        "verified"
+      ],
+      "type": "object"
+    },
+    "AnswerMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "type": "string"
+        },
+        "compared": {
+          "type": "string"
+        },
+        "day_ends": {
+          "type": "string"
+        },
+        "period": {
+          "type": "string"
+        },
+        "shown": {
+          "type": "integer"
+        },
+        "time_zone": {
+          "type": "string"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "zone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "as_of",
+        "day_ends",
+        "period",
+        "zone"
+      ],
+      "type": "object"
+    },
+    "AnswerRow": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "type": "object"
+    },
     "Approval": {
       "additionalProperties": false,
       "properties": {
@@ -2728,6 +3559,41 @@
       },
       "required": [
         "ref"
+      ],
+      "type": "object"
+    },
+    "ChoiceOption": {
+      "additionalProperties": false,
+      "properties": {
+        "hint": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hint",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ChoiceQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "choices": {
+          "items": {
+            "$ref": "#/$defs/ChoiceOption"
+          },
+          "type": "array"
+        },
+        "question": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "choices",
+        "question"
       ],
       "type": "object"
     },
@@ -2997,6 +3863,15 @@
         "name": {
           "type": "string"
         },
+        "pack": {
+          "type": "string"
+        },
+        "pinned": {
+          "items": {
+            "$ref": "#/$defs/DashboardPin"
+          },
+          "type": "array"
+        },
         "tiles": {
           "items": {
             "$ref": "#/$defs/DashboardTile"
@@ -3009,6 +3884,7 @@
         "default_range",
         "label",
         "name",
+        "pinned",
         "tiles"
       ],
       "type": "object"
@@ -3035,6 +3911,42 @@
       "required": [
         "hidden",
         "order"
+      ],
+      "type": "object"
+    },
+    "DashboardPin": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "question"
+      ],
+      "type": "object"
+    },
+    "DashboardPinRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        }
+      },
+      "required": [
+        "label",
+        "question"
       ],
       "type": "object"
     },
@@ -3267,6 +4179,102 @@
       ],
       "type": "object"
     },
+    "ExploreDimension": {
+      "additionalProperties": false,
+      "properties": {
+        "group": {
+          "type": "string"
+        },
+        "hops": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hops",
+        "kind",
+        "label",
+        "path"
+      ],
+      "type": "object"
+    },
+    "ExploreMeasure": {
+      "additionalProperties": false,
+      "properties": {
+        "agg": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agg",
+        "key",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ExploreRecordType": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "dimensions": {
+          "items": {
+            "$ref": "#/$defs/ExploreDimension"
+          },
+          "type": "array"
+        },
+        "label": {
+          "type": "string"
+        },
+        "measures": {
+          "items": {
+            "$ref": "#/$defs/ExploreMeasure"
+          },
+          "type": "array"
+        },
+        "record_type": {
+          "type": "string"
+        },
+        "time_field": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dimensions",
+        "label",
+        "measures",
+        "record_type",
+        "time_field"
+      ],
+      "type": "object"
+    },
     "FieldHint": {
       "additionalProperties": false,
       "properties": {
@@ -3434,6 +4442,31 @@
       ],
       "type": "object"
     },
+    "MetricAdHocMeasure": {
+      "additionalProperties": false,
+      "properties": {
+        "agg": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "filters": {
+          "items": {
+            "$ref": "#/$defs/MetricFilter"
+          },
+          "type": "array"
+        },
+        "record_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agg",
+        "record_type"
+      ],
+      "type": "object"
+    },
     "MetricDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -3492,9 +4525,36 @@
       ],
       "type": "object"
     },
+    "MetricDrillRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "occurred_at": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "occurred_at",
+        "title",
+        "value"
+      ],
+      "type": "object"
+    },
     "MetricDrillRequest": {
       "additionalProperties": false,
       "properties": {
+        "cursor": {
+          "type": "string"
+        },
         "from": {
           "type": "string"
         },
@@ -3503,6 +4563,10 @@
             "type": "string"
           },
           "type": "object"
+        },
+        "measure": {
+          "$ref": "#/$defs/MetricAdHocMeasure",
+          "x-optional-pointer": true
         },
         "metric": {
           "type": "string"
@@ -3513,7 +4577,6 @@
       },
       "required": [
         "from",
-        "metric",
         "to"
       ],
       "type": "object"
@@ -3529,11 +4592,29 @@
             "$ref": "#/$defs/MetricFilter"
           },
           "type": "array"
+        },
+        "list_openable": {
+          "type": "boolean"
+        },
+        "next_cursor": {
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/MetricDrillRecord"
+          },
+          "type": "array"
+        },
+        "total": {
+          "type": "string"
         }
       },
       "required": [
         "doctype",
-        "filters"
+        "filters",
+        "list_openable",
+        "rows",
+        "total"
       ],
       "type": "object"
     },
@@ -3572,6 +4653,18 @@
       ],
       "type": "object"
     },
+    "MetricPeriod": {
+      "additionalProperties": false,
+      "properties": {
+        "preset": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "preset"
+      ],
+      "type": "object"
+    },
     "MetricQueryRequest": {
       "additionalProperties": false,
       "properties": {
@@ -3596,11 +4689,21 @@
         "grain": {
           "type": "string"
         },
+        "measures": {
+          "items": {
+            "$ref": "#/$defs/MetricAdHocMeasure"
+          },
+          "type": "array"
+        },
         "metrics": {
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "period": {
+          "$ref": "#/$defs/MetricPeriod",
+          "x-optional-pointer": true
         },
         "to": {
           "type": "string"
@@ -3610,10 +4713,8 @@
         }
       },
       "required": [
-        "from",
         "grain",
-        "metrics",
-        "to"
+        "metrics"
       ],
       "type": "object"
     },
@@ -3625,6 +4726,18 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "formats": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
         },
         "metrics": {
           "items": {
@@ -3666,6 +4779,12 @@
         },
         "label": {
           "type": "string"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "values": {
           "items": {
@@ -3717,23 +4836,104 @@
       ],
       "type": "object"
     },
+    "MetricsHistory": {
+      "additionalProperties": false,
+      "properties": {
+        "progress": {
+          "type": "number"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "progress",
+        "state"
+      ],
+      "type": "object"
+    },
     "MetricsMeta": {
       "additionalProperties": false,
       "properties": {
         "as_of": {
           "type": "string"
         },
+        "currencies": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "day_ends": {
+          "type": "string"
+        },
+        "history": {
+          "$ref": "#/$defs/MetricsHistory",
+          "x-optional-pointer": true
+        },
+        "owner_only": {
+          "type": "boolean"
+        },
+        "period": {
+          "$ref": "#/$defs/MetricsPeriod"
+        },
+        "previous": {
+          "$ref": "#/$defs/MetricsSpan",
+          "x-optional-pointer": true
+        },
         "source_sequence": {
           "type": "integer"
         },
         "tier": {
           "type": "string"
+        },
+        "time_zone": {
+          "type": "string"
         }
       },
       "required": [
         "as_of",
+        "day_ends",
+        "period",
         "source_sequence",
-        "tier"
+        "tier",
+        "time_zone"
+      ],
+      "type": "object"
+    },
+    "MetricsPeriod": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "preset": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "preset",
+        "to"
+      ],
+      "type": "object"
+    },
+    "MetricsSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
       ],
       "type": "object"
     },
@@ -4491,6 +5691,166 @@
         "name",
         "namespace",
         "version"
+      ],
+      "type": "object"
+    },
+    "SavedQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "ad_hoc": {
+          "$ref": "#/$defs/MetricAdHocMeasure",
+          "x-optional-pointer": true
+        },
+        "by": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "compare": {
+          "type": "string"
+        },
+        "filters": {
+          "items": {
+            "$ref": "#/$defs/MetricFilter"
+          },
+          "type": "array"
+        },
+        "from": {
+          "type": "string"
+        },
+        "grain": {
+          "type": "string"
+        },
+        "measure": {
+          "type": "string"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "period": {
+          "type": "string"
+        },
+        "record_type": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "top": {
+          "type": "integer"
+        },
+        "view": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SavedReport": {
+      "additionalProperties": false,
+      "properties": {
+        "broken": {
+          "$ref": "#/$defs/SavedReportBroken",
+          "x-optional-pointer": true
+        },
+        "broken_at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "modified": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "owner_name": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        },
+        "record_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "modified",
+        "name",
+        "owner",
+        "owner_name",
+        "question",
+        "record_types",
+        "visibility"
+      ],
+      "type": "object"
+    },
+    "SavedReportBroken": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "record_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "label"
+      ],
+      "type": "object"
+    },
+    "SavedReportCopyRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "visibility"
+      ],
+      "type": "object"
+    },
+    "SavedReportRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "question": {
+          "$ref": "#/$defs/SavedQuestion"
+        },
+        "visibility": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "question",
+        "visibility"
       ],
       "type": "object"
     },

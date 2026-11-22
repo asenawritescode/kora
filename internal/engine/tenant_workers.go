@@ -2,50 +2,20 @@ package engine
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/asenawritescode/kora/internal/eventstream"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/internal/natsprovider"
 	"github.com/asenawritescode/kora/internal/notifications"
 	"github.com/asenawritescode/kora/internal/outbox"
 )
-
-// AnalyticsSiteWALDir returns the legacy route-name-keyed WAL partition. New
-// Engine writers use AnalyticsTenantWALDir; this helper remains for migration
-// and source compatibility with existing tests/tools.
-func AnalyticsSiteWALDir(baseDir, siteName string) string {
-	cleanSite := strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '-', r == '_':
-			return r
-		default:
-			return '_'
-		}
-	}, strings.TrimSpace(siteName))
-	if cleanSite == "" || cleanSite == "." || cleanSite == ".." {
-		cleanSite = "unknown-site"
-	}
-	return filepath.Join(baseDir, cleanSite)
-}
-
-// AnalyticsTenantWALDir returns a path-safe WAL partition keyed by stable
-// tenant identity. Hashing avoids leaking IDs into paths and prevents route
-// names, aliases, or untrusted path characters from changing the partition.
-func AnalyticsTenantWALDir(baseDir, tenantID string) string {
-	hash := sha256.Sum256([]byte(strings.TrimSpace(tenantID)))
-	return filepath.Join(baseDir, "tenant-"+hex.EncodeToString(hash[:]))
-}
 
 // RunRealtimeBridge forwards tenant bus events to realtime listeners until the bus closes.
 func RunRealtimeBridge(ctx context.Context, siteName string, bus eventstream.Bus, provider *natsprovider.Provider) {
@@ -82,38 +52,6 @@ func RunRealtimeBridge(ctx context.Context, siteName string, bus eventstream.Bus
 			_ = provider.PublishSubject(ctx, subjectPrefix, payload, contract.NewEventID())
 		}
 	}
-}
-
-func RunAnalyticsRebuildConsumer(ctx context.Context, siteName string, provider *natsprovider.Provider, runner *analytics.RebuildRunner) {
-	cfg := provider.Config()
-	cfg.ConsumerName = siteName + "-analytics-rebuilds"
-	cfg.ConsumerSubject = cfg.SubjectPrefix + ".tasks.analytics-rebuild"
-	consumer, err := natsprovider.NewConsumer(provider, cfg)
-	if err != nil {
-		slog.Warn("analytics rebuild consumer init failed", "site", siteName, "error", err)
-		return
-	}
-	handler := func(ctx context.Context, delivery contract.Delivery) error {
-		var request struct {
-			JobID string `json:"job_id"`
-			Site  string `json:"site"`
-		}
-		if err := json.Unmarshal(delivery.Data, &request); err != nil {
-			return err
-		}
-		if request.JobID == "" || request.Site != siteName {
-			return fmt.Errorf("invalid analytics rebuild job payload")
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		runner.Notify()
-		return nil
-	}
-	slog.Info("analytics rebuild consumer started", "site", siteName, "consumer", cfg.ConsumerName)
-	RunNATSConsumerWithBackoff(ctx, siteName, cfg.ConsumerName, func(runCtx context.Context) error {
-		return consumer.Run(runCtx, handler)
-	})
 }
 
 // RunNATSOutboxSideEffects publishes tenant outbox side effects to NATS.

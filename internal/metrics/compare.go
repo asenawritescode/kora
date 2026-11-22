@@ -19,8 +19,13 @@ const (
 
 // previousRange is the window of as many buckets as the range has, ending the day before its
 // first bucket. For a range that starts on a bucket boundary that is the day before From. A range
-// grain takes as many days as the range has, ending the day before From.
+// grain takes as many days as the range has, ending the day before From. A week_before window is
+// the range one week earlier.
 func (p plan) previousRange() (tenanttime.Date, tenanttime.Date) {
+	if p.compare == CompareWeekBefore {
+		shifted := Span{p.from, p.to}.weekBefore()
+		return shifted.From, shifted.To
+	}
 	if p.grain == GrainRange {
 		start := toTime(p.from)
 		days := int(toTime(p.to).Sub(start).Hours()/24) + 1
@@ -31,10 +36,15 @@ func (p plan) previousRange() (tenanttime.Date, tenanttime.Date) {
 	return toDate(stepPeriod(first, p.grain, -n)), toDate(first.AddDate(0, 0, -1))
 }
 
+// compares reports whether the plan reads a comparison window.
+func (p plan) compares() bool {
+	return p.compare == ComparePreviousPeriod || p.compare == CompareWeekBefore
+}
+
 // previousRows runs the previous-period window and returns its rows aligned with cur's rows. It
 // uses the current keys: with top-N, the previous Other group is every group outside the current
 // top N. A group that appears only in the previous period has no current row and is dropped.
-func (e Engine) previousRows(ctx context.Context, p plan, cur aggregate, keys []string) ([]Row, error) {
+func (e Engine) previousRows(ctx context.Context, p plan, cur aggregate, keys []string, labels []map[string]string) ([]Row, error) {
 	from, to := p.previousRange()
 	prevPlan := p
 	prevPlan.from, prevPlan.to = from, to
@@ -46,7 +56,7 @@ func (e Engine) previousRows(ctx context.Context, p plan, cur aggregate, keys []
 		prev = prev.fold(keptGroups(keys))
 	}
 	prev.groups = cur.groups
-	return p.rows(prev, keys, from, to), nil
+	return p.rows(prev, keys, from, to, labels), nil
 }
 
 // keptGroups is the set of keys that are real groups: every key except the Other group.

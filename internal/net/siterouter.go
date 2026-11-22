@@ -423,7 +423,6 @@ func InjectSiteRuntimeContext(c *gin.Context, snapshot *tenantruntime.Snapshot) 
 	if snapshot.SessionManager != nil {
 		c.Set("site_session_manager", snapshot.SessionManager)
 	}
-	c.Set("site_analytics_worker", snapshot.AnalyticsWorker)
 	if snapshot.HasServices {
 		c.Set("site_runtime_services", snapshot.Services)
 	}

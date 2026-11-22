@@ -48,7 +48,6 @@ func mergeManagementPackageSnapshot(current, incoming *doctype.ConfigSnapshot, a
 	merged.Permissions = mergeSnapshotItems(current.Permissions, incoming.Permissions, func(v *doctype.Permission) string { return v.Doctype + "\x00" + v.Role })
 	merged.WorkflowDefinitions = mergeWorkflowDefinitions(current.WorkflowDefinitions, incoming.WorkflowDefinitions)
 	merged.Views = mergeSnapshotItems(current.Views, incoming.Views, func(v *doctype.View) string { return v.Name })
-	merged.AnalyticsMetrics = mergeSnapshotItems(current.AnalyticsMetrics, incoming.AnalyticsMetrics, func(v *doctype.AnalyticsMetricConfig) string { return v.Name })
 	merged.Scripts = mergeSnapshotItems(current.Scripts, incoming.Scripts, func(v *doctype.ScriptSnapshot) string { return v.Name })
 	modules, err := mergeModuleDescriptors(current.Modules, incoming.Modules, authority)
 	if err != nil {
@@ -58,7 +57,6 @@ func mergeManagementPackageSnapshot(current, incoming *doctype.ConfigSnapshot, a
 	if err := mergeRawPackageItems(&merged, current, incoming); err != nil {
 		return nil, err
 	}
-	merged.Reports = append([]json.RawMessage(nil), current.Reports...)
 	merged.ScheduledJobs = mergeScheduledJobs(current.ScheduledJobs, incoming.ScheduledJobs)
 	if err := validateMergedViewRoutes(merged.Views); err != nil {
 		return nil, err
@@ -249,9 +247,6 @@ var packageResourceLookups = map[string]func(*doctype.ConfigSnapshot, string) bo
 	"view": func(s *doctype.ConfigSnapshot, name string) bool {
 		return containsMatch(s.Views, func(v *doctype.View) bool { return v != nil && v.Name == name })
 	},
-	"metric": func(s *doctype.ConfigSnapshot, name string) bool {
-		return containsMatch(s.AnalyticsMetrics, func(v *doctype.AnalyticsMetricConfig) bool { return v != nil && v.Name == name })
-	},
 	"script": func(s *doctype.ConfigSnapshot, name string) bool {
 		return containsMatch(s.Scripts, func(v *doctype.ScriptSnapshot) bool { return v != nil && v.Name == name })
 	},
@@ -275,14 +270,6 @@ var packageResourceLookups = map[string]func(*doctype.ConfigSnapshot, string) bo
 					return string(offer.Name)+"."+op.Name == name
 				})
 			})
-		})
-	},
-	"report": func(s *doctype.ConfigSnapshot, name string) bool {
-		return containsMatch(s.Reports, func(raw json.RawMessage) bool {
-			var report struct {
-				Name string `json:"name"`
-			}
-			return json.Unmarshal(raw, &report) == nil && report.Name == name
 		})
 	},
 }

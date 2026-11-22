@@ -1,0 +1,10 @@
+name: dispensary_quantity_received
+label: "Quantity received"
+type: simple
+model: "Medicine Batch"
+measure:
+  agg: sum
+  field: quantity_received
+time: business_date
+format: number
+description: "Quantity received from the Medicine Batch records (sum)."

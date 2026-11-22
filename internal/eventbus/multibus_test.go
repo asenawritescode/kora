@@ -2,7 +2,6 @@ package eventbus
 
 import (
 	"errors"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -19,10 +18,7 @@ func (s *multiBusStub) Subscribe() (<-chan eventstream.ChangeEvent, error) {
 	s.ch = make(chan eventstream.ChangeEvent, 1)
 	return s.ch, nil
 }
-func (s *multiBusStub) DrainWAL(handler func(eventstream.ChangeEvent)) (int, error) { return 0, nil }
-func (s *multiBusStub) RotateWAL() (string, error)                                  { return "", nil }
-func (s *multiBusStub) CommitWALRotation(string) error                              { return nil }
-func (s *multiBusStub) Dropped() int64                                              { return 0 }
+func (s *multiBusStub) Dropped() int64 { return 0 }
 func (s *multiBusStub) Close() error {
 	close(s.ch)
 	return nil
@@ -71,7 +67,7 @@ func TestMultiBusProcessListenerAdmissionBoundsAndReleasesAcrossTenants(t *testi
 	}
 	newBus := func() *MultiBus {
 		t.Helper()
-		inner := NewChannelBusWithLimits(2, DefaultMaxEventBytes, 2*DefaultMaxEventBytes, t.TempDir())
+		inner := NewChannelBus(2, DefaultMaxEventBytes)
 		multi, err := NewDeferredMultiBus(inner)
 		if err != nil {
 			t.Fatal("create tenant multi bus:", err)
@@ -135,7 +131,7 @@ func TestMultiBusProcessListenerAdmissionSerializesConcurrentRegistrations(t *te
 	const tenantCount = 12
 	buses := make([]*MultiBus, tenantCount)
 	for i := range buses {
-		inner := NewChannelBusWithLimits(2, DefaultMaxEventBytes, 2*DefaultMaxEventBytes, t.TempDir())
+		inner := NewChannelBus(2, DefaultMaxEventBytes)
 		buses[i], err = NewDeferredMultiBus(inner)
 		if err != nil {
 			t.Fatal("create tenant multi bus:", err)
@@ -282,7 +278,7 @@ func TestChannelBusWakeupQueuesShareProcessWideByteBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	newBus := func(name string) (*MultiBus, eventstream.Bus) {
-		inner := NewChannelBusWithLimits(2, DefaultMaxEventBytes, 2*DefaultMaxEventBytes, filepath.Join(t.TempDir(), name))
+		inner := NewChannelBus(2, DefaultMaxEventBytes)
 		queueAware := inner.(interface {
 			SetQueueAdmission(*QueueAdmission) error
 		})
@@ -323,13 +319,6 @@ func TestChannelBusWakeupQueuesShareProcessWideByteBudget(t *testing.T) {
 		t.Fatal("start second tenant fanout:", err)
 	}
 	waitForListenerBudget(t, budget, func(snapshot QueueSnapshot) bool { return snapshot.UsedBytes == 0 })
-	var replayed int
-	count, err := secondInner.(interface {
-		DrainWAL(func(eventstream.ChangeEvent)) (int, error)
-	}).DrainWAL(func(eventstream.ChangeEvent) { replayed++ })
-	if err != nil || count != 1 || replayed != 1 {
-		t.Fatalf("WAL replay after skipped wake-up = (%d events, %d callbacks, %v), want durable event", count, replayed, err)
-	}
 }
 
 func TestMultiBusPublishFansOutOnceWhenSourceWakeupsAreConsumed(t *testing.T) {
@@ -337,7 +326,7 @@ func TestMultiBusPublishFansOutOnceWhenSourceWakeupsAreConsumed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inner := NewChannelBusWithLimits(4, DefaultMaxEventBytes, 4*DefaultMaxEventBytes, filepath.Join(t.TempDir(), "wal"))
+	inner := NewChannelBus(4, DefaultMaxEventBytes)
 	if err := inner.(interface {
 		SetQueueAdmission(*QueueAdmission) error
 	}).SetQueueAdmission(budget); err != nil {
@@ -388,7 +377,7 @@ func TestMultiBusCloseBeforeStartReleasesAllQueueReservations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inner := NewChannelBusWithLimits(2, DefaultMaxEventBytes, 2*DefaultMaxEventBytes, filepath.Join(t.TempDir(), "wal"))
+	inner := NewChannelBus(2, DefaultMaxEventBytes)
 	if err := inner.(interface {
 		SetQueueAdmission(*QueueAdmission) error
 	}).SetQueueAdmission(budget); err != nil {
@@ -527,7 +516,7 @@ func TestMultiBusRejectsListenerQueueOverHardLimit(t *testing.T) {
 }
 
 func TestMultiBusListenerQueueCapacityUsesEventByteLimit(t *testing.T) {
-	inner := NewChannelBusWithLimits(4, 4<<20, 16<<20, t.TempDir())
+	inner := NewChannelBus(4, 4<<20)
 	mb, err := NewDeferredMultiBus(inner)
 	if err != nil {
 		t.Fatal("create multi bus:", err)

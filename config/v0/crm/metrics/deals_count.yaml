@@ -1,0 +1,9 @@
+name: deals_count
+label: Deals
+type: balance
+model: Deal
+measure:
+  agg: count
+time: business_date
+format: number
+description: Deals in each pipeline stage as of the end of the period (count).

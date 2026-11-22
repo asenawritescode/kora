@@ -1,0 +1,8 @@
+name: cake_net_profit
+label: Net profit
+type: derived
+formula: cake_sales - cake_expenses
+time: business_date
+good: up
+format: currency
+description: Sales minus expenses.

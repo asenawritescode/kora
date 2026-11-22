@@ -39,7 +39,7 @@ func TestRouteOptionsZeroValueRegistersFullRouteSet(t *testing.T) {
 		return set
 	}
 	zero := routeSet(RouteOptions{})
-	for _, want := range []string{"POST /api/v1/upload", "GET /api/v1/resource/:doctype", "GET /api/v1/analytics/status", "POST /api/v1/ai/chat"} {
+	for _, want := range []string{"POST /api/v1/upload", "GET /api/v1/resource/:doctype", "GET /api/v1/explore/catalog", "POST /api/v1/ai/chat"} {
 		if !zero[want] {
 			t.Errorf("zero RouteOptions did not register %s", want)
 		}
@@ -49,7 +49,6 @@ func TestRouteOptionsZeroValueRegistersFullRouteSet(t *testing.T) {
 		opts RouteOptions
 	}{
 		{"runtime services", RouteOptions{RuntimeServices: NewSiteRuntimeServices()}},
-		{"analytics cache", RouteOptions{AnalyticsCache: NewAnalyticsQueryCache()}},
 		{"allowlist and realtime owner", RouteOptions{HTTPAllowlist: []string{"example.com"}, RealtimeConnections: &RealtimeConnectionOwner{}}},
 	}
 	for _, tt := range tests {

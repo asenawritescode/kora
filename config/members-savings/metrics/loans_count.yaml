@@ -1,0 +1,9 @@
+name: loans_count
+label: "Loans"
+type: balance
+model: "Loan"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Loans from the Loan records (count)."

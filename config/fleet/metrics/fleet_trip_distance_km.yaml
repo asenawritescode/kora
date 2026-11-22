@@ -1,0 +1,10 @@
+name: fleet_trip_distance_km
+label: "Distance (km)"
+type: simple
+model: "Trip"
+measure:
+  agg: sum
+  field: distance_km
+time: business_date
+format: number
+description: "Distance (km) from the Trip records (sum)."

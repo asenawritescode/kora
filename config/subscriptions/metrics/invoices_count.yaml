@@ -1,0 +1,9 @@
+name: invoices_count
+label: "Recurring invoices"
+type: balance
+model: "Recurring Invoice"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Recurring invoices from the Recurring Invoice records (count)."

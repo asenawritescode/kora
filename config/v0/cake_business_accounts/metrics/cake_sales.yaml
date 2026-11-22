@@ -1,0 +1,11 @@
+name: cake_sales
+label: Sales
+type: simple
+model: Cake Order
+measure:
+  agg: sum
+  field: total_sales
+time: business_date
+good: up
+format: currency
+description: Total sales of the cake orders by order date (sum).

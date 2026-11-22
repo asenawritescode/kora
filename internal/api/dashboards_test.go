@@ -35,7 +35,7 @@ func dashboardFixture(t *testing.T) (*doctype.Registry, metricsAPI) {
 func serveDashboards(t *testing.T, registry *doctype.Registry, api dashboardsAPI, roles []string, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	execution := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-dashboards", roles, nil)
+	execution := newVerifiedTestContext(t, "stable-tenant", "tenant-dashboards", roles, nil)
 	ex, _ := execution.Get("policy_execution")
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -55,7 +55,7 @@ func serveDashboards(t *testing.T, registry *doctype.Registry, api dashboardsAPI
 func viewAs(t *testing.T, registry *doctype.Registry, api dashboardsAPI, roles []string, dash metrics.Dashboard) (contract.DashboardDefinition, bool) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	execution := newAnalyticsAuthorizationContext(t, "stable-tenant", "tenant-dashboards", roles, nil)
+	execution := newVerifiedTestContext(t, "stable-tenant", "tenant-dashboards", roles, nil)
 	ex, _ := execution.Get("policy_execution")
 	router := gin.New()
 	var def contract.DashboardDefinition

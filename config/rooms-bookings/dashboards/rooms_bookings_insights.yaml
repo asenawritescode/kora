@@ -1,0 +1,24 @@
+name: rooms_bookings_insights
+label: "Rooms and bookings insights"
+description: "Figures and charts that reproduce the rooms and bookings overview report."
+default_range: last_30_days
+tiles:
+  - metric: rooms_count
+  - metric: rooms_bookings_count
+  - metric: rooms_booking_value
+charts:
+  - id: rooms_by_status
+    title: "Rooms by status"
+    kind: bar
+    metrics: [rooms_count]
+    by: status
+  - id: bookings_by_status
+    title: "Bookings by status"
+    kind: bar
+    metrics: [rooms_bookings_count]
+    by: status
+  - id: booking_value_by_status
+    title: "Booking value by status"
+    kind: bar
+    metrics: [rooms_booking_value]
+    by: status

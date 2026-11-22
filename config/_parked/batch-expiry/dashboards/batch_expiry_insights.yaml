@@ -1,0 +1,18 @@
+name: batch_expiry_insights
+label: "Dispensary insights"
+description: "Figures and charts that reproduce the dispensary overview report."
+default_range: last_30_days
+tiles:
+  - metric: dispensary_prescriptions_count
+  - metric: dispensary_batches_count
+charts:
+  - id: prescriptions_by_status
+    title: "Prescriptions by status"
+    kind: bar
+    metrics: [dispensary_prescriptions_count]
+    by: status
+  - id: batches_by_product
+    title: "Quantity received by product"
+    kind: bar
+    metrics: [dispensary_quantity_received]
+    by: product

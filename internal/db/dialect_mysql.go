@@ -308,7 +308,7 @@ func (d *MySQLDialect) TableSuffix() string {
 
 func (d *MySQLDialect) ColumnType(f *doctype.Field) string {
 	switch f.Fieldtype {
-	case "Data", "Select", "Link", "Dynamic Link":
+	case "Data", "Select", "Link", "Dynamic Link", "User":
 		return "VARCHAR(140)"
 	case "Text":
 		return "TEXT"
@@ -411,6 +411,9 @@ func (d *MySQLDialect) InsertOrIgnorePrefix() string { return "INSERT IGNORE" }
 
 // SharedRowLock is MySQL's locking read: FOR SHARE.
 func (d *MySQLDialect) SharedRowLock() string { return " FOR SHARE" }
+
+// ExclusiveRowLock is MySQL's locking read: FOR UPDATE.
+func (d *MySQLDialect) ExclusiveRowLock() string { return " FOR UPDATE" }
 
 // AllocateNameNumber issues the next PREFIX-NNNN number. The prefix is its own
 // counter key, so it shares the series path.
@@ -542,7 +545,7 @@ func (d *MySQLDialect) numberBlockSQL() []string {
 }
 
 func (d *MySQLDialect) SystemTableSQL() []string {
-	return append(append(d.numberBlockSQL(), []string{
+	return append(append(append(d.numberBlockSQL(), mysqlRoleSQL()...), []string{
 		// _kora_naming_series
 		"CREATE TABLE IF NOT EXISTS _kora_naming_series (\n\t\t\tdoctype VARCHAR(140) NOT NULL,\n\t\t\tprefix VARCHAR(32) NOT NULL,\n\t\t\tcurrent BIGINT NOT NULL DEFAULT 0,\n\t\t\tmodified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),\n\t\t\tPRIMARY KEY (doctype, prefix)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
@@ -553,10 +556,6 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		"ALTER TABLE _kora_doctype ADD COLUMN version INT NOT NULL DEFAULT 1",
 		"ALTER TABLE _kora_doctype ADD COLUMN config_json JSON",
 		"ALTER TABLE _kora_doctype ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
-
-		// _kora_role
-		"CREATE TABLE IF NOT EXISTS _kora_role (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tworkspace_access TINYINT(1) NOT NULL DEFAULT 1,\n\t\t\tdescription TEXT\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-		"ALTER TABLE _kora_role ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
 
 		// _kora_permission
 		"CREATE TABLE IF NOT EXISTS _kora_permission (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tdoctype VARCHAR(140) NOT NULL,\n\t\t\trole VARCHAR(140) NOT NULL,\n\t\t\tcan_read TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_write TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_create TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_delete TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_submit TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_cancel TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_amend TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_export TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_import TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_report TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tif_owner TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tif_assigned TEXT NULL,\n\t\t\tscope_json TEXT NULL,\n\t\t\tUNIQUE KEY idx_doctype_role (doctype, role)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
@@ -618,7 +617,7 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		"ALTER TABLE _kora_view ADD COLUMN idx INT NOT NULL DEFAULT 0",
 		"ALTER TABLE _kora_view DROP PRIMARY KEY",
 		"ALTER TABLE _kora_view ADD PRIMARY KEY (name)",
-	}...), append(append(mysqlFieldTableSQL(), PaymentTablesMySQL()...), DashboardOverrideTablesMySQL()...)...)
+	}...), append(append(mysqlFieldTableSQL(), PaymentTablesMySQL()...), append(DashboardOverrideTablesMySQL(), SavedReportTablesMySQL()...)...)...)
 }
 
 // parseMySQLKeyField returns the field a duplicate-entry message names. MySQL 8
@@ -671,5 +670,14 @@ func mysqlFieldTableSQL() []string {
 		"ALTER TABLE _kora_field ADD COLUMN default_to_name TINYINT(1) NOT NULL DEFAULT 0",
 		"ALTER TABLE _kora_field ADD COLUMN field_precision INT",
 		"ALTER TABLE _kora_field ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
+	}
+}
+
+// mysqlRoleSQL is the _kora_role table and its column additions. It is created before the other system tables.
+func mysqlRoleSQL() []string {
+	return []string{
+		"CREATE TABLE IF NOT EXISTS _kora_role (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tworkspace_access TINYINT(1) NOT NULL DEFAULT 1,\n\t\t\tdescription TEXT\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+		"ALTER TABLE _kora_role ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
+		"ALTER TABLE _kora_role ADD COLUMN insights_access TINYINT(1) NOT NULL DEFAULT 1",
 	}
 }

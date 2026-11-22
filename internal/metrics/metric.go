@@ -79,7 +79,8 @@ type catalog struct {
 func newCatalog(defs []Metric, doctypes []*doctype.DocType) (catalog, []error) {
 	c := catalog{models: map[string]*doctype.DocType{}, metrics: map[string]Metric{}}
 	for _, dt := range doctypes {
-		c.models[dt.Name] = dt
+		// Parsed record types get the fact models the registry will give them, so a pack is checked against what the server runs.
+		c.models[dt.Name] = dt.WithGeneratedFacts()
 	}
 	var errs []error
 	for _, m := range defs {
@@ -298,6 +299,9 @@ func (fl Filter) validate(f *doctype.FactModel) error {
 }
 
 func isDimension(f *doctype.FactModel, column string) bool {
+	if f.GroupsByStatus(column) {
+		return true
+	}
 	for _, d := range f.Dimensions {
 		if d.ColumnName() == column {
 			return true

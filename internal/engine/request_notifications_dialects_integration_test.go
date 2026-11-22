@@ -182,7 +182,7 @@ func runRequestNotificationOutboxLifecycle(t *testing.T, database *sql.DB, diale
 	if _, err := database.ExecContext(ctx, db.Rebind(dialect, `UPDATE _kora_notification_delivery SET available_at=? WHERE tenant_id=? AND request_id=?`), now, string(tenant), string(requestID)); err != nil {
 		t.Fatalf("%s make retry due: %v", dialect.DriverName(), err)
 	}
-	bus := eventbus.NewChannelBusWithLimits(2, 2048, 4096, t.TempDir())
+	bus := eventbus.NewChannelBus(2, 2048)
 	defer bus.Close()
 	events, err := bus.Subscribe()
 	if err != nil {

@@ -4,71 +4,6 @@
   "route_composition": "cli/serve.go API/auth/public/request registration functions; DocType and host routing are data/runtime dependent",
   "registered_routes": [
     {
-      "method": "GET",
-      "path": "/api/analytics/catalog",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func1"
-    },
-    {
-      "method": "POST",
-      "path": "/api/analytics/drill",
-      "handler": "github.com/asenawritescode/kora/internal/api.registerAnalyticsDrill.func1"
-    },
-    {
-      "method": "GET",
-      "path": "/api/analytics/insights/:doctype",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func12"
-    },
-    {
-      "method": "GET",
-      "path": "/api/analytics/metrics",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func9"
-    },
-    {
-      "method": "POST",
-      "path": "/api/analytics/metrics",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func8"
-    },
-    {
-      "method": "GET",
-      "path": "/api/analytics/metrics/:name",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func10"
-    },
-    {
-      "method": "POST",
-      "path": "/api/analytics/metrics/:name/query",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func11"
-    },
-    {
-      "method": "POST",
-      "path": "/api/analytics/query",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func4"
-    },
-    {
-      "method": "POST",
-      "path": "/api/analytics/rebuild",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func6"
-    },
-    {
-      "method": "GET",
-      "path": "/api/analytics/rebuild/:id",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func7"
-    },
-    {
-      "method": "GET",
-      "path": "/api/analytics/reports",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func2"
-    },
-    {
-      "method": "POST",
-      "path": "/api/analytics/reports/:name/query",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func3"
-    },
-    {
-      "method": "GET",
-      "path": "/api/analytics/status",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func5"
-    },
-    {
       "method": "POST",
       "path": "/api/auth/login",
       "handler": "github.com/asenawritescode/kora/internal/auth.registerPasswordLoginRoute.func1"
@@ -107,6 +42,51 @@
       "method": "PUT",
       "path": "/api/dashboards/:name/override",
       "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.saveOverride-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/dashboards/:name/pins",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.addPin-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/dashboards/:name/pins/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.removePin-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/explore/catalog",
+      "handler": "github.com/asenawritescode/kora/internal/api.registerExploreRoutes.func1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/explore/reports",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.list-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/explore/reports",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.create-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/explore/reports/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.remove-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/explore/reports/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.get-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/explore/reports/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.update-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/explore/reports/:id/copy",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.copy-fm"
     },
     {
       "method": "DELETE",
@@ -765,71 +745,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/v1/analytics/catalog",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func1"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/analytics/drill",
-      "handler": "github.com/asenawritescode/kora/internal/api.registerAnalyticsDrill.func1"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/analytics/insights/:doctype",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func12"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/analytics/metrics",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func9"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/analytics/metrics",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func8"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/analytics/metrics/:name",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func10"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/analytics/metrics/:name/query",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func11"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/analytics/query",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func4"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/analytics/rebuild",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func6"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/analytics/rebuild/:id",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func7"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/analytics/reports",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func2"
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/analytics/reports/:name/query",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func3"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/analytics/status",
-      "handler": "github.com/asenawritescode/kora/internal/api.RegisterAnalyticsRoutes.func5"
-    },
-    {
-      "method": "GET",
       "path": "/api/v1/auth/oidc/:provider/start",
       "handler": "github.com/asenawritescode/kora/internal/auth.(*OIDCLogin).Register.func2"
     },
@@ -857,6 +772,51 @@
       "method": "PUT",
       "path": "/api/v1/dashboards/:name/override",
       "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.saveOverride-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboards/:name/pins",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.addPin-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/dashboards/:name/pins/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.dashboardsAPI.removePin-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/explore/catalog",
+      "handler": "github.com/asenawritescode/kora/internal/api.registerExploreRoutes.func1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/explore/reports",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.list-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/explore/reports",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.create-fm"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/explore/reports/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.remove-fm"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/explore/reports/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.get-fm"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/explore/reports/:id",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.update-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/explore/reports/:id/copy",
+      "handler": "github.com/asenawritescode/kora/internal/api.reportsAPI.copy-fm"
     },
     {
       "method": "DELETE",

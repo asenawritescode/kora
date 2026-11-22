@@ -127,11 +127,19 @@ jobs:
           KORA_TENANT_CLOCK_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_FACTS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_METRICS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+          KORA_SAVED_REPORT_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_DB_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+          KORA_ASK_ZANA_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+          KORA_MCP_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
         run: >-
           go test -tags=integration -p 1
-          ./internal/db ./internal/dbaccess ./internal/api ./internal/tenanttime ./internal/analytics ./internal/outbox ./internal/site ./internal/requests/sqlstore ./internal/workflow/sqlstore ./internal/metrics
-          ./internal/notifications/sqlstore ./internal/management/sqlstore ./internal/facts -count=1 -timeout=15m
+          ./internal/db ./internal/dbaccess ./internal/api ./internal/tenanttime ./internal/projection ./internal/outbox ./internal/site ./internal/requests/sqlstore ./internal/workflow/sqlstore ./internal/metrics
+          ./internal/notifications/sqlstore ./internal/management/sqlstore ./internal/facts ./internal/mcp -count=1 -timeout=15m
+
+      - name: Test AI transcript run IDs on disposable MySQL
+        env:
+          KORA_AI_TRANSCRIPT_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+        run: go test -tags=integration ./internal/api/ai -run TestTranscriptCarriesRunIDsAcrossDialects/mysql -count=1 -timeout=5m
 
       - name: Test programmatic module owner command fixture
         env:
@@ -167,6 +175,26 @@ jobs:
         env:
           KORA_METRICS_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
         run: go test -tags=integration ./internal/metrics -count=1 -timeout=5m
+
+      - name: Test published projections on disposable PostgreSQL
+        env:
+          KORA_PROJECTION_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
+        run: go test -tags=integration ./internal/projection -count=1 -timeout=5m
+
+      - name: Test AI transcript run IDs on disposable PostgreSQL
+        env:
+          KORA_AI_TRANSCRIPT_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
+        run: go test -tags=integration ./internal/api/ai -run TestTranscriptCarriesRunIDsAcrossDialects/postgres -count=1 -timeout=5m
+
+      - name: Test Ask Zana golden questions on disposable PostgreSQL
+        env:
+          KORA_ASK_ZANA_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
+        run: go test -tags=integration ./internal/api -run TestAskZanaGoldenQuestions -count=1 -timeout=5m
+
+      - name: Test saved Explore reports on disposable PostgreSQL
+        env:
+          KORA_SAVED_REPORT_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
+        run: go test -tags=integration ./internal/api -run TestSavedReports -count=1 -timeout=5m
 
       - name: Test child-row sums in doc constraints on disposable MySQL
         env:
@@ -264,12 +292,16 @@ jobs:
         env:
           KORA_DBACCESS_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
         run: go test -tags=integration ./internal/dbaccess -run TestStatementTimeoutCancelsSlowReadsOnDisposableDatabases -count=1 -timeout=5m
+      - name: Test role insights_access upgrade on disposable PostgreSQL
+        env:
+          KORA_SITE_ROLE_UPGRADE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
+        run: go test -tags=integration ./internal/site -run TestBootstrapAddsInsightsAccessToExistingRoleTable/postgres -count=1 -timeout=5m
       - name: Test naming allocation on disposable PostgreSQL
         env:
           KORA_DB_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
           KORA_ORM_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
         run: >-
-          go test -tags=integration ./internal/db -run 'TestNameAllocationIssuesUniqueNamesUnderConcurrency|TestReserveSeriesRangeGivesDisjointRangesToTwoTills' -count=1 -timeout=5m &&
+          go test -tags=integration ./internal/db -run 'TestNameAllocationIssuesUniqueNamesUnderConcurrency|TestReserveSeriesRangeGivesDisjointRangesToTwoTills|TestRetiredAnalyticsTablesDropIdempotentlyKeepingProjectionStorage' -count=1 -timeout=5m &&
           go test -tags=integration ./internal/orm -run TestReserveNumberBlockRecordsDisjointOpenBlocksForTwoTills -count=1 -timeout=5m
 
       - name: Test number blocks on disposable MySQL

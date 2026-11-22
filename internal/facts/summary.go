@@ -60,13 +60,18 @@ func rebuildSelect(dialect db.Dialect, dt *doctype.DocType, day tenanttime.Date)
 	for _, m := range f.Measures {
 		inner = append(inner, m.ColumnName())
 	}
-	part := func(table string) string {
-		return fmt.Sprintf("SELECT %s FROM %s WHERE %s = ? AND %s = ?", quoteList(dialect, inner), q(table), q("business_date"), q("deleted"))
+	// A line table part keeps only rows with a line id, so a line row with an empty id never counts as a header.
+	part := func(table string, lines bool) string {
+		where := fmt.Sprintf("%s = ? AND %s = ?", q("business_date"), q("deleted"))
+		if lines {
+			where += " AND " + q("line_id") + " <> ''"
+		}
+		return fmt.Sprintf("SELECT %s FROM %s WHERE %s", quoteList(dialect, inner), q(table), where)
 	}
-	source := part(f.TableName(dt))
+	source := part(f.TableName(dt), false)
 	partArgs := []any{day.String(), db.BoolParam(dialect, false)}
 	if f.Lines != "" {
-		source += " UNION ALL " + part(f.LineTableName(dt))
+		source += " UNION ALL " + part(f.LineTableName(dt), true)
 		partArgs = append(partArgs, day.String(), db.BoolParam(dialect, false))
 	}
 	// grain "" is the day total; each dimension is its own grain.

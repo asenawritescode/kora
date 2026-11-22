@@ -1,0 +1,11 @@
+name: crop_plans_target_quantity
+label: Target quantity
+type: simple
+model: Crop Plan
+measure:
+  agg: sum
+  field: target_quantity
+time: business_date
+good: up
+format: number
+description: Target quantity of the crop plans by planting date (sum).

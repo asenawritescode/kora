@@ -1,0 +1,9 @@
+name: properties_units_count
+label: "Units"
+type: balance
+model: "Unit"
+measure:
+  agg: count
+time: business_date
+format: number
+description: "Units from the Unit records (count)."

@@ -1,0 +1,11 @@
+name: sales_base_total
+label: Sales in base currency, all statuses
+type: simple
+model: Sale
+measure:
+  agg: sum
+  field: base_total
+time: business_date
+good: up
+format: currency
+description: Sale totals in base currency for every sale status, returns included (sum).

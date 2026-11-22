@@ -27,6 +27,20 @@ type Server struct {
 	registry *doctype.Registry
 	mode     Mode
 	executor VerifiedToolExecutor
+	metrics  MetricsFactory
+}
+
+// MetricsFactory returns the runner of the metrics tools for one call. The runner must act as the caller the call
+// authenticated as, so the reads apply the same grants, scope and business clock as the API.
+type MetricsFactory func(ctx context.Context) (ai.MetricsRunner, error)
+
+// Option configures a Server at construction.
+type Option func(*Server)
+
+// WithMetrics adds the metrics read tools (list_metrics, query_metrics, drill_metrics). Each call takes its runner from
+// the factory; without this option the server has no metrics tools.
+func WithMetrics(factory MetricsFactory) Option {
+	return func(s *Server) { s.metrics = factory }
 }
 
 // VerifiedToolExecutor is supplied only by an adapter that authenticates the
@@ -41,7 +55,7 @@ func New(reg *doctype.Registry, siteName string, mode Mode) *Server {
 
 // NewWithExecutor enables tenant tools only when the caller provides the
 // authenticated execution adapter. Without it, executable mode cannot start.
-func NewWithExecutor(reg *doctype.Registry, siteName string, mode Mode, executor VerifiedToolExecutor) *Server {
+func NewWithExecutor(reg *doctype.Registry, siteName string, mode Mode, executor VerifiedToolExecutor, opts ...Option) *Server {
 	if mode == "" {
 		mode = ModeValidationOnly
 	}
@@ -51,6 +65,9 @@ func NewWithExecutor(reg *doctype.Registry, siteName string, mode Mode, executor
 	}, nil)
 
 	ks := &Server{srv: srv, registry: reg, mode: mode, executor: executor}
+	for _, opt := range opts {
+		opt(ks)
+	}
 	ks.registerTools()
 	return ks
 }
@@ -58,8 +75,8 @@ func NewWithExecutor(reg *doctype.Registry, siteName string, mode Mode, executor
 // NewReadOnlyWithExecutor registers only generated DocType find/list/get
 // tools. The executor must authenticate every call and enforce current tenant
 // grants. Mutating and system tools are deliberately absent from this mode.
-func NewReadOnlyWithExecutor(reg *doctype.Registry, siteName string, executor VerifiedToolExecutor) *Server {
-	return NewWithExecutor(reg, siteName, ModeReadOnly, executor)
+func NewReadOnlyWithExecutor(reg *doctype.Registry, siteName string, executor VerifiedToolExecutor, opts ...Option) *Server {
+	return NewWithExecutor(reg, siteName, ModeReadOnly, executor, opts...)
 }
 
 // Run starts the MCP server on stdio transport (for Claude Desktop).
@@ -73,6 +90,11 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) registerTools() {
 	// Config generation tools.
 	s.addConfigTools()
+	if s.metrics != nil {
+		for _, tool := range ai.MetricsToolDescriptors() {
+			s.addMetricsTool(tool)
+		}
+	}
 
 	if s.mode != ModeExecutable && s.mode != ModeReadOnly {
 		return
@@ -154,6 +176,20 @@ func (s *Server) addProjectedTool(tool ai.ToolDescriptor) {
 		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: result}}}, nil, nil
 	})
+}
+
+// addMetricsTool publishes one metrics read. The call runs through the same runner the chat uses, so a refusal is
+// the same "Error:" text.
+func (s *Server) addMetricsTool(tool ai.ToolDescriptor) {
+	mcp.AddTool(s.srv, &mcp.Tool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema},
+		func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, any, error) {
+			run, err := s.metrics(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
+			text := ai.RunMetricsTool(run, tool.Name, args)
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil, nil
+		})
 }
 
 func sanitizeName(name string) string {

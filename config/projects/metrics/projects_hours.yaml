@@ -1,0 +1,10 @@
+name: projects_hours
+label: "Hours"
+type: simple
+model: "Timesheet Entry"
+measure:
+  agg: sum
+  field: hours
+time: business_date
+format: number
+description: "Hours from the Timesheet Entry records (sum)."

@@ -1,0 +1,10 @@
+name: invoices_balance
+label: "Balance due"
+type: balance
+model: "Recurring Invoice"
+measure:
+  agg: sum
+  field: balance
+time: business_date
+format: currency
+description: "Balance due from the Recurring Invoice records (sum)."
