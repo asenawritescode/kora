@@ -527,10 +527,10 @@ func TestAuthenticateChannelSession_LoadsPermissions(t *testing.T) {
 	token := "channel-token"
 	rows := sqlmock.NewRows([]string{
 		"id", "site", "client_name", "conversation_key", "provider", "sender_address", "token_hash", "api_permissions",
-		"trusted_until", "sensitive_until", "revoked_at", "revoked_reason", "created_at", "last_used_at",
+		"trusted_until", "sensitive_until", "revoked_at", "revoked_reason", "created_at", "last_used_at", "subject_user",
 	}).AddRow(
 		"chs_1", "demo", "kora-cloud", "twilio:+1:+2", "twilio_whatsapp", "+254700000001", channelTokenHash(token),
-		`[{"doctype":"Customer","read":true}]`, time.Now().Add(10*time.Minute), nil, nil, "", time.Now(), nil,
+		`[{"doctype":"Customer","read":true}]`, time.Now().Add(10*time.Minute), nil, nil, "", time.Now(), nil, "",
 	)
 	mock.ExpectQuery("SELECT id, site, client_name, conversation_key, provider, sender_address, token_hash, api_permissions").
 		WithArgs(channelTokenHash(token)).WillReturnRows(rows)
