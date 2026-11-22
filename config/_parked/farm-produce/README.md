@@ -3,7 +3,7 @@
 Produce intake for cooperatives and agribusinesses: Farmer and Produce Delivery.
 Roles: **Cooperative Manager** (manages farmers and deliveries) and **Produce Clerk** (reads
 farmers, enters deliveries). One view, **Produce Deliveries** at `/produce`, and a produce
-overview report (kilograms by grade and by farmer, at `/reports/produce`).
+insights dashboard `farm_produce_insights` (kilograms by grade and by farmer).
 
 Depends on the Selling pack (`erpsell`): a delivery links to `Product`.
 
@@ -24,7 +24,7 @@ Depends on the Selling pack (`erpsell`): a delivery links to `Product`.
   prices and farmers carefully until the Engine enforces them.
 
 Limits: no farmer account balances, no payment run, no traceability by plot. The Engine does
-not sum across records, so a farmer's total owed or delivered is only in the report, not on the farmer.
+not sum across records, so a farmer's total owed or delivered is only in the dashboard, not on the farmer.
 
 Checks: `go test ./internal/site -run Produce`, `go test ./internal/analytics -run Produce` and
 `go test -tags integration ./internal/api -run Produce` (needs MySQL, set `KORA_TEST_DSN`).

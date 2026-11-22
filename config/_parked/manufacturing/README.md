@@ -6,7 +6,7 @@ Selling/Stock pack's `Product` (`config/erpsell`), so install it with that pack.
 Roles: **Production Manager** (everything except deleting append-only records) and
 **Production Operator** (reads recipes and work orders; creates production runs and material
 issues; cannot delete). One view, **Production Overview** at `/production` (open work orders
-and bills of materials), and a `manufacturing_overview` report (work orders by status,
+and bills of materials), and a `manufacturing_insights` dashboard (work orders by status,
 quantity made by product).
 
 - A Bill of Materials names the product it makes, how much one batch yields (more than zero)

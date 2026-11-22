@@ -19,7 +19,7 @@ feeds, journals and accounts (nothing posted to them), stock ledgers (see
 | Cash control | Till Session, Till Count (child), Cash Movement |
 | Money out | Expense |
 
-Reports (all in base currency): Sales (by day, currency, status), Payments
+Dashboard metrics (all in base currency): Sales (by day, currency, status), Payments
 received (by currency, method), Expenses (by category, day).
 
 The **Owner Dashboard** view (`/dashboard`) shows the key figures on one screen: number of
@@ -33,7 +33,7 @@ Roles: **Manager** (runs the shop, owns currencies and rates) and **Cashier**
 
 - One **base currency**, chosen once in **Settings** (the site currency). It is not
   listed as a Currency record; the Currency records are the other currencies you
-  deal in, each with its rate to the base. Totals, reports and the books are in the base currency. Product prices
+  deal in, each with its rate to the base. Totals, metrics and the books are in the base currency. Product prices
   (`selling_price`, `cost_price`) are in the base currency.
 - Every money record (Sale, Payment, Cash Movement, Expense) has `currency` and
   `exchange_rate`. **Leave `currency` empty for the base currency.**
@@ -42,7 +42,7 @@ Roles: **Manager** (runs the shop, owns currencies and rates) and **Cashier**
   sale. When a currency is picked on a form, the rate fills in from the Currency
   record and can be edited.
 - `base_total` / `base_amount` are computed (`amount x rate`, two decimals) and are
-  what reports add up.
+  what metrics add up.
 - Rates are typed in by a person on the Currency record. Nothing reads a feed, and
   there is no gain/loss on rate changes.
 - A sale can be paid with several Payment records in different currencies.

@@ -4,7 +4,7 @@ Menu, tables and kitchen orders for restaurants and cafes: Menu Item, Dining Tab
 Kitchen Order (with Kitchen Order Line items).
 Roles: **Restaurant Manager** (everything) and **Waiter** (reads the menu and tables,
 creates and edits kitchen orders, cannot delete). One view, **Menu and Tables** at `/menu`
-(kitchen orders by status, the tables, the menu), and a `menu_overview` report (kitchen
+(kitchen orders by status, the tables, the menu), and a `menu_tables_insights` dashboard (kitchen
 orders by status, menu items by category).
 
 - Table numbers and order references are unique; every order needs at least one line.
