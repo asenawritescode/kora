@@ -105,13 +105,6 @@ func BootstrapSystemTables(ctx context.Context, database *sql.DB, dialect db.Dia
 			return err
 		}
 	}
-	// The analytics counter and rollup engine is gone. Drop its tables from
-	// tenants that ran an earlier bootstrap; the statements are idempotent.
-	for _, ddl := range db.RetiredAnalyticsDropDDL(dialect) {
-		if err := execDDL(ddl, "dropping retired analytics table"); err != nil {
-			return err
-		}
-	}
 	var identityDDL []string
 	switch dialect.(type) {
 	case *db.LibSQLDialect:

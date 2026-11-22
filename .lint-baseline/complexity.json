@@ -1008,10 +1008,7 @@
    "lines": 259
   },
   "internal/db::ExtensibilityTablesMySQL": {
-   "lines": 142
-  },
-  "internal/db::ExtensibilityTablesPostgres": {
-   "lines": 83
+   "lines": 136
   },
   "internal/db::LoadSchema": {
    "statements": 41
@@ -1465,7 +1462,7 @@
   "internal/engine::registerResourceMetrics": {
    "cognitive": 96,
    "cyclomatic": 37,
-   "statements": 187
+   "statements": 186
   },
   "internal/engine::registeredConfigQueryProviders": {
    "cognitive": 52,
@@ -1519,29 +1516,8 @@
    "cognitive": 26,
    "cyclomatic": 20
   },
-  "internal/eventbus::(*channelBus).AcknowledgeWAL": {
-   "cognitive": 46,
-   "cyclomatic": 28
-  },
-  "internal/eventbus::(*channelBus).refreshWALBacklogLocked": {
-   "cognitive": 32,
-   "cyclomatic": 19
-  },
-  "internal/eventbus::(*channelBus).writeWAL": {
-   "cognitive": 23,
-   "cyclomatic": 18
-  },
-  "internal/eventbus::AcknowledgeWAL": {
-   "statements": 65
-  },
   "internal/eventbus::addListener": {
    "statements": 49
-  },
-  "internal/eventbus::refreshWALBacklogLocked": {
-   "statements": 58
-  },
-  "internal/eventbus::writeWAL": {
-   "statements": 52
   },
   "internal/expression::(*TreeEvaluator).eval": {
    "cognitive": 27,

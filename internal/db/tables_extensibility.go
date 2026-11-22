@@ -2,7 +2,7 @@ package db
 
 // ExtensibilityTablesMySQL returns MySQL-specific extensibility DDL.
 func ExtensibilityTablesMySQL() []string {
-	return []string{
+	return append([]string{
 		`CREATE TABLE IF NOT EXISTS _kora_script (
 			name VARCHAR(140) PRIMARY KEY,
 			site VARCHAR(140) NOT NULL DEFAULT '',
@@ -137,12 +137,12 @@ func ExtensibilityTablesMySQL() []string {
 			INDEX idx_deliv_status (status),
 			INDEX idx_deliv_created (created_at)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-	}
+	}, RetiredAnalyticsDropDDL((&MySQLDialect{}))...)
 }
 
 // ExtensibilityTablesPostgres returns PostgreSQL-specific system DDL.
 func ExtensibilityTablesPostgres() []string {
-	return []string{
+	return append([]string{
 		`CREATE TABLE IF NOT EXISTS _kora_script (
 			name VARCHAR(140) PRIMARY KEY, site VARCHAR(140) NOT NULL DEFAULT '',
 			script_type VARCHAR(50) NOT NULL DEFAULT 'doc_event', doctype VARCHAR(140) NOT NULL DEFAULT '',
@@ -218,7 +218,7 @@ func ExtensibilityTablesPostgres() []string {
 		`CREATE INDEX IF NOT EXISTS idx_deliv_extension ON _kora_webhook_delivery (extension_name)`,
 		`CREATE INDEX IF NOT EXISTS idx_deliv_status ON _kora_webhook_delivery (status)`,
 		`CREATE INDEX IF NOT EXISTS idx_deliv_created ON _kora_webhook_delivery (created_at)`,
-	}
+	}, RetiredAnalyticsDropDDL((&PostgresDialect{}))...)
 }
 
 // ExtensibilityTablesLibSQL returns LibSQL-compatible extensibility DDL.

@@ -188,6 +188,8 @@ func sessionCacheBudgetFromEnv() (uint64, error) {
 // analyticsOutboxFromEnv reads the analytics queue budget and subscriber limit
 // and the outbox archive horizon.
 func analyticsOutboxFromEnv() (uint64, int, time.Duration, error) {
+	// Startup-only: report files left by the retired analytics WAL once.
+	eventbus.LogLegacyWALDir(eventbus.LegacyWALDir)
 	queueBudget, err := analyticsQueueBudgetFromEnv()
 	if err != nil {
 		return 0, 0, 0, err
@@ -309,7 +311,6 @@ func runServe() error {
 	if sc.DBDSN == "" {
 		return fmt.Errorf("DB_DSN is required; Engine serves sites from the canonical platform directory")
 	}
-	eventbus.LogLegacyWALDir(eventbus.LegacyWALDir)
 	common := site.CommonConfigFromEnv()
 	configureLogging(common.LogLevel, common.LogFormat)
 	storageResolver := engine.NewStorageResolver(storageConfigFromEnv())

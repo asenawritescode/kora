@@ -63,9 +63,6 @@ contract/version.go::DetectVersionConflict
 contract/version.go::NewConflictRecord
 contract/version.go::VersionMismatchError.Error
 contract/version.go::itoa64
-internal/analytics/backfill.go::backfillMetric
-internal/analytics/model.go::BuildDataPointCatalog
-internal/analytics/worker.go::Worker.addDelta
 internal/api/ai/legacy_inventory.go::InspectRunStatusInventory
 internal/api/ai/legacy_inventory.go::aiRunColumns
 internal/api/ai/run_store.go::ListRunTasks
@@ -182,8 +179,6 @@ internal/engine/management_invitation_executor.go::recordInvitationOutcome
 internal/engine/management_invitation_executor.go::retryInvitationDelivery
 internal/engine/management_invitation_executor.go::revokeInvitationForReconciliation
 internal/engine/scheduler.go::StartScheduler
-internal/eventbus/bus.go::NewChannelBus
-internal/eventbus/bus.go::NewChannelBusWithMaxEventBytes
 internal/eventbus/multibus.go::NewMultiBus
 internal/eventbus/queue_admission.go::NewAnalyticsQueueAdmission
 internal/expression/expression.go::ExprError.Error
