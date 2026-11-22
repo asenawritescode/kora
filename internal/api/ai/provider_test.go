@@ -85,7 +85,7 @@ func TestCallAIWithRetryRetriesTransientAndSucceeds(t *testing.T) {
 	}))
 	defer server.Close()
 
-	got, err := callAIWithRetry(server.URL, "test-key", map[string]any{"model": "gpt-4o"}, AIConfig{MaxRetries: 1, RetryBackoffMs: 1}, nil)
+	got, err := callAIWithRetry(providerCall{BaseURL: server.URL, APIKey: "test-key", Body: map[string]any{"model": "gpt-4o"}, Config: AIConfig{MaxRetries: 1, RetryBackoffMs: 1}})
 	if err != nil {
 		t.Fatalf("callAIWithRetry: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestCallAIWithRetryHonorsTimeout(t *testing.T) {
 	defer server.Close()
 
 	start := time.Now()
-	_, err := callAIWithRetry(server.URL, "test-key", map[string]any{"model": "gpt-4o"}, AIConfig{HTTPTimeoutSec: 1, MaxRetries: 0}, nil)
+	_, err := callAIWithRetry(providerCall{BaseURL: server.URL, APIKey: "test-key", Body: map[string]any{"model": "gpt-4o"}, Config: AIConfig{HTTPTimeoutSec: 1, MaxRetries: 0}})
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -118,7 +118,7 @@ func TestCallAIWithRetryFailsOnNonTransientMalformedResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := callAIWithRetry(server.URL, "test-key", map[string]any{"model": "gpt-4o"}, AIConfig{MaxRetries: 2, RetryBackoffMs: 1}, nil)
+	_, err := callAIWithRetry(providerCall{BaseURL: server.URL, APIKey: "test-key", Body: map[string]any{"model": "gpt-4o"}, Config: AIConfig{MaxRetries: 2, RetryBackoffMs: 1}})
 	if err == nil || !strings.Contains(err.Error(), "parsing AI response") {
 		t.Fatalf("expected parsing failure, got %v", err)
 	}
@@ -172,6 +172,51 @@ func TestLoadAIConfigModelTable(t *testing.T) {
 				cfg.MaxToolResultChars != tc.wantResultCap || cfg.TokenBudget != tc.wantBudget {
 				t.Errorf("LoadAIConfig(%q) = rounds %d tokens %d history %d result %d budget %d",
 					tc.model, cfg.MaxRounds, cfg.MaxTokensPerCall, cfg.HistoryLimit, cfg.MaxToolResultChars, cfg.TokenBudget)
+			}
+		})
+	}
+}
+
+func TestGatewayHeadersFor(t *testing.T) {
+	tests := []struct {
+		name        string
+		providerKey string
+		channel     string
+		want        map[string]string
+	}{
+		{
+			name:        "gateway call on the workspace is web",
+			providerKey: "kora_cloud",
+			channel:     "",
+			want: map[string]string{
+				"X-Kora-Site": "site-a", "X-Kora-Channel": "web", "X-Kora-Run": "run-1", "X-Kora-Purpose": "chat",
+			},
+		},
+		{
+			name:        "gateway call on a channel names the channel",
+			providerKey: "kora_cloud",
+			channel:     "whatsapp",
+			want: map[string]string{
+				"X-Kora-Site": "site-a", "X-Kora-Channel": "whatsapp", "X-Kora-Run": "run-1", "X-Kora-Purpose": "chat",
+			},
+		},
+		{
+			name:        "direct provider sends no gateway headers",
+			providerKey: "deepseek_api_key",
+			channel:     "whatsapp",
+			want:        nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := gatewayHeadersFor(tt.providerKey, "site-a", tt.channel, "run-1")
+			if len(got) != len(tt.want) {
+				t.Fatalf("gatewayHeadersFor() = %v, want %v", got, tt.want)
+			}
+			for name, value := range tt.want {
+				if got[name] != value {
+					t.Fatalf("header %s = %q, want %q", name, got[name], value)
+				}
 			}
 		})
 	}

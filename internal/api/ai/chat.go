@@ -494,25 +494,30 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 			CurrentStepID:  stepID,
 			InputMessage:   req.Message,
 		})
-		aiResp, err := callAIWithRetry(baseURL, apiKey, aiBody, cfg, func(attempt int, status string, latency time.Duration, usage Usage, attemptErr error) {
-			tokens := usage.tokenClasses()
-			if status == "failed" {
-				tokens[contract.UsageClassPartial] = 0
-			}
-			_ = RecordUsage(auditCtx, tx.DB, contract.UsageEvent{
-				RunID:      runID,
-				Site:       siteName,
-				Model:      model,
-				Provider:   providerKey,
-				Attempt:    attempt,
-				Status:     status,
-				Tokens:     tokens,
-				LatencyMs:  latency.Milliseconds(),
-				OccurredAt: time.Now().UTC(),
-				Attribution: map[string]string{
-					"operation": "chat",
-				},
-			})
+		aiResp, err := callAIWithRetry(providerCall{
+			BaseURL: baseURL,
+			APIKey:  apiKey,
+			Body:    aiBody,
+			Config:  cfg,
+			Headers: gatewayHeadersFor(providerKey, siteName, turn.Channel, runID),
+			Record: func(attempt int, status string, latency time.Duration, reply providerReply, attemptErr error) {
+				tokens := reply.Usage.tokenClasses()
+				if status == "failed" {
+					tokens[contract.UsageClassPartial] = 0
+				}
+				_ = RecordUsage(auditCtx, tx.DB, contract.UsageEvent{
+					RunID:       runID,
+					Site:        siteName,
+					Model:       model,
+					Provider:    providerKey,
+					Attempt:     attempt,
+					Status:      status,
+					Tokens:      tokens,
+					LatencyMs:   latency.Milliseconds(),
+					OccurredAt:  time.Now().UTC(),
+					Attribution: usageAttribution(reply.Model),
+				})
+			},
 		})
 		if err != nil {
 			slog.Error("AI provider call failed", "error", err, "round", round)

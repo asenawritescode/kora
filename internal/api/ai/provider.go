@@ -246,11 +246,43 @@ func resolveProvider(db *sql.DB, siteName, modelOverride string, dialect ...kdb.
 // AI provider HTTP call with retry
 // ---------------------------------------------------------------------------
 
-func callAI(client *http.Client, baseURL, apiKey string, body map[string]any) (map[string]any, error) {
+// Gateway attribution header names. Cloud reads them to record each model call against its site, channel, run and
+// purpose.
+const (
+	headerKoraSite    = "X-Kora-Site"
+	headerKoraChannel = "X-Kora-Channel"
+	headerKoraRun     = "X-Kora-Run"
+	headerKoraPurpose = "X-Kora-Purpose"
+)
+
+// gatewayPurposeChat is the purpose of a chat-loop model call.
+const gatewayPurposeChat = "chat"
+
+// gatewayHeadersFor returns the attribution headers for a model call. Only the Cloud gateway takes them, so a direct
+// provider gets nil. An empty channel is the workspace, "web".
+func gatewayHeadersFor(providerKey, site, channel, run string) map[string]string {
+	if providerKey != "kora_cloud" {
+		return nil
+	}
+	if channel == "" {
+		channel = "web"
+	}
+	return map[string]string{
+		headerKoraSite:    site,
+		headerKoraChannel: channel,
+		headerKoraRun:     run,
+		headerKoraPurpose: gatewayPurposeChat,
+	}
+}
+
+func callAI(client *http.Client, baseURL, apiKey string, body map[string]any, headers map[string]string) (map[string]any, error) {
 	jsonBody, _ := json.Marshal(body)
 	req, _ := http.NewRequest("POST", baseURL+"/chat/completions", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -276,31 +308,50 @@ func newAIHTTPClient(timeoutSec int) *http.Client {
 	}
 }
 
-// providerAttemptRecorder hears each provider attempt. Usage is the call's usage on a completed attempt and zero otherwise.
-type providerAttemptRecorder func(attempt int, status string, latency time.Duration, usage Usage, err error)
+// providerReply is what a completed provider attempt reported: its usage and the model that answered. Model is
+// empty when the provider did not name one.
+type providerReply struct {
+	Usage Usage
+	Model string
+}
+
+// providerAttemptRecorder hears each provider attempt. The reply is the attempt's on a completed attempt and zero
+// otherwise.
+type providerAttemptRecorder func(attempt int, status string, latency time.Duration, reply providerReply, err error)
+
+// providerCall is one provider request with its retry policy.
+type providerCall struct {
+	BaseURL string
+	APIKey  string
+	Body    map[string]any
+	Config  AIConfig
+	// Headers are extra request headers, the gateway attribution on a Cloud call. Nil for a direct provider.
+	Headers map[string]string
+	Record  providerAttemptRecorder
+}
 
 // callAIWithRetry calls the AI provider with exponential backoff on transient errors.
-func callAIWithRetry(baseURL, apiKey string, body map[string]any, cfg AIConfig, record providerAttemptRecorder) (map[string]any, error) {
+func callAIWithRetry(call providerCall) (map[string]any, error) {
 	var lastErr error
-	client := newAIHTTPClient(cfg.HTTPTimeoutSec)
-	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
+	client := newAIHTTPClient(call.Config.HTTPTimeoutSec)
+	for attempt := 0; attempt <= call.Config.MaxRetries; attempt++ {
 		if attempt > 0 {
-			backoff := time.Duration(cfg.RetryBackoffMs) * time.Millisecond * time.Duration(math.Pow(2, float64(attempt-1)))
+			backoff := time.Duration(call.Config.RetryBackoffMs) * time.Millisecond * time.Duration(math.Pow(2, float64(attempt-1)))
 			slog.Info("Retrying AI call", "attempt", attempt, "backoff_ms", backoff.Milliseconds())
 			time.Sleep(backoff)
 		}
 
 		start := time.Now()
-		result, err := callAI(client, baseURL, apiKey, body)
+		result, err := callAI(client, call.BaseURL, call.APIKey, call.Body, call.Headers)
 		if err == nil {
-			if record != nil {
-				record(attempt+1, "completed", time.Since(start), parseUsage(result), nil)
+			if call.Record != nil {
+				call.Record(attempt+1, "completed", time.Since(start), providerReply{Usage: parseUsage(result), Model: safeGetString(result, "model")}, nil)
 			}
 			return result, nil
 		}
 
-		if record != nil {
-			record(attempt+1, "failed", time.Since(start), Usage{}, err)
+		if call.Record != nil {
+			call.Record(attempt+1, "failed", time.Since(start), providerReply{}, err)
 		}
 		lastErr = err
 
@@ -309,7 +360,7 @@ func callAIWithRetry(baseURL, apiKey string, body map[string]any, cfg AIConfig, 
 			return nil, err
 		}
 	}
-	return nil, fmt.Errorf("AI provider call failed after %d retries: %w", cfg.MaxRetries, lastErr)
+	return nil, fmt.Errorf("AI provider call failed after %d retries: %w", call.Config.MaxRetries, lastErr)
 }
 
 func isTransientError(err error) bool {

@@ -325,3 +325,13 @@ func usageCount(m map[string]any, key string) int64 {
 	}
 	return int64(n)
 }
+
+// usageAttribution is the attribution of one chat-loop model call. served_model is the model the provider says
+// answered; it can differ from the requested model (DeepSeek answers a deepseek-chat request as deepseek-flash).
+func usageAttribution(reported string) map[string]string {
+	attribution := map[string]string{"operation": "chat"}
+	if reported != "" {
+		attribution["served_model"] = reported
+	}
+	return attribution
+}
