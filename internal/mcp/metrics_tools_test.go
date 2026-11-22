@@ -94,7 +94,7 @@ func TestMetricsToolCallsRunThroughTheCallersRunner(t *testing.T) {
 		return runner.run, nil
 	}, admitAll))
 	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "query_metrics",
-		Arguments: map[string]any{"metrics": []any{"sales"}, "grain": "range"}})
+		Arguments: map[string]any{"metrics": []any{"sales"}, "grain": "range", "period": map[string]any{"preset": "last_7_days"}}})
 	if err != nil {
 		t.Fatal("call query_metrics:", err)
 	}
@@ -114,7 +114,7 @@ func TestMetricsToolRefusalIsTheChatsErrorText(t *testing.T) {
 	if err != nil {
 		t.Fatal("call drill_metrics:", err)
 	}
-	if text := resultText(t, result); text != "Error: metrics are not available to field-assigned grants" {
+	if text := resultText(t, result); text != `{"error":{"code":"permission_denied","message":"metrics are not available to field-assigned grants"}}` {
 		t.Fatalf("refusal = %q", text)
 	}
 }

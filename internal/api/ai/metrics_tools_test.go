@@ -41,9 +41,9 @@ func TestMetricsToolsRunThroughRunnerAndKeepEvidence(t *testing.T) {
 		wantDrills   int
 		wantOK       bool
 	}{
-		{"checked metric is verified", toolQueryMetrics, map[string]any{"metrics": []any{"sales_total"}, "grain": "range"}, true, 1, 0, true},
-		{"unchecked metric is not verified", toolQueryMetrics, map[string]any{"metrics": []any{"credit_given"}, "grain": "range"}, false, 1, 0, true},
-		{"unsaved measure is never verified", toolQueryMetrics, map[string]any{"measures": []any{map[string]any{"record_type": "Sale", "agg": "count"}}, "grain": "range"}, false, 1, 0, true},
+		{"checked metric is verified", toolQueryMetrics, map[string]any{"metrics": []any{"sales_total"}, "grain": "range", "period": map[string]any{"preset": "last_7_days"}}, true, 1, 0, true},
+		{"unchecked metric is not verified", toolQueryMetrics, map[string]any{"metrics": []any{"credit_given"}, "grain": "range", "period": map[string]any{"preset": "last_7_days"}}, false, 1, 0, true},
+		{"unsaved measure is never verified", toolQueryMetrics, map[string]any{"measures": []any{map[string]any{"record_type": "Sale", "agg": "count"}}, "grain": "range", "period": map[string]any{"preset": "last_7_days"}}, false, 1, 0, true},
 		{"drill keeps the total as evidence", toolDrillMetrics, map[string]any{"metric": "sales_total", "from": "2026-11-09", "to": "2026-11-15"}, false, 0, 1, true},
 	}
 	for _, tc := range cases {
@@ -51,7 +51,7 @@ func TestMetricsToolsRunThroughRunnerAndKeepEvidence(t *testing.T) {
 			fake := sampleFake()
 			turn := &answerTurn{run: fake.run}
 			out := executeMetricsTool(turn, tc.tool, tc.args)
-			if strings.HasPrefix(out, "Error") {
+			if strings.Contains(out, `"error"`) {
 				t.Fatalf("tool refused: %s", out)
 			}
 			if len(turn.queries) != tc.wantQueries || len(turn.drills) != tc.wantDrills {
@@ -86,8 +86,8 @@ func TestMetricsRefusalIsRelayedAsError(t *testing.T) {
 		MetricsRouteQuery: {Status: 403, Body: []byte(`{"error":{"code":"metrics.forbidden","message":"metrics are not available to field-assigned grants"}}`)},
 	}}
 	turn := &answerTurn{run: fake.run}
-	out := executeMetricsTool(turn, toolQueryMetrics, map[string]any{"metrics": []any{"sales_total"}, "grain": "range"})
-	if out != "Error: metrics are not available to field-assigned grants" {
+	out := executeMetricsTool(turn, toolQueryMetrics, map[string]any{"metrics": []any{"sales_total"}, "grain": "range", "period": map[string]any{"preset": "last_7_days"}})
+	if out != `{"error":{"code":"permission_denied","message":"metrics are not available to field-assigned grants"}}` {
 		t.Fatalf("refusal = %q", out)
 	}
 	if len(turn.queries) != 0 {
@@ -97,7 +97,7 @@ func TestMetricsRefusalIsRelayedAsError(t *testing.T) {
 
 func TestMetricsToolsRefuseWithoutRunner(t *testing.T) {
 	out := executeMetricsTool(&answerTurn{}, toolQueryMetrics, map[string]any{"grain": "range"})
-	if !strings.HasPrefix(out, "Error") {
+	if !strings.Contains(out, `"error"`) {
 		t.Fatalf("query without runner = %q, want an error", out)
 	}
 }
@@ -128,4 +128,29 @@ func TestAskChoiceChecksTheChoices(t *testing.T) {
 
 func choice(label, hint string) map[string]any {
 	return map[string]any{"label": label, "hint": hint}
+}
+
+func TestQueryMetricsWithoutPeriodIsAStructuredError(t *testing.T) {
+	cases := []struct {
+		name string
+		args map[string]any
+		want bool
+	}{
+		{"no period", map[string]any{"metrics": []any{"sales_total"}, "grain": "range"}, false},
+		{"empty preset", map[string]any{"metrics": []any{"sales_total"}, "period": map[string]any{"preset": ""}}, false},
+		{"preset", map[string]any{"metrics": []any{"sales_total"}, "period": map[string]any{"preset": "this_month"}}, true},
+		{"from date", map[string]any{"metrics": []any{"sales_total"}, "from": "2026-11-01", "to": "2026-11-15"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := sampleFake()
+			out := executeMetricsTool(&answerTurn{run: fake.run}, toolQueryMetrics, tc.args)
+			if got := strings.Contains(out, `"error"`); got == tc.want {
+				t.Fatalf("refused = %v for %s, want %v", got, out, !tc.want)
+			}
+			if !tc.want && (!strings.Contains(out, `"code":"missing_fields"`) || !strings.Contains(out, `"field":"period"`) || !strings.Contains(out, "last_7_days")) {
+				t.Fatalf("missing period error = %s, want missing_fields on period with the presets as the fix", out)
+			}
+		})
+	}
 }

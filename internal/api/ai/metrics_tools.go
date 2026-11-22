@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -121,7 +122,7 @@ type metricsCatalog struct {
 // executeMetricsTool runs one metrics tool for the turn. A missing runner refuses without reading anything.
 func executeMetricsTool(turn *answerTurn, name string, args map[string]any) string {
 	if turn == nil || turn.run == nil {
-		return "Error: metrics are not available in this session."
+		return metricsError(errPermissionDenied, "Metrics are not available in this session.", "", "")
 	}
 	switch name {
 	case toolListMetrics:
@@ -160,11 +161,14 @@ func (t *answerTurn) query(args map[string]any) string {
 	}
 	body, err := json.Marshal(args)
 	if err != nil {
-		return "Error: query_metrics arguments are not valid JSON."
+		return metricsError(errInvalidValue, "query_metrics arguments are not valid JSON.", "", "")
 	}
 	var req contract.MetricQueryRequest
 	if decodeErr := json.Unmarshal(body, &req); decodeErr != nil {
-		return "Error: query_metrics arguments do not match the query shape."
+		return metricsError(errInvalidValue, "query_metrics arguments do not match the query shape.", "", "")
+	}
+	if !hasPeriod(req) {
+		return metricsError(errMissingFields, "query_metrics needs a period.", "period", periodPresetsFix)
 	}
 	return t.answerQuery(body, req, nil)
 }
@@ -177,7 +181,7 @@ func (t *answerTurn) savedQuery(id string) string {
 	}
 	var reports []contract.SavedReport
 	if decodeErr := json.Unmarshal(data, &reports); decodeErr != nil {
-		return "Error: the saved reports could not be read."
+		return metricsError(errGuardFailed, "The saved reports could not be read.", "", "")
 	}
 	for i := range reports {
 		if reports[i].ID != id {
@@ -185,7 +189,7 @@ func (t *answerTurn) savedQuery(id string) string {
 		}
 		req, ok := requestOfQuestion(reports[i].Question)
 		if !ok {
-			return "Error: this saved report does not hold a metric question that can be run."
+			return metricsError(errGuardFailed, "This saved report does not hold a metric question that can be run.", "", "")
 		}
 		body, err := json.Marshal(req)
 		if err != nil {
@@ -193,7 +197,7 @@ func (t *answerTurn) savedQuery(id string) string {
 		}
 		return t.answerQuery(body, req, &reports[i])
 	}
-	return "Error: no saved report with that id is visible to you."
+	return metricsError(errNotFound, "No saved report with that id is visible to you.", "id", "")
 }
 
 // requestOfQuestion is the metrics query a saved question asks: its metric, grouping, period and filters.
@@ -221,18 +225,18 @@ func requestOfQuestion(q contract.SavedQuestion) (contract.MetricQueryRequest, b
 func (t *answerTurn) answerQuery(body []byte, req contract.MetricQueryRequest, saved *contract.SavedReport) string {
 	resp := t.run(MetricsRouteQuery, body)
 	if resp.Status != 200 {
-		return toolError(errors.New(refusalMessage(resp)))
+		return metricsRefusal(resp)
 	}
 	var env struct {
 		Data contract.MetricQueryResult `json:"data"`
 		Meta contract.MetricsMeta       `json:"meta"`
 	}
 	if decodeErr := json.Unmarshal(resp.Body, &env); decodeErr != nil {
-		return "Error: the query answer could not be read."
+		return metricsError(errGuardFailed, "The query answer could not be read.", "", "")
 	}
 	if h := env.Meta.History; h != nil && h.State == "building" {
 		t.building = append(t.building, buildingRead{label: requestLabel(req), progress: h.Progress, meta: env.Meta})
-		return fmt.Sprintf("Error: the history behind this figure is still building (%d%% done). Give no number for it; say that the history is still building.", int(h.Progress*100))
+		return metricsError(errGuardFailed, fmt.Sprintf("The history behind this figure is still building (%d%% done).", int(h.Progress*100)), "", "Give no number for it; say that the history is still building.")
 	}
 	verified := false
 	if saved == nil {
@@ -264,21 +268,21 @@ func requestLabel(req contract.MetricQueryRequest) string {
 func (t *answerTurn) drill(args map[string]any) string {
 	body, err := json.Marshal(args)
 	if err != nil {
-		return "Error: drill_metrics arguments are not valid JSON."
+		return metricsError(errInvalidValue, "drill_metrics arguments are not valid JSON.", "", "")
 	}
 	var req contract.MetricDrillRequest
 	if decodeErr := json.Unmarshal(body, &req); decodeErr != nil {
-		return "Error: drill_metrics arguments do not match the drill shape."
+		return metricsError(errInvalidValue, "drill_metrics arguments do not match the drill shape.", "", "")
 	}
 	resp := t.run(MetricsRouteDrill, body)
 	if resp.Status != 200 {
-		return toolError(errors.New(refusalMessage(resp)))
+		return metricsRefusal(resp)
 	}
 	var env struct {
 		Data contract.MetricDrillResult `json:"data"`
 	}
 	if decodeErr := json.Unmarshal(resp.Body, &env); decodeErr != nil {
-		return "Error: the drill answer could not be read."
+		return metricsError(errGuardFailed, "The drill answer could not be read.", "", "")
 	}
 	t.drills = append(t.drills, drillAnswer{request: req, result: env.Data})
 	return string(resp.Body)
@@ -291,7 +295,7 @@ func (t *answerTurn) askChoice(args map[string]any) string {
 	question = strings.TrimSpace(question)
 	choices, err := choicesOf(args["choices"])
 	if err != nil || question == "" {
-		return "Error: ask_choice needs a question and two to four choices, each with a label and a hint."
+		return metricsError(errInvalidValue, "ask_choice needs a question and two to four choices, each with a label and a hint.", "", "")
 	}
 	t.choice = &contract.ChoiceQuestion{Question: question, Choices: choices}
 	return "Shown to the person. Do not answer yet; wait for their choice."
@@ -399,9 +403,36 @@ func refusalMessage(resp MetricsResponse) string {
 	return "the metrics request was refused"
 }
 
-// toolError is the text the model reads for a failed tool: it always starts with "Error".
+// toolError is the structured text the model reads for a failed metrics call that has no code of its own.
 func toolError(err error) string {
-	return "Error: " + err.Error()
+	return metricsError(errGuardFailed, err.Error(), "", "")
+}
+
+// periodPresetsFix names the periods a query can take. query_metrics refuses a query with none.
+const periodPresetsFix = "Set period.preset to one of: today, yesterday, this_week, last_week, this_month, last_month, last_7_days, last_30_days, last_3_months; or give from and to (YYYY-MM-DD)."
+
+// metricsError is a metrics refusal in the structured shape every tool error uses: code, message, field and fix.
+func metricsError(code, message, field, fix string) string {
+	return aiToolError{Code: code, Message: message, Field: field, Fix: fix}.text()
+}
+
+// metricsRefusal relays a refused metrics call. The status sets the code; the message is the API's own.
+func metricsRefusal(resp MetricsResponse) string {
+	code := errGuardFailed
+	switch resp.Status {
+	case http.StatusForbidden:
+		code = errPermissionDenied
+	case http.StatusNotFound:
+		code = errNotFound
+	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		code = errInvalidValue
+	}
+	return metricsError(code, refusalMessage(resp), "", "")
+}
+
+// hasPeriod reports whether a query names its period: a preset, or a from date.
+func hasPeriod(req contract.MetricQueryRequest) bool {
+	return (req.Period != nil && req.Period.Preset != "") || req.From != ""
 }
 
 // metricsToolDefs are the function definitions of the metrics tools.
