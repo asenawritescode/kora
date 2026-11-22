@@ -14,6 +14,9 @@ import (
 	"github.com/asenawritescode/kora/internal/tenanttime"
 )
 
+// factDirtyTable is the table of business days whose summaries are not yet recomputed: _kora_fact_dirty.
+const factDirtyTable = "_kora_fact_dirty"
+
 // defaultTimeout bounds one metrics query, previous period included, when the Engine sets no Timeout.
 const defaultTimeout = 10 * time.Second
 
@@ -116,6 +119,10 @@ func (e Engine) result(ctx context.Context, p plan, cur aggregate) (Result, erro
 // run sums the plan's range. A plan with a balance also sums the days before the range, as the
 // opening bucket, so the balance can start from it.
 func (e Engine) run(ctx context.Context, p plan) (aggregate, error) {
+	p, err := e.settled(ctx, p)
+	if err != nil {
+		return aggregate{}, err
+	}
 	agg, err := e.sumRows(ctx, p)
 	if err != nil || !p.needsOpening() {
 		return agg, err
@@ -133,6 +140,33 @@ func (e Engine) run(ctx context.Context, p plan) (aggregate, error) {
 		agg.groups[key] = group
 	}
 	return agg, nil
+}
+
+// settled reads the fact rows instead of the summary when a day the plan reads is dirty. Summaries are
+// recomputed per dirty day, so a dirty day's summary can be older than its fact rows, and the result's
+// source sequence claims the fact rows. Clean days are current, so the summary stays the source otherwise.
+func (e Engine) settled(ctx context.Context, p plan) (plan, error) {
+	if !p.summary {
+		return p, nil
+	}
+	dirty, err := e.hasDirtyDays(ctx, p.model.Name, p.to)
+	if err != nil {
+		return plan{}, err
+	}
+	p.summary = !dirty
+	return p, nil
+}
+
+// hasDirtyDays reports whether a business day of model up to and including through is marked dirty in the
+// fact dirty table, which internal/facts writes. It reads the table here, as summaryTable names the summaries,
+// because facts imports nothing from metrics.
+func (e Engine) hasDirtyDays(ctx context.Context, model string, through tenanttime.Date) (bool, error) {
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE model = ? AND business_date <= ?", e.Dialect.QuoteIdent(factDirtyTable)) //nolint:gosec // identifiers only, quoted by the dialect
+	var n int64
+	if err := e.DB.QueryRowContext(ctx, db.Rebind(e.Dialect, query), model, through.String()).Scan(&n); err != nil {
+		return false, fmt.Errorf("metrics: read dirty days of %s: %w", model, err)
+	}
+	return n > 0, nil
 }
 
 // sumRows sends the plan's statement and sums the rows it returns.
