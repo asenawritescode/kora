@@ -53,6 +53,14 @@ func TestDataToUserRelabelIsNotBlockedAndKeepsLogins(t *testing.T) {
 				t.Fatalf("Data to User plans DDL: %v", preview.DDL)
 			}
 
+			upgrade, err := PlanSnapshotActivation(database.DB, database.Name, dialect, registry, &doctype.ConfigSnapshot{DocTypes: []*doctype.DocType{after}}, "", "rev-after")
+			if err != nil {
+				t.Fatalf("plan after: %v", err)
+			}
+			if len(upgrade) != 0 {
+				t.Fatalf("upgrade to User plans statements over the live table: %v", upgrade)
+			}
+
 			var cashier string
 			if err := database.DB.QueryRowContext(ctx, fmt.Sprintf("SELECT cashier FROM %s WHERE name = 'TS-1'", table)).Scan(&cashier); err != nil {
 				t.Fatal(err)
