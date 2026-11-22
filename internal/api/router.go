@@ -135,12 +135,21 @@ func (h *Handler) legacyRuntimeService(site string) SiteRuntimeService {
 
 // NewHandler creates a new API handler.
 func NewHandler(registry *doctype.Registry, txManager *orm.TxManager) *Handler {
-	return &Handler{
+	h := &Handler{
 		Registry:      registry,
 		TxManager:     txManager,
 		AuthProviders: auth.NewProviderRegistry(),
 		AgentStores:   map[string]*org.AgentStore{},
 	}
+	// The metrics API reads the site database and dialect from each request, so a handler built without the
+	// router (tests, tools) still answers Ask Zana's metrics reads. The router replaces it with its own.
+	var siteDB *sql.DB
+	var dialect kdb.Dialect
+	if txManager != nil {
+		siteDB, dialect = txManager.DB, txManager.Dialect
+	}
+	h.metrics = newMetricsAPI(registry, siteDB, dialect)
+	return h
 }
 
 // siteRegistry returns the registry for the current request's site.
