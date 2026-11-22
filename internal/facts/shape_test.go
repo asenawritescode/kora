@@ -1,6 +1,7 @@
 package facts
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/asenawritescode/kora/internal/doctype"
@@ -8,6 +9,8 @@ import (
 
 func TestDecideShape(t *testing.T) {
 	base := []doctype.FactColumn{{Name: "register", Type: doctype.FactColumnText}, {Name: "total", Type: doctype.FactColumnDecimal}}
+	g := shapeGenerationPrefix
+	withCopy := append(append([]doctype.FactColumn{}, base...), doctype.FactColumn{Name: "line_copy", Type: doctype.FactColumnDecimal})
 	tests := []struct {
 		name        string
 		stored      *storedShape
@@ -15,14 +18,16 @@ func TestDecideShape(t *testing.T) {
 		want        []doctype.FactColumn
 		action      shapeAction
 	}{
-		{"never synced", nil, "f2", base, shapeRecreate},
-		{"same fingerprint", &storedShape{"f1", base}, "f1", base, shapeKeep},
-		{"new measure only", &storedShape{"f1", base}, "f2",
-			append(append([]doctype.FactColumn{}, base...), doctype.FactColumn{Name: "line_copy", Type: doctype.FactColumnDecimal}), shapeAdd},
-		{"fingerprint change, same columns", &storedShape{"f1", base}, "f2", base, shapeAdd},
-		{"column removed", &storedShape{"f1", base}, "f2", base[:1], shapeRecreate},
-		{"column retyped", &storedShape{"f1", base}, "f2",
+		{"never synced", nil, g + "f2", base, shapeRecreate},
+		{"same fingerprint", &storedShape{g + "f1", base}, g + "f1", base, shapeKeep},
+		{"new measure only", &storedShape{g + "f1", base}, g + "f2", withCopy, shapeAdd},
+		{"fingerprint change, same columns", &storedShape{g + "f1", base}, g + "f2", base, shapeAdd},
+		{"column removed", &storedShape{g + "f1", base}, g + "f2", base[:1], shapeRecreate},
+		{"column retyped", &storedShape{g + "f1", base}, g + "f2",
 			[]doctype.FactColumn{{Name: "register", Type: doctype.FactColumnDecimal}, {Name: "total", Type: doctype.FactColumnDecimal}}, shapeRecreate},
+		// Rows written by an older generation may hold line rows under an empty id: recreate, even when the columns match.
+		{"older generation, same columns", &storedShape{"f1", base}, g + "f1", base, shapeRecreate},
+		{"claimed, never synced", &storedShape{"", base}, g + "f1", base, shapeRecreate},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -50,6 +55,9 @@ func TestModelShapeFingerprint(t *testing.T) {
 	base, _, err := modelShape(saleFacts())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.HasPrefix(base, shapeGenerationPrefix) {
+		t.Fatalf("fingerprint %q lacks the shape generation", base)
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

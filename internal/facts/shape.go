@@ -22,6 +22,11 @@ import (
 const (
 	shapeTable        = "_kora_fact_shape"
 	shapeLeaseSeconds = 300
+	// shapeGenerationPrefix names the generation of what the fact tables hold. Change it when a build wrote
+	// fact rows that are wrong (AN-E10d: line rows stored under an empty id). A stored fingerprint without
+	// this prefix recreates the model's tables, and the rebuild that follows refills them from source, so
+	// the stale rows are dropped and every model is rebuilt once on upgrade.
+	shapeGenerationPrefix = "g2:"
 )
 
 // ModelSync brings every fact model's tables in line with its definition. It runs when a tenant runtime
@@ -88,7 +93,8 @@ func (s *ModelSync) syncModel(ctx context.Context, store *JobStore, dt *doctype.
 }
 
 // modelShape returns the fingerprint of a fact model and the columns its tables carry. The fingerprint is
-// a hash of the model's JSON, so any change to what it declares changes it.
+// the shape generation followed by a hash of the model's JSON, so any change to what it declares, or to the
+// generation, changes it.
 func modelShape(dt *doctype.DocType) (string, []doctype.FactColumn, error) {
 	raw, err := json.Marshal(struct {
 		Name  string
@@ -98,7 +104,7 @@ func modelShape(dt *doctype.DocType) (string, []doctype.FactColumn, error) {
 		return "", nil, fmt.Errorf("facts: fingerprint %s: %w", dt.Name, err)
 	}
 	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:]), dt.Facts.Columns(), nil
+	return shapeGenerationPrefix + hex.EncodeToString(sum[:]), dt.Facts.Columns(), nil
 }
 
 // shapeAction is what a model's tables need when its fingerprint differs from the stored one.
@@ -118,8 +124,9 @@ type storedShape struct {
 
 // decideShape compares the stored shape with the wanted one. Only additions can be applied in place, so
 // any removed or retyped column recreates the tables; the rebuild that follows refills them from source.
+// A shape from an older generation recreates them too, because its rows may be wrong, not just its columns.
 func decideShape(stored *storedShape, fingerprint string, want []doctype.FactColumn) shapeAction {
-	if stored == nil {
+	if stored == nil || !strings.HasPrefix(stored.fingerprint, shapeGenerationPrefix) {
 		return shapeRecreate
 	}
 	if stored.fingerprint == fingerprint {
