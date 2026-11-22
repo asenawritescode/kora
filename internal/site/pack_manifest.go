@@ -121,7 +121,7 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 		if !validPackFileType(clean, file.ContentType) {
 			add("content_type", clean, "file extension and content type are not supported")
 		}
-		if err := validatePackFileSyntax(file); err != nil {
+		if err := validatePackFileContent(file); err != nil {
 			add("invalid_file", clean, err.Error())
 		} else if err := resources.add(file); err != nil {
 			add("resource_conflict", clean, err.Error())
@@ -349,6 +349,15 @@ func decodeQueryDefinition(data []byte) (*query.Definition, error) {
 	return &d, nil
 }
 
+// validatePackFileContent checks one file of a package. A retired reports/ file from an older
+// release is accepted here; installs skip it (withoutRetiredReports).
+func validatePackFileContent(file PackFile) error {
+	if file.ContentType == "report" {
+		return nil
+	}
+	return validatePackFileSyntax(file)
+}
+
 func validatePackFileSyntax(file PackFile) error {
 	data := []byte(file.Content)
 	switch file.ContentType {
@@ -389,8 +398,6 @@ func validatePackFileSyntax(file PackFile) error {
 			return fmt.Errorf("script file is empty")
 		}
 		return nil
-	case "report":
-		return nil // retired: releases published with reports/ still validate; installs skip them (withoutRetiredReports)
 	case "pack":
 		if !isPackManifestPath(file.Path) {
 			return fmt.Errorf("content type pack requires path %s or components/<ns>/%s", packFileName, packFileName)
