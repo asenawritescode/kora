@@ -118,7 +118,16 @@ var recordTasks = []recordTask{
 			return strings.Contains(low, "delete") && (strings.Contains(low, "not available") || strings.Contains(low, "cannot") || strings.Contains(low, "can't") || strings.Contains(low, "continue"))
 		}},
 	{id: 10, message: "Sell 2 Sugar 2kg, cash.", writes: true,
-		settled: func(f *chatFixture) error { return expectCountOf(f, "Sale", 1) }},
+		settled: func(f *chatFixture) error {
+			if err := expectCountOf(f, "Sale", 1); err != nil {
+				return err
+			}
+			// The cash payment was requested at confirm, once, and the sale holds its id.
+			if n := f.one("SELECT COUNT(*) FROM _kora_payment_intent WHERE site = ?", f.siteName); n != "1" {
+				return fmt.Errorf("payment intents = %s, want 1", n)
+			}
+			return nil
+		}},
 }
 
 // expectCountOf checks the row count of a doctype.
@@ -291,11 +300,10 @@ var recordTaskScripts = map[int]func(f *chatFixture) []scriptedRecordTurn{
 		}
 	},
 	10: func(f *chatFixture) []scriptedRecordTurn {
-		intent := f.cashIntent(f.thread+"-sale", 500)
 		sale := map[string]any{
 			"register": "REG-1", "location": "LOC-1", "till_session": recordTaskTill, "currency": "KES",
 			"items":    []any{map[string]any{"item": "ITM-1", "quantity": 2, "unit_price": 250, "amount": 500}},
-			"payments": []any{map[string]any{"method": "Cash", "amount": 500, "currency": "KES", "reference": intent}},
+			"payments": []any{map[string]any{"method": "Cash", "amount": 500, "currency": "KES"}},
 		}
 		return []scriptedRecordTurn{
 			{message: recordTasks[9].message, steps: func(*chatFixture) []packChatStep {
