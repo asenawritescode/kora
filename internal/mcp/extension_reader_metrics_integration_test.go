@@ -25,6 +25,7 @@ import (
 func TestKoraMCPServesMetricsToAuthenticatedExtension(t *testing.T) {
 	for _, tc := range []struct{ name, driver, env string }{
 		{"mysql", "mysql", "KORA_MCP_DISPOSABLE_MYSQL_DSN"},
+		{"postgres", "postgres", "KORA_MCP_DISPOSABLE_POSTGRES_DSN"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dsn := os.Getenv(tc.env)
