@@ -78,7 +78,7 @@ func TestChatWritesArePreviewedThenConfirmedAcrossDialects(t *testing.T) {
 				for _, call := range calls {
 					anyCalls = append(anyCalls, call)
 				}
-				results := executeToolCallsForAI(tx.Context, tx, registry, toolCallBatch{
+				results := RunToolTurn(tx.Context, tx, registry, toolCallBatch{
 					Calls: anyCalls, Owner: owner, Site: siteName, RunID: run, StepID: "step-" + run,
 					ConversationID: conv, Execution: execution, Commands: commands,
 				})

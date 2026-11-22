@@ -1,11 +1,13 @@
 package ai
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/kernel"
 	"github.com/asenawritescode/kora/internal/orm"
@@ -30,9 +32,6 @@ func previewRecordWrite(tx *orm.TxManager, reg *doctype.Registry, inv toolInvoca
 	if dt == nil {
 		return (&aiToolError{Code: errNotFound, Message: "Unknown record type " + w.Doctype + "."}).text()
 	}
-	if inv.RunID == "" || inv.ConversationID == "" {
-		return (&aiToolError{Code: errConfirmInvalid, Message: "A preview needs a conversation turn."}).text()
-	}
 	result, err := executeAIRecordMutation(tx, reg, recordMutation{Command: w.Command, Doctype: w.Doctype, Name: w.Name, Fields: w.Fields, Execution: inv.Execution, Preview: true})
 	if err != nil {
 		return recordWriteErrorText(err)
@@ -41,7 +40,15 @@ func previewRecordWrite(tx *orm.TxManager, reg *doctype.Registry, inv toolInvoca
 	if aerr != nil {
 		return aerr.text()
 	}
-	argsJSON, err := json.Marshal(w)
+	return storePreview(tx, inv, w, preview)
+}
+
+// storePreview keeps one previewed write as previewed and returns the reply with its confirm token.
+func storePreview(tx *orm.TxManager, inv toolInvocation, stored any, preview map[string]any) string {
+	if inv.RunID == "" || inv.ConversationID == "" {
+		return (&aiToolError{Code: errConfirmInvalid, Message: "A preview needs a conversation turn."}).text()
+	}
+	argsJSON, err := json.Marshal(stored)
 	if err != nil {
 		return (&aiToolError{Code: errInvalidValue, Message: "The write could not be stored."}).text()
 	}
@@ -66,6 +73,72 @@ func previewRecordWrite(tx *orm.TxManager, reg *doctype.Registry, inv toolInvoca
 		return (&aiToolError{Code: errInvalidValue, Message: "The preview could not be encoded."}).text()
 	}
 	return string(out)
+}
+
+// packActionWrite is one run_action call as it is stored between preview and confirm.
+type packActionWrite struct {
+	Action string         `json:"action"`
+	Input  map[string]any `json:"input"`
+}
+
+// previewPackAction checks a run_action through the operation core, under the preview option.
+func previewPackAction(tx *orm.TxManager, catalog contract.ApplicationCatalog, inv toolInvocation, action packAction, input map[string]any) string {
+	ctx := tx.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return actionRefusal("validation.invalid_input", "Input must be an object of field values.", "")
+	}
+	if _, err := inv.Operations.Preview(ctx, inv.Execution, tx.BusinessScope, action.Action, contract.ExecutePublishedOperation{
+		Meta:        contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey(inv.IdempotencyKey)},
+		InputSchema: inputSchemaOf(catalog, action.Action),
+		Input:       encoded,
+	}); err != nil {
+		return operationErrorText(err)
+	}
+	preview := map[string]any{"action": action.Action, "title": action.Title, "input": input}
+	return storePreview(tx, inv, packActionWrite{Action: action.Action, Input: input}, preview)
+}
+
+// executeConfirmPackAction runs a previewed run_action once, through the operation core.
+func executeConfirmPackAction(tx *orm.TxManager, inv toolInvocation, row pendingWrite) string {
+	var stored packActionWrite
+	if err := json.Unmarshal([]byte(row.ArgsJSON), &stored); err != nil {
+		return failPendingWrite(tx, row.ID, actionRefusal("module.operation_failed", "The stored action could not be read.", ""))
+	}
+	if inv.Operations == nil {
+		return failPendingWrite(tx, row.ID, aiToolError{Code: errPermissionDenied, Message: "Pack actions are not available in this context."}.text())
+	}
+	catalog, err := inv.Operations.Catalog(inv.Execution, tx.BusinessScope)
+	if err != nil {
+		return failPendingWrite(tx, row.ID, aiToolError{Code: errGuardFailed, Message: "Pack actions are unavailable."}.text())
+	}
+	encoded, err := json.Marshal(stored.Input)
+	if err != nil {
+		return failPendingWrite(tx, row.ID, actionRefusal("validation.invalid_input", "Input must be an object of field values.", ""))
+	}
+	ctx := tx.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	receipt, err := inv.Operations.Run(ctx, inv.Execution, tx.BusinessScope, stored.Action, contract.ExecutePublishedOperation{
+		Meta:        contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey(confirmIdempotencyKey(row.ID))},
+		InputSchema: inputSchemaOf(catalog, stored.Action),
+		Input:       encoded,
+	})
+	if err != nil {
+		return failPendingWrite(tx, row.ID, operationErrorText(err))
+	}
+	outcome := receiptText(stored.Action, receipt)
+	if receipt.Error != nil {
+		return failPendingWrite(tx, row.ID, outcome)
+	}
+	// The operation receipt is committed with the action. If this store fails, a later confirm
+	// reclaims the row after its lease and replays that receipt.
+	_ = finishPendingWrite(ctx, tx.DB, row.ID, pendingDone, outcome)
+	return outcome
 }
 
 // previewReply is the reply to a previewed write. Its fields keep this order on the wire.
@@ -115,6 +188,9 @@ func executeConfirmWrite(tx *orm.TxManager, reg *doctype.Registry, inv toolInvoc
 	var w recordWrite
 	if err := json.Unmarshal([]byte(row.ArgsJSON), &w); err != nil {
 		return failPendingWrite(tx, row.ID, "The stored write could not be read.")
+	}
+	if row.ToolName == toolRunAction {
+		return executeConfirmPackAction(tx, inv, row)
 	}
 	result, err := executeAIRecordMutation(tx, reg, recordMutation{Command: w.Command, Doctype: w.Doctype, Name: w.Name, Fields: w.Fields, IdempotencyKey: confirmIdempotencyKey(row.ID), Execution: inv.Execution})
 	if err != nil {

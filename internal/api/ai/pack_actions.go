@@ -27,6 +27,8 @@ const (
 type ModuleOperations interface {
 	Catalog(execution policy.Execution, scope contract.BusinessScope) (contract.ApplicationCatalog, error)
 	Run(ctx context.Context, execution policy.Execution, scope contract.BusinessScope, ref string, request contract.ExecutePublishedOperation) (contract.OperationReceipt, error)
+	// Preview checks one action as Run would, and keeps nothing: its writes roll back.
+	Preview(ctx context.Context, execution policy.Execution, scope contract.BusinessScope, ref string, request contract.ExecutePublishedOperation) (contract.OperationReceipt, error)
 }
 
 // OperationError is a refused pack action: a stable code, the message, and the field it
@@ -67,11 +69,11 @@ type packAction struct {
 // executePackAction runs list_actions or run_action. Without ModuleOperations it refuses.
 func executePackAction(tx *orm.TxManager, inv toolInvocation) string {
 	if inv.Operations == nil {
-		return "Permission denied: pack actions are not available in this context."
+		return aiToolError{Code: errPermissionDenied, Message: "Pack actions are not available in this context."}.text()
 	}
 	catalog, err := inv.Operations.Catalog(inv.Execution, tx.BusinessScope)
 	if err != nil {
-		return "Error: pack actions are unavailable."
+		return aiToolError{Code: errGuardFailed, Message: "Pack actions are unavailable."}.text()
 	}
 	if inv.Name == toolListActions {
 		return listPackActions(catalog, inv)
@@ -95,7 +97,7 @@ func listPackActions(catalog contract.ApplicationCatalog, inv toolInvocation) st
 	}
 	data, err := json.Marshal(map[string]any{"actions": matched})
 	if err != nil {
-		return "Error: pack actions could not be listed."
+		return aiToolError{Code: errInvalidValue, Message: "Pack actions could not be listed."}.text()
 	}
 	return string(data)
 }
@@ -153,7 +155,7 @@ func describePackAction(catalog contract.ApplicationCatalog, actions []packActio
 	}
 	data, err := json.Marshal(map[string]any{"action": action.Action, "title": action.Title, "record_type": action.RecordType, "input": input})
 	if err != nil {
-		return "Error: pack action could not be described."
+		return aiToolError{Code: errInvalidValue, Message: "Pack action could not be described."}.text()
 	}
 	return string(data)
 }
@@ -202,6 +204,9 @@ func runPackAction(tx *orm.TxManager, catalog contract.ApplicationCatalog, inv t
 	ctx := tx.Context
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if inv.PreviewWrites {
+		return previewPackAction(tx, catalog, inv, action, input)
 	}
 	receipt, err := inv.Operations.Run(ctx, inv.Execution, tx.BusinessScope, action.Action, contract.ExecutePublishedOperation{
 		Meta:        contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey(inv.IdempotencyKey)},
@@ -276,13 +281,22 @@ func findPackAction(actions []packAction, ref string) (packAction, bool) {
 }
 
 // actionRefusal is the structured error a pack action returns to the model.
+// actionRefusal returns the structured error of a refused pack action. The module's own code
+// maps to the shared error codes; an unknown code is a guard failure.
 func actionRefusal(code, message, field string) string {
-	body := map[string]string{"error": code, "message": message}
-	if field != "" {
-		body["field"] = field
+	return aiToolError{Code: refusalCode(code), Message: message, Field: field}.text()
+}
+
+func refusalCode(code string) string {
+	switch {
+	case code == "unknown_action" || code == "module.operation_not_found":
+		return errNotFound
+	case code == "permission.denied":
+		return errPermissionDenied
+	case strings.HasPrefix(code, "validation."):
+		return errInvalidValue
 	}
-	data, _ := json.Marshal(body)
-	return "Error: " + string(data)
+	return errGuardFailed
 }
 
 // humanizeIdentifier turns an operation name such as record_sale into a title such as Record sale.

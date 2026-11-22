@@ -667,7 +667,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			if verified, ok := c.Get("policy_execution"); ok {
 				execution, _ = verified.(policy.Execution)
 			}
-			toolResults := executeToolCallsForAI(auditCtx, tx, reg, toolCallBatch{Calls: toolCalls, Owner: currentUser, Site: siteName, RunID: runID, StepID: stepID, ConversationID: conversationID, Execution: execution, Turn: answers, Commands: turn.Commands, Operations: turn.Operations})
+			toolResults := RunToolTurn(auditCtx, tx, reg, toolCallBatch{Calls: toolCalls, Owner: currentUser, Site: siteName, RunID: runID, StepID: stepID, ConversationID: conversationID, Execution: execution, Turn: answers, Commands: turn.Commands, Operations: turn.Operations})
 			for i, tr := range toolResults {
 				raw := tr["content"].(string)
 				slog.Info("Tool result", "content", raw[:min(len(raw), 200)])

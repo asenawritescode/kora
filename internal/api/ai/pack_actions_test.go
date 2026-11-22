@@ -17,6 +17,7 @@ import (
 // fakeOperations is a ModuleOperations over a fixed catalog. It records the last run request.
 type fakeOperations struct {
 	catalog    contract.ApplicationCatalog
+	previews   int
 	runErr     error
 	receipt    contract.OperationReceipt
 	lastRef    string
@@ -28,6 +29,13 @@ type fakeOperations struct {
 
 func (f *fakeOperations) Catalog(policy.Execution, contract.BusinessScope) (contract.ApplicationCatalog, error) {
 	return f.catalog, nil
+}
+
+// Preview records the call and returns the same receipt, without counting it as a run.
+func (f *fakeOperations) Preview(_ context.Context, _ policy.Execution, _ contract.BusinessScope, ref string, request contract.ExecutePublishedOperation) (contract.OperationReceipt, error) {
+	f.previews++
+	f.lastRef, f.lastInput = ref, request.Input
+	return f.receipt, f.runErr
 }
 
 func (f *fakeOperations) Run(_ context.Context, _ policy.Execution, _ contract.BusinessScope, ref string, request contract.ExecutePublishedOperation) (contract.OperationReceipt, error) {
@@ -198,9 +206,9 @@ func TestRunPackActionRefusalsAndReplay(t *testing.T) {
 		runs    int
 		wantSub string
 	}{
-		{name: "unknown action", args: map[string]any{"action": "pos.core~pos.till~missing", "input": map[string]any{}}, wantSub: `"error":"unknown_action"`},
-		{name: "unavailable action", args: map[string]any{"action": "pos.core~pos.till~close_session", "input": map[string]any{}}, wantSub: `"error":"unknown_action"`},
-		{name: "input is not an object", args: map[string]any{"action": "pos.core~pos.till~open_session", "input": "float 500"}, wantSub: `"error":"validation.invalid_input"`},
+		{name: "unknown action", args: map[string]any{"action": "pos.core~pos.till~missing", "input": map[string]any{}}, wantSub: `"code":"not_found"`},
+		{name: "unavailable action", args: map[string]any{"action": "pos.core~pos.till~close_session", "input": map[string]any{}}, wantSub: `"code":"not_found"`},
+		{name: "input is not an object", args: map[string]any{"action": "pos.core~pos.till~open_session", "input": "float 500"}, wantSub: `"code":"invalid_value"`},
 		{name: "executor refusal reaches the model", args: map[string]any{"action": "pos.core~pos.till~open_session", "input": map[string]any{}}, runErr: OperationError{Code: "validation.failed", Message: "Till is not open", Field: "till_session"}, runs: 1, wantSub: `"field":"till_session"`},
 		{name: "completed action", args: map[string]any{"action": "pos.core~pos.checkout~record_sale", "input": map[string]any{"register": "R1"}}, runs: 1, wantSub: `"execution_id":"exec-1"`},
 	} {
@@ -230,7 +238,7 @@ func TestRunPackActionPassesSchemaAndToolCallKey(t *testing.T) {
 
 func TestPackActionsRefuseWithoutOperations(t *testing.T) {
 	out := packInvocation(t, nil, toolRunAction, map[string]any{"action": "x", "input": map[string]any{}})
-	if !strings.HasPrefix(out, "Permission denied") {
+	if !strings.Contains(out, `"code":"permission_denied"`) {
 		t.Fatalf("result = %s, want a refusal", out)
 	}
 }

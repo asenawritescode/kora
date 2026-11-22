@@ -25,7 +25,7 @@ func TestExecuteToolCallsForAIRejectsMalformedCalls(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tx := &orm.TxManager{Context: context.Background(), Dialect: db.Resolve("mysql"), Execution: valid}
-			results := executeToolCallsForAI(context.Background(), tx, doctype.NewRegistry(), toolCallBatch{
+			results := RunToolTurn(context.Background(), tx, doctype.NewRegistry(), toolCallBatch{
 				Calls: []any{tt.call}, Owner: "forged", Site: "site-a", RunID: "run-1", StepID: "step-1", ConversationID: "conv-1",
 			})
 			if len(results) != 1 {

@@ -264,11 +264,11 @@ func findRecords(tx *orm.TxManager, dt *doctype.DocType, args map[string]any, ro
 	}
 	filter, limit, offset, orderBy, err := buildValidatedFindArgs(dt, findArgs)
 	if err != nil {
-		return fmt.Sprintf("Error finding %s: %v", dt.Name, err)
+		return aiToolError{Code: errInvalidValue, Message: "Could not search " + dt.Name + ": " + err.Error(), Fix: "Use fields listed by describe_record_type and supported operators."}.text()
 	}
 	docs, total, err := tx.GetListWithScope(dt, filter, orderBy, limit, offset, rowScope, nil, "")
 	if err != nil {
-		return fmt.Sprintf("Error finding %s: %v", dt.Name, err)
+		return aiToolError{Code: errGuardFailed, Message: "Could not search " + dt.Name + "."}.text()
 	}
 	if total == 0 {
 		return fmt.Sprintf("No %s found.", dt.Name)
@@ -294,7 +294,7 @@ func getRecord(tx *orm.TxManager, dt *doctype.DocType, args map[string]any, rowS
 		"fields":   aiReadableDocumentFields(dt, doc.Fields),
 	})
 	if marshalErr != nil {
-		return fmt.Sprintf("Error formatting %s %q.", dt.Name, name)
+		return aiToolError{Code: errInvalidValue, Message: fmt.Sprintf("%s %q could not be read.", dt.Name, name)}.text()
 	}
 	return string(result)
 }
@@ -328,7 +328,7 @@ func describeRecordType(reg *doctype.Registry, dt *doctype.DocType, commands *ke
 	}
 	data, err := json.Marshal(out)
 	if err != nil {
-		return fmt.Sprintf("Error describing %s.", dt.Name)
+		return aiToolError{Code: errInvalidValue, Message: "Could not describe " + dt.Name + "."}.text()
 	}
 	return string(data)
 }

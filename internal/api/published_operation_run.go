@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/kernel"
 	"github.com/asenawritescode/kora/internal/policy"
 )
 
@@ -21,6 +22,9 @@ type publishedOperationRun struct {
 	Scope     contract.BusinessScope
 	Ref       string
 	Request   contract.ExecutePublishedOperation
+	// Preview validates and runs a local command in a transaction that is rolled back,
+	// and writes no intent, lease or receipt. Other effects are checked against their schema.
+	Preview bool
 }
 
 // operationFailure is a refused published operation with the HTTP status and the
@@ -57,6 +61,9 @@ func runPublishedOperation(ctx context.Context, run publishedOperationRun) (cont
 	}
 	if run.Services.ExecutePublishedOperation == nil {
 		return contract.OperationReceipt{}, refuseOperation(http.StatusServiceUnavailable, "module.operation_unavailable", "Published operation executor is unavailable")
+	}
+	if run.Preview {
+		ctx = kernel.WithPreview(ctx)
 	}
 	receipt, err := run.Services.ExecutePublishedOperation(ctx, run.Execution, run.Scope, operation.owner, operation.published, run.Request.InputSchema, run.Request.Meta, run.Request.Input)
 	if err != nil {

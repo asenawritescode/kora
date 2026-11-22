@@ -230,3 +230,12 @@ func (p BindingPlan) ResolveBusinessReference(ctx context.Context, execution pol
 	defer handle.Revoke()
 	return contract.ValidateBusinessReference(ctx, handle, contract.ScopeContext{Scope: scope, ProviderID: binding.ProviderID}, ref, rule.ResourceType)
 }
+
+// ValidateOperationInput checks payload against the input schema of a declared operation of
+// the binding, without running it.
+func (b ResolvedBinding) ValidateOperationInput(ref contract.SchemaRef, payload []byte) error {
+	if b.validateSchema == nil {
+		return fmt.Errorf("capability binding has no schema validator")
+	}
+	return b.validateSchema(ref, payload)
+}

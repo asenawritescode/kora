@@ -93,7 +93,7 @@ func TestAIRecordMutationUsesKernelReceiptAndAudit(t *testing.T) {
 			t.Fatal("encode AI tool arguments:", err)
 		}
 		calls := []any{map[string]any{"id": callID, "function": map[string]any{"name": toolName, "arguments": string(argBytes)}}}
-		results := executeToolCallsForAI(tx.Context, tx, registry, toolCallBatch{Calls: calls, Owner: "alice@example.test", Site: site, RunID: runID, StepID: stepID, ConversationID: "conversation-1"})
+		results := RunToolTurn(tx.Context, tx, registry, toolCallBatch{Calls: calls, Owner: "alice@example.test", Site: site, RunID: runID, StepID: stepID, ConversationID: "conversation-1"})
 		if len(results) != 1 {
 			t.Fatalf("tool %s returned %d responses, want one", toolName, len(results))
 		}

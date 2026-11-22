@@ -432,7 +432,7 @@ func (h *Handler) HandleChannelTools(c *gin.Context) {
 		return
 	}
 	channel := strings.TrimSpace(c.DefaultQuery("channel", "web"))
-	catalog := ai.BuildToolCatalog(h.siteRegistry(c), ai.CatalogOptions{Operations: aiModuleOperations{h: h, c: c}})
+	catalog := ai.BuildToolCatalog(h.siteRegistry(c), ai.CatalogOptions{Operations: NewAIModuleOperations(h, c)})
 	configRevision := c.GetUint64("site_config_revision")
 	filtered := make([]ai.ToolDescriptor, 0, len(catalog.Tools))
 	for _, tool := range catalog.Tools {
@@ -470,7 +470,7 @@ func (h *Handler) handleChannelTool(c *gin.Context, readOnly bool) {
 		writeError(c, http.StatusBadRequest, "validation.required_field", "tool_name is required", map[string]any{"field": "tool_name"})
 		return
 	}
-	safety := ai.BuildToolCatalog(h.siteRegistry(c), ai.CatalogOptions{Operations: aiModuleOperations{h: h, c: c}})
+	safety := ai.BuildToolCatalog(h.siteRegistry(c), ai.CatalogOptions{Operations: NewAIModuleOperations(h, c)})
 	var descriptor *ai.ToolDescriptor
 	for i := range safety.Tools {
 		if safety.Tools[i].Name == req.ToolName {
@@ -510,7 +510,7 @@ func (h *Handler) handleChannelTool(c *gin.Context, readOnly bool) {
 	result := ai.ExecuteTool(h.siteTx(c), h.siteRegistry(c), ai.ToolRequest{
 		Name: req.ToolName, Args: req.Args, Owner: owner, Site: siteNameStr, Confirmed: true,
 		IdempotencyKey: strings.TrimSpace(c.GetHeader("Idempotency-Key")), Execution: execution,
-		Commands: h.kernelCommands(h.runtimeService(c, siteNameStr)), Operations: aiModuleOperations{h: h, c: c},
+		Commands: h.kernelCommands(h.runtimeService(c, siteNameStr)), Operations: NewAIModuleOperations(h, c),
 	})
 	status := "success"
 	var errorMessage string

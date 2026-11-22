@@ -618,6 +618,9 @@ fields:
 // Tool execution
 // ---------------------------------------------------------------------------
 
+// ToolTurn is the model's tool calls for one step of a chat turn; RunToolTurn runs them.
+type ToolTurn = toolCallBatch
+
 // toolCallBatch is the model's tool calls for one step. A zero Execution falls
 // back to the transaction manager's; Owner is replaced by the verified actor.
 type toolCallBatch struct {
@@ -633,9 +636,14 @@ type toolCallBatch struct {
 	Operations     ModuleOperations
 }
 
-// executeToolCallsForAI runs the model's tool calls and returns results in
+// RunToolTurn runs the model's tool calls and returns results in
 // OpenAI tool message format. The acting user and roles are taken from the
 // verified execution identity only; a caller cannot supply them.
+// RunToolTurn runs the tool calls of one chat step: the chat route and the scripted turn tests use it.
+func RunToolTurn(ctx context.Context, tx *orm.TxManager, reg *doctype.Registry, batch ToolTurn) []map[string]any {
+	return executeToolCallsForAI(ctx, tx, reg, batch)
+}
+
 func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.Registry, batch toolCallBatch) []map[string]any {
 	if !batch.Execution.Valid() && tx != nil {
 		batch.Execution = tx.Execution

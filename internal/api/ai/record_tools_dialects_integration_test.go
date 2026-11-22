@@ -103,7 +103,7 @@ func TestRecordToolsReachPackTypesAcrossDialects(t *testing.T) {
 				for _, call := range calls {
 					anyCalls = append(anyCalls, call)
 				}
-				results := executeToolCallsForAI(tx.Context, tx, registry, toolCallBatch{
+				results := RunToolTurn(tx.Context, tx, registry, toolCallBatch{
 					Calls: anyCalls, Owner: "alice@example.test", Site: site, RunID: runID, StepID: step,
 					ConversationID: "conversation-" + suffix, Execution: execution, Commands: commands,
 				})

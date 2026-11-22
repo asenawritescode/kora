@@ -782,7 +782,7 @@ func TestExecuteToolCallsForAIRecordsAuditRows(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	tx := &orm.TxManager{DB: db, SiteName: "site-a", Execution: testAIExecution(t, "site-a", "alice", nil)}
-	results := executeToolCallsForAI(ctx, tx, doctype.NewRegistry(), toolCallBatch{Owner: "alice", Site: "site-a", RunID: "run-1", StepID: "step-1", ConversationID: "conv-1", Calls: []any{
+	results := RunToolTurn(ctx, tx, doctype.NewRegistry(), toolCallBatch{Owner: "alice", Site: "site-a", RunID: "run-1", StepID: "step-1", ConversationID: "conv-1", Calls: []any{
 		map[string]any{
 			"id": "tool-call-1",
 			"function": map[string]any{
@@ -839,7 +839,7 @@ func TestExecuteToolCallsForAIGuardedToolUsesSharedExecutor(t *testing.T) {
 
 	tx := &orm.TxManager{DB: db, SiteName: "site-a", Execution: testAIExecution(t, "site-a", "alice", nil)}
 	tx.Context = auth.ContextWithSessionCreatedAt(context.Background(), time.Now())
-	results := executeToolCallsForAI(ctx, tx, doctype.NewRegistry(), toolCallBatch{Owner: "alice", Site: "site-a", RunID: "run-1", StepID: "step-1", ConversationID: "conv-1", Calls: []any{
+	results := RunToolTurn(ctx, tx, doctype.NewRegistry(), toolCallBatch{Owner: "alice", Site: "site-a", RunID: "run-1", StepID: "step-1", ConversationID: "conv-1", Calls: []any{
 		map[string]any{
 			"id": "tool-call-guarded-1",
 			"function": map[string]any{

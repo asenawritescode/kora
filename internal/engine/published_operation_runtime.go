@@ -92,6 +92,9 @@ func executePublishedOperation(ctx context.Context, rt publishedOperationRuntime
 	if spec.Effect != contract.EffectLocal && spec.Effect != contract.EffectExternal {
 		return contract.OperationReceipt{}, contract.NewError(contract.CodeValidationFailed, "published operation is not a registered command")
 	}
+	if kernel.IsPreview(ctx) {
+		return previewPublishedOperation(ctx, rt, previewRequest{target: target, call: call, spec: spec, snapshot: snapshot, operationRef: contract.PublishedOperationRef(target.owner, target.published.Capability, target.published.Operation)})
+	}
 	operationRef := contract.PublishedOperationRef(target.owner, target.published.Capability, target.published.Operation)
 	intentKey, err := contract.PublishedOperationIntentKey(target.scope, operationRef, call.meta.IdempotencyKey)
 	if err != nil {
@@ -136,21 +139,9 @@ func executePublishedOperation(ctx context.Context, rt publishedOperationRuntime
 		}
 	}
 
-	plan, err := rt.resolve(target.scope)
+	plan, selected, caller, err := resolveCallerBinding(rt, target)
 	if err != nil {
-		return contract.OperationReceipt{}, contract.NewError(contract.CodeDependencyUnavailable, "published operation provider plan is unavailable")
-	}
-	var selected plugin.ResolvedBinding
-	var caller contract.ModuleID
-	for _, candidate := range target.published.AllowedCallers {
-		binding, ok := plan.Resolve(plugin.BindingKey{Scope: target.scope, ConsumerModuleID: candidate, CapabilityName: target.published.Capability})
-		if ok && binding.OwnerModuleID == target.owner {
-			selected, caller = binding, candidate
-			break
-		}
-	}
-	if caller == "" {
-		return contract.OperationReceipt{}, contract.NewError(contract.CodeDependencyUnavailable, "no registered caller has the selected provider binding")
+		return contract.OperationReceipt{}, err
 	}
 	if spec.Effect == contract.EffectExternal {
 		providerContext := contract.OperationContext{Site: string(target.scope.TenantID), Actor: target.execution.Actor().PrincipalID, Scope: target.scope}
