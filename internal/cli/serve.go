@@ -309,6 +309,7 @@ func runServe() error {
 	if sc.DBDSN == "" {
 		return fmt.Errorf("DB_DSN is required; Engine serves sites from the canonical platform directory")
 	}
+	eventbus.LogLegacyWALDir(eventbus.LegacyWALDir)
 	common := site.CommonConfigFromEnv()
 	configureLogging(common.LogLevel, common.LogFormat)
 	storageResolver := engine.NewStorageResolver(storageConfigFromEnv())

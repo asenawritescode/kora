@@ -17,13 +17,10 @@ type stubBus struct {
 	ch chan eventstream.ChangeEvent
 }
 
-func (s *stubBus) Publish(event eventstream.ChangeEvent) error         { s.ch <- event; return nil }
-func (s *stubBus) Subscribe() (<-chan eventstream.ChangeEvent, error)  { return s.ch, nil }
-func (s *stubBus) DrainWAL(func(eventstream.ChangeEvent)) (int, error) { return 0, nil }
-func (s *stubBus) RotateWAL() (string, error)                          { return "", nil }
-func (s *stubBus) CommitWALRotation(string) error                      { return nil }
-func (s *stubBus) Dropped() int64                                      { return 0 }
-func (s *stubBus) Close() error                                        { close(s.ch); return nil }
+func (s *stubBus) Publish(event eventstream.ChangeEvent) error        { s.ch <- event; return nil }
+func (s *stubBus) Subscribe() (<-chan eventstream.ChangeEvent, error) { return s.ch, nil }
+func (s *stubBus) Dropped() int64                                     { return 0 }
+func (s *stubBus) Close() error                                       { close(s.ch); return nil }
 
 func TestCloudRelayPostsFirstRecordOnlyOncePerDoctype(t *testing.T) {
 	t.Parallel()
@@ -107,10 +104,7 @@ func (s *multiBusStub) Subscribe() (<-chan eventstream.ChangeEvent, error) {
 	s.ch = make(chan eventstream.ChangeEvent, 1)
 	return s.ch, nil
 }
-func (s *multiBusStub) DrainWAL(handler func(eventstream.ChangeEvent)) (int, error) { return 0, nil }
-func (s *multiBusStub) RotateWAL() (string, error)                                  { return "", nil }
-func (s *multiBusStub) CommitWALRotation(string) error                              { return nil }
-func (s *multiBusStub) Dropped() int64                                              { return 0 }
+func (s *multiBusStub) Dropped() int64 { return 0 }
 func (s *multiBusStub) Close() error {
 	close(s.ch)
 	return nil

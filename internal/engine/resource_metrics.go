@@ -66,7 +66,7 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 		"kora.realtime.nats.subscriptions.active", "kora.realtime.nats.client_pending_messages", "kora.realtime.nats.client_pending_bytes", "kora.realtime.nats.client_pending_nonempty_observed_span_ns", "kora.realtime.nats.application_pending_items", "kora.realtime.nats.application_pending_bytes", "kora.realtime.nats.application_capacity_items", "kora.realtime.nats.application_capacity_bytes", "kora.realtime.nats.application_oldest_age_upper_bound_ns", "kora.realtime.nats.client_dropped_messages",
 		"kora.process.goroutines", "kora.process.heap_alloc_bytes", "kora.process.heap_sys_bytes", "kora.process.rss_bytes",
 		"kora.session_cache.entries", "kora.session_cache.bytes", "kora.session_cache.max_entries", "kora.session_cache.max_bytes",
-		"kora.analytics.queue.items", "kora.analytics.queue.upper_bound_bytes", "kora.analytics.queue.max_items", "kora.analytics.queue.max_bytes", "kora.analytics.queue.oldest_age_upper_bound_ns", "kora.analytics.events.dropped", "kora.analytics.events.payload_rejected", "kora.analytics.events.wal_write_failures", "kora.analytics.listeners.overflows", "kora.analytics.listeners.registration_rejected",
+		"kora.analytics.queue.items", "kora.analytics.queue.upper_bound_bytes", "kora.analytics.queue.max_items", "kora.analytics.queue.max_bytes", "kora.analytics.queue.oldest_age_upper_bound_ns", "kora.analytics.events.dropped", "kora.analytics.events.payload_rejected", "kora.analytics.listeners.overflows", "kora.analytics.listeners.registration_rejected",
 		"kora.analytics.process_queued_bytes", "kora.analytics.process_queue_max_bytes", "kora.analytics.process_queue_rejected",
 		"kora.analytics.listeners.process_active", "kora.analytics.listeners.process_capacity", "kora.analytics.listeners.process_rejected",
 		"kora.session_cache.shared_bytes", "kora.session_cache.shared_max_bytes",
@@ -94,7 +94,7 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 		"Active NATS realtime subscriptions", "Messages pending in NATS client subscription buffers", "Bytes pending in NATS client subscription buffers", "Span between consecutive metric samples that observed a NATS client subscription backlog as nonempty; not message age", "Messages pending in Engine application subscription channels", "Conservative byte upper bound for Engine application subscription channels", "Aggregate Engine application channel item capacity", "Aggregate Engine application channel byte capacity", "Conservative upper bound on age of messages waiting in Engine application subscription channels", "Cumulative messages dropped by NATS client realtime subscriptions",
 		"Current process goroutine count", "Current process heap allocation bytes", "Current process heap system bytes", "Current process resident set size from the Linux process statm interface",
 		"Cached session entries across resident tenants", "Estimated bytes retained by session caches across resident tenants", "Session cache entry capacity across resident tenants", "Session cache byte capacity across resident tenants",
-		"Analytics wake-up events queued across resident tenants", "Conservative serialized-payload upper bound for queued analytics events", "Analytics wake-up event capacity across resident tenants", "Analytics wake-up queue byte capacity across resident tenants", "Conservative upper bound on age of queued in-memory analytics wake-up events", "Analytics events rejected or dropped by resident buses since bus startup", "Analytics events rejected by the configured encoded-payload limit", "Analytics event WAL persistence failures", "Analytics listener events dropped because subscriber queues were full", "Analytics subscriber registrations rejected by capacity or lifecycle limits",
+		"Analytics wake-up events queued across resident tenants", "Conservative serialized-payload upper bound for queued analytics events", "Analytics wake-up event capacity across resident tenants", "Analytics wake-up queue byte capacity across resident tenants", "Conservative upper bound on age of queued in-memory analytics wake-up events", "Analytics events rejected or dropped by resident buses since bus startup", "Analytics events rejected by the configured encoded-payload limit", "Analytics listener events dropped because subscriber queues were full", "Analytics subscriber registrations rejected by capacity or lifecycle limits",
 		"Conservative queued analytics payload bytes reserved process-wide", "Process-wide conservative analytics queue byte capacity", "Analytics wake-up or subscriber queue reservations rejected by the process-wide byte budget",
 		"Active analytics listener registrations reserved across the Engine process", "Process-wide analytics listener registration capacity", "Analytics listener registrations rejected by the process-wide subscription limit",
 		"Session snapshot bytes retained across process and tenant session managers", "Shared process session snapshot byte capacity",
@@ -126,8 +126,8 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 		"kora.db.work.wait_total": true, "kora.db.work.wait_duration_ns": true, "kora.db.work.rejected": true,
 		"kora.realtime.streams.rejected": true, "kora.realtime.nats.client_dropped_messages": true, "kora.async_hooks.queue.rejected_items": true,
 		"kora.uploads.rejected":                  true,
-		"kora.analytics.events.payload_rejected": true, "kora.analytics.events.wal_write_failures": true,
-		"kora.analytics.listeners.overflows": true, "kora.analytics.listeners.registration_rejected": true,
+		"kora.analytics.events.payload_rejected": true,
+		"kora.analytics.listeners.overflows":     true, "kora.analytics.listeners.registration_rejected": true,
 		"kora.analytics.process_queue_rejected":     true,
 		"kora.analytics.listeners.process_rejected": true,
 		"kora.tenant.activation.wait_total":         true, "kora.tenant.activation.wait_duration_ns": true, "kora.tenant.activation.rejected": true,
@@ -313,7 +313,6 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 					}); ok {
 						drops := snapshotter.DropCauses()
 						values["kora.analytics.events.payload_rejected"] += drops.PayloadRejected
-						values["kora.analytics.events.wal_write_failures"] += drops.WALWriteFailures
 						values["kora.analytics.listeners.overflows"] += drops.SubscriberOverflows
 						values["kora.analytics.listeners.registration_rejected"] += drops.SubscriberRegistrationsRejected
 					}

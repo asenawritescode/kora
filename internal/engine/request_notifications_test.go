@@ -12,7 +12,7 @@ import (
 )
 
 func TestInboxNotificationSenderPublishesRecipientScopedInvalidationOnly(t *testing.T) {
-	bus := eventbus.NewChannelBusWithLimits(2, 2048, 4096, t.TempDir())
+	bus := eventbus.NewChannelBus(2, 2048)
 	defer bus.Close()
 	events, err := bus.Subscribe()
 	if err != nil {

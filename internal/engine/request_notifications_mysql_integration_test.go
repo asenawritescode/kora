@@ -167,7 +167,7 @@ func TestMySQLRequestOutboxSchedulesAndDeliversRecipientScopedInboxEvent(t *test
 	if _, err := database.ExecContext(ctx, `UPDATE _kora_notification_delivery SET available_at=? WHERE tenant_id=? AND request_id=?`, now, string(tenant), string(requestID)); err != nil {
 		t.Fatal("make persisted notification retry due:", err)
 	}
-	bus := eventbus.NewChannelBusWithLimits(2, 2048, 4096, t.TempDir())
+	bus := eventbus.NewChannelBus(2, 2048)
 	defer bus.Close()
 	events, err := bus.Subscribe()
 	if err != nil {

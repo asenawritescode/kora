@@ -25,7 +25,7 @@ func TestStartupSiteCollectionClosesFanoutBusWhenSiblingLoadFails(t *testing.T) 
 		t.Fatal("create startup rollback DB:", err)
 	}
 	defer database.Close()
-	base := eventbus.NewChannelBus(4, t.TempDir()+"/wal")
+	base := eventbus.NewChannelBus(4, 0)
 	fanout, err := eventbus.NewMultiBus(base)
 	if err != nil {
 		t.Fatal(err)

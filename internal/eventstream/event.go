@@ -40,14 +40,6 @@ type ChangeEvent struct {
 type Bus interface {
 	Publish(ChangeEvent) error
 	Subscribe() (<-chan ChangeEvent, error)
-	DrainWAL(func(ChangeEvent)) (int, error)
-	RotateWAL() (string, error)
-	CommitWALRotation(string) error
 	Dropped() int64
 	Close() error
-}
-
-// WALAcknowledger acknowledges only event IDs included in a committed batch.
-type WALAcknowledger interface {
-	AcknowledgeWAL(eventIDs []string) error
 }

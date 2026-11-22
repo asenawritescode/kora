@@ -458,7 +458,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	}
 	services.RealtimeAdmission = config.RealtimeAdmission
 	services.UploadAdmission = config.UploadAdmission
-	baseBus := eventbus.NewChannelBusWithLimits(config.Analytics.ChannelSize, config.Analytics.MaxEventBytes, eventbus.DefaultMaxQueuedBytes, AnalyticsTenantWALDir(eventbus.LegacyWALDir, loaded.SiteID))
+	baseBus := eventbus.NewChannelBus(config.Analytics.ChannelSize, config.Analytics.MaxEventBytes)
 	if config.AnalyticsQueueAdmission != nil {
 		queueAware, ok := baseBus.(interface {
 			SetQueueAdmission(*eventbus.QueueAdmission) error

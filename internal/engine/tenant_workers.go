@@ -2,14 +2,11 @@ package engine
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/asenawritescode/kora/internal/eventstream"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,14 +16,6 @@ import (
 	"github.com/asenawritescode/kora/internal/notifications"
 	"github.com/asenawritescode/kora/internal/outbox"
 )
-
-// AnalyticsTenantWALDir returns a path-safe WAL partition keyed by stable
-// tenant identity. Hashing avoids leaking IDs into paths and prevents route
-// names, aliases, or untrusted path characters from changing the partition.
-func AnalyticsTenantWALDir(baseDir, tenantID string) string {
-	hash := sha256.Sum256([]byte(strings.TrimSpace(tenantID)))
-	return filepath.Join(baseDir, "tenant-"+hex.EncodeToString(hash[:]))
-}
 
 // RunRealtimeBridge forwards tenant bus events to realtime listeners until the bus closes.
 func RunRealtimeBridge(ctx context.Context, siteName string, bus eventstream.Bus, provider *natsprovider.Provider) {

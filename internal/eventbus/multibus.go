@@ -101,27 +101,6 @@ func (mb *MultiBus) Subscribe() (<-chan eventstream.ChangeEvent, error) {
 	return ch, nil
 }
 
-// DrainWAL drains the inner bus WAL through handler.
-func (mb *MultiBus) DrainWAL(handler func(eventstream.ChangeEvent)) (int, error) {
-	return mb.inner.DrainWAL(handler)
-}
-
-// DrainWALBatch drains at most limit WAL events when the inner bus supports it.
-func (mb *MultiBus) DrainWALBatch(limit int, handler func(eventstream.ChangeEvent)) (int, error) {
-	if drainer, ok := mb.inner.(WALBatchDrainer); ok {
-		return drainer.DrainWALBatch(limit, handler)
-	}
-	return mb.inner.DrainWAL(handler)
-}
-func (mb *MultiBus) RotateWAL() (string, error)          { return mb.inner.RotateWAL() }
-func (mb *MultiBus) CommitWALRotation(path string) error { return mb.inner.CommitWALRotation(path) }
-func (mb *MultiBus) AcknowledgeWAL(ids []string) error {
-	if ack, ok := mb.inner.(eventstream.WALAcknowledger); ok {
-		return ack.AcknowledgeWAL(ids)
-	}
-	return fmt.Errorf("event bus does not support per-event WAL acknowledgment")
-}
-
 // NewMultiBus creates and starts a fan-out wrapper around an existing eventstream.Bus.
 func NewMultiBus(inner eventstream.Bus) (*MultiBus, error) {
 	mb, err := NewDeferredMultiBus(inner)
@@ -414,6 +393,7 @@ func (mb *MultiBus) fanout(event eventstream.ChangeEvent) {
 func (mb *MultiBus) recordListenerOverflowLocked(listener chan eventstream.ChangeEvent, closeOnOverflow bool, index *int) {
 	mb.dropped.Add(1)
 	mb.subscriberOverflows.Add(1)
+	overflowWarning.warn("analytics: subscriber queue full; event dropped for slow listener")
 	if !closeOnOverflow {
 		*index++
 		return
