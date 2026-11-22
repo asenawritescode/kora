@@ -186,11 +186,11 @@ REPORTING AND ANALYTICS (accuracy rules, never break them):
 AI CHAT: You have tools to list, find, get, create, update documents. You can create doctypes as Draft, validate YAML, and answer business numbers with the metrics tools. Everything scoped to the current site.`
 
 // chatFunctions is the tool list of one chat turn: the catalog, without the metrics reads when the person has no Insights.
-func chatFunctions(tx *orm.TxManager, reg *doctype.Registry, insights, disabled bool) []map[string]any {
+func chatFunctions(tx *orm.TxManager, reg *doctype.Registry, insights, disabled bool, operations ModuleOperations) []map[string]any {
 	if disabled {
 		return nil
 	}
-	functions := buildOpenAIToolsFromCatalog(BuildToolCatalog(reg, CatalogOptions{Execution: tx.Execution, BusinessScope: tx.BusinessScope}))
+	functions := buildOpenAIToolsFromCatalog(BuildToolCatalog(reg, CatalogOptions{Execution: tx.Execution, BusinessScope: tx.BusinessScope, Operations: operations}))
 	if !insights {
 		functions = withoutMetricsTools(functions)
 	}
@@ -352,7 +352,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 	}
 
 	// Build function definitions from the canonical tool catalog projection.
-	functions := chatFunctions(tx, reg, turn.Insights, req.DisableTools)
+	functions := chatFunctions(tx, reg, turn.Insights, req.DisableTools, turn.Operations)
 
 	// Durable server history is the source of truth for the conversation.
 	sanitizedHistory := sanitizeHistory(transcript, cfg.HistoryLimit)
@@ -665,7 +665,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			if verified, ok := c.Get("policy_execution"); ok {
 				execution, _ = verified.(policy.Execution)
 			}
-			toolResults := executeToolCallsForAI(auditCtx, tx, reg, toolCallBatch{Calls: toolCalls, Owner: currentUser, Site: siteName, RunID: runID, StepID: stepID, ConversationID: conversationID, Execution: execution, Turn: answers, Commands: turn.Commands})
+			toolResults := executeToolCallsForAI(auditCtx, tx, reg, toolCallBatch{Calls: toolCalls, Owner: currentUser, Site: siteName, RunID: runID, StepID: stepID, ConversationID: conversationID, Execution: execution, Turn: answers, Commands: turn.Commands, Operations: turn.Operations})
 			for i, tr := range toolResults {
 				raw := tr["content"].(string)
 				slog.Info("Tool result", "content", raw[:min(len(raw), 200)])

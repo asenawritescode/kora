@@ -46,6 +46,8 @@ const maxFindRecords = 20
 type CatalogOptions struct {
 	Execution     policy.Execution
 	BusinessScope contract.BusinessScope
+	// Operations offers the pack-action tools when set. Nil leaves them out of the catalog.
+	Operations ModuleOperations
 }
 
 // readableRecordTypes returns the sorted names of the non-child record types in
@@ -78,13 +80,6 @@ func recordToolDescriptors(types []string) []ToolDescriptor {
 	typeProp := map[string]any{"type": "string", "enum": types, "description": "Record type name from the enum."}
 	nameProp := map[string]any{"type": "string", "description": "Stable document name."}
 	dataProp := map[string]any{"type": "object", "description": "Field values by fieldname. Call describe_record_type first to see fields."}
-	object := func(props map[string]any, required ...string) map[string]any {
-		schema := map[string]any{"type": "object", "additionalProperties": false, "properties": props}
-		if len(required) > 0 {
-			schema["required"] = required
-		}
-		return schema
-	}
 	findProps := map[string]any{
 		"record_type": typeProp,
 		"search":      map[string]any{"type": "string", "description": "Text to match in the record title or name."},
@@ -92,11 +87,11 @@ func recordToolDescriptors(types []string) []ToolDescriptor {
 		"limit":       map[string]any{"type": "integer", "minimum": 1, "maximum": maxFindRecords, "description": "Max rows (default 5)."},
 	}
 	return []ToolDescriptor{
-		recordTool(toolFindRecords, "Find or list records of one type, recent first. Returns names, titles and summary fields.", object(findProps, "record_type"), recordToolOperation[toolFindRecords]),
-		recordTool(toolGetRecord, "Get one record by name.", object(map[string]any{"record_type": typeProp, "name": nameProp}, "record_type", "name"), recordToolOperation[toolGetRecord]),
-		recordTool(toolDescribeRecord, "Describe a record type: fields with type, required, default, options, link target, read-only and computed flags, child tables and pack commands. Call before a write.", object(map[string]any{"record_type": typeProp}, "record_type"), recordToolOperation[toolDescribeRecord]),
-		recordTool(toolCreateRecord, "Create one record of a type. Pack-owned types need their pack command instead; the error names it.", object(map[string]any{"record_type": typeProp, "data": dataProp}, "record_type", "data"), recordToolOperation[toolCreateRecord]),
-		recordTool(toolUpdateRecord, "Update fields of one existing record by its stable name.", object(map[string]any{"record_type": typeProp, "name": nameProp, "data": dataProp}, "record_type", "name", "data"), recordToolOperation[toolUpdateRecord]),
+		recordTool(toolFindRecords, "Find or list records of one type, recent first. Returns names, titles and summary fields.", objectSchema(findProps, "record_type"), recordToolOperation[toolFindRecords]),
+		recordTool(toolGetRecord, "Get one record by name.", objectSchema(map[string]any{"record_type": typeProp, "name": nameProp}, "record_type", "name"), recordToolOperation[toolGetRecord]),
+		recordTool(toolDescribeRecord, "Describe a record type: fields with type, required, default, options, link target, read-only and computed flags, child tables and pack commands. Call before a write.", objectSchema(map[string]any{"record_type": typeProp}, "record_type"), recordToolOperation[toolDescribeRecord]),
+		recordTool(toolCreateRecord, "Create one record of a type. Pack-owned types need their pack command instead; the error names it.", objectSchema(map[string]any{"record_type": typeProp, "data": dataProp}, "record_type", "data"), recordToolOperation[toolCreateRecord]),
+		recordTool(toolUpdateRecord, "Update fields of one existing record by its stable name.", objectSchema(map[string]any{"record_type": typeProp, "name": nameProp, "data": dataProp}, "record_type", "name", "data"), recordToolOperation[toolUpdateRecord]),
 	}
 }
 

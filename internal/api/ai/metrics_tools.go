@@ -50,6 +50,8 @@ type ChatTurn struct {
 	Insights bool
 	// Commands names the pack commands a module-owned write must use in error replies.
 	Commands *kernel.CommandRegistry
+	// Operations offers and runs the pack-action tools. Nil leaves them out.
+	Operations ModuleOperations
 }
 
 // Tool names of the metrics tools.

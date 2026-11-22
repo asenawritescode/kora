@@ -82,6 +82,9 @@ type ToolCatalog struct {
 // (scoped by opts), then the system tools.
 func BuildToolCatalog(reg *doctype.Registry, opts CatalogOptions) ToolCatalog {
 	catalog := recordToolDescriptors(readableRecordTypes(reg, opts))
+	if opts.Operations != nil {
+		catalog = append(catalog, packActionDescriptors()...)
+	}
 	for _, raw := range buildSystemFunctions(reg) {
 		if descriptor, ok := descriptorFromRawFunction(raw); ok {
 			catalog = append(catalog, descriptor)
@@ -214,6 +217,8 @@ type ToolRequest struct {
 	IdempotencyKey string
 	// Commands resolves the pack commands a module-owned write must use.
 	Commands *kernel.CommandRegistry
+	// Operations runs the pack-action tools. Nil refuses them.
+	Operations ModuleOperations
 	// Execution is the verified principal the resulting kernel commands are
 	// bound to. A zero value falls back to the transaction manager's own.
 	Execution policy.Execution
@@ -227,7 +232,7 @@ func ExecuteTool(tx *orm.TxManager, reg *doctype.Registry, req ToolRequest) stri
 	if req.Confirmed {
 		key = channelToolMutationIdempotencyKey(req.Site, req.IdempotencyKey)
 	}
-	return executeSingleTool(tx, reg, toolInvocation{Name: req.Name, Args: req.Args, Owner: req.Owner, Site: req.Site, IdempotencyKey: key, Execution: req.Execution, Commands: req.Commands})
+	return executeSingleTool(tx, reg, toolInvocation{Name: req.Name, Args: req.Args, Owner: req.Owner, Site: req.Site, IdempotencyKey: key, Execution: req.Execution, Commands: req.Commands, Operations: req.Operations})
 }
 
 // holdForApproval records a durable pending approval for target unless one is
@@ -246,7 +251,7 @@ func holdForApproval(tx *orm.TxManager, target ApprovalTarget, owner, stepID str
 
 func classifyToolSafety(name string) string {
 	switch {
-	case name == toolFindRecords, name == toolGetRecord, name == toolDescribeRecord, name == "list_doctypes", name == toolListMetrics, name == toolQueryMetrics, name == toolDrillMetrics, name == toolAskChoice:
+	case name == toolFindRecords, name == toolGetRecord, name == toolDescribeRecord, name == toolListActions, name == "list_doctypes", name == toolListMetrics, name == toolQueryMetrics, name == toolDrillMetrics, name == toolAskChoice:
 		return "safe"
 	case name == toolCreateRecord, name == toolUpdateRecord:
 		return "guarded"
@@ -625,6 +630,7 @@ type toolCallBatch struct {
 	Execution      policy.Execution
 	Turn           *answerTurn
 	Commands       *kernel.CommandRegistry
+	Operations     ModuleOperations
 }
 
 // executeToolCallsForAI runs the model's tool calls and returns results in
@@ -720,7 +726,7 @@ func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.
 			continue
 		}
 
-		result := executeSingleTool(tx, reg, toolInvocation{Name: name, Args: args, Owner: batch.Owner, Site: batch.Site, RunID: batch.RunID, StepID: batch.StepID, IdempotencyKey: aiToolMutationIdempotencyKey(batch.Site, batch.RunID, batch.StepID, id), Execution: batch.Execution, Turn: batch.Turn, Commands: batch.Commands}) //nolint:contextcheck // the context travels in tx.Context
+		result := executeSingleTool(tx, reg, toolInvocation{Name: name, Args: args, Owner: batch.Owner, Site: batch.Site, RunID: batch.RunID, StepID: batch.StepID, IdempotencyKey: aiToolMutationIdempotencyKey(batch.Site, batch.RunID, batch.StepID, id), Execution: batch.Execution, Turn: batch.Turn, Commands: batch.Commands, Operations: batch.Operations}) //nolint:contextcheck // the context travels in tx.Context
 		status := "completed"
 		if isToolError(result) {
 			status = "failed"
@@ -762,6 +768,8 @@ type toolInvocation struct {
 	Turn           *answerTurn
 	// Commands resolves the pack commands a module-owned write must use. Nil names none.
 	Commands *kernel.CommandRegistry
+	// Operations runs the pack-action tools. Nil refuses them.
+	Operations ModuleOperations
 }
 
 // executeSingleTool is the production tool path. DocType tools use the same
@@ -849,6 +857,10 @@ func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, inv toolInvocat
 		return result
 	}
 
+	if toolName == toolListActions || toolName == toolRunAction {
+		inv.Execution = execution
+		return executePackAction(tx, inv)
+	}
 	if operation, ok := recordToolOperation[toolName]; ok {
 		inv.Execution = execution
 		return executeRecordTool(tx, reg, inv, operation)
