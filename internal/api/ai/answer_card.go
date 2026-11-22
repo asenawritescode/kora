@@ -76,8 +76,11 @@ func (t *answerTurn) cardFor(q queryAnswer, page cardPage) contract.AnswerCard {
 	if q.meta.OwnerOnly {
 		card.ScopeNote = "Only your own records"
 	}
-	if isNumberResult(q.result) {
+	if isNumberResult(q.result) || isPrimaryNumber(q) {
 		card.Kind = "number"
+		if isPrimaryNumber(q) && len(q.result.Metrics) > 1 {
+			card.Label = labelOf(queryAnswer{result: contract.MetricQueryResult{Metrics: q.result.Metrics[:1], Labels: q.result.Labels}, saved: q.saved}, cat)
+		}
 		fillNumber(&card, q, cat, page.Currency)
 	} else {
 		card.Kind = "table"
@@ -90,6 +93,13 @@ func (t *answerTurn) cardFor(q queryAnswer, page cardPage) contract.AnswerCard {
 // isNumberResult reports whether a result is one value: one metric, one bucket, no group.
 func isNumberResult(res contract.MetricQueryResult) bool {
 	return len(res.Metrics) == 1 && len(res.Rows) == 1 && len(res.Rows[0].Group) == 0 && len(res.Rows[0].Values) == 1
+}
+
+// isPrimaryNumber reports whether a query asks one figure: no grouping, no dimension, and one bucket. Its first metric
+// is the measure the card shows; a second metric the model added does not make a table of one figure.
+func isPrimaryNumber(q queryAnswer) bool {
+	return len(q.request.Dimensions) == 0 && len(q.request.Measures) == 0 && len(q.request.Metrics) > 0 &&
+		len(q.result.Rows) == 1 && len(q.result.Rows[0].Group) == 0 && len(q.result.Rows[0].Values) >= len(q.request.Metrics)
 }
 
 // labelOf names the metrics a query reads, as the card shows them.

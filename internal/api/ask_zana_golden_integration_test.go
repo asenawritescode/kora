@@ -508,6 +508,19 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 				}
 			},
 		}}},
+		{name: "one figure for one measure is a number card even when two metrics are asked", user: goldenAdminUser, roles: doctype.AdminRole, turns: []goldenTurn{{
+			message: "How much did we sell today?",
+			steps: []modelStep{
+				{tool: "query_metrics", args: `{"metrics":["sales","receipts"],"period":{"preset":"today"},"grain":"range"}`},
+				{content: "Sales today were KES 300."},
+			},
+			check: func(t *testing.T, got ai.ChatResponse, _ []string) {
+				card := requireCards(t, got, 1)[0]
+				if card.Kind != "number" || card.Label != "Sales" || card.Value != "KES 300" || len(card.Rows) != 0 {
+					t.Fatalf("card = %+v; want one number card for sales KES 300", card)
+				}
+			},
+		}}},
 		{name: "average sale today", user: goldenAdminUser, roles: doctype.AdminRole, turns: []goldenTurn{{
 			message: "What was my average sale today?",
 			steps: []modelStep{

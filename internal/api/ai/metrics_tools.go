@@ -229,7 +229,7 @@ func (t *answerTurn) answerQuery(body []byte, req contract.MetricQueryRequest, s
 		}
 	}
 	qa := queryAnswer{question: body, request: req, result: env.Data, meta: env.Meta, verified: verified, saved: saved}
-	if isNumberResult(env.Data) {
+	if isNumberResult(env.Data) || isPrimaryNumber(qa) {
 		qa.spark = t.sparkline(req, env.Meta)
 	}
 	t.queries = append(t.queries, qa)
