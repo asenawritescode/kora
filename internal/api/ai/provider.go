@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
@@ -96,6 +97,14 @@ func DefaultAIConfig() AIConfig {
 	}
 }
 
+// deepseekFlashConfig is the tuned config of deepseek-flash, the model DeepSeek serves for deepseek-chat too.
+var deepseekFlashConfig = AIConfig{
+	MaxRounds: 6, TokenBudget: 60000, CompactionThreshold: 0.80,
+	MaxToolResultChars: 3000, StallThreshold: 3, MaxToolErrors: 5,
+	MaxTokensPerCall: 1024, HTTPTimeoutSec: 90, MaxRetries: 2,
+	RetryBackoffMs: 1000, HistoryLimit: 12,
+}
+
 // modelDefaults maps model names (as resolved by resolveProvider) to
 // model-specific overrides. The map is keyed by the exact model string
 // (e.g., "gpt-4o", "claude-sonnet-4-6").
@@ -136,12 +145,9 @@ var modelConfigs = map[string]AIConfig{
 		MaxTokensPerCall: 4096, HTTPTimeoutSec: 60, MaxRetries: 2,
 		RetryBackoffMs: 500, HistoryLimit: 20,
 	},
-	"deepseek-chat": {
-		MaxRounds: 6, TokenBudget: 60000, CompactionThreshold: 0.80,
-		MaxToolResultChars: 3000, StallThreshold: 3, MaxToolErrors: 5,
-		MaxTokensPerCall: 1024, HTTPTimeoutSec: 90, MaxRetries: 2,
-		RetryBackoffMs: 1000, HistoryLimit: 12,
-	},
+	"deepseek-flash": deepseekFlashConfig,
+	// deepseek-chat is the former name of deepseek-flash. Sites that set it keep the same tuned values.
+	"deepseek-chat": deepseekFlashConfig,
 	"deepseek-v4-pro": {
 		MaxRounds: 15, TokenBudget: 120000, CompactionThreshold: 0.80,
 		MaxToolResultChars: 4000, StallThreshold: 3, MaxToolErrors: 5,
@@ -202,6 +208,14 @@ func applyFloat(store *secret.Store, site, key string, dst *float64) {
 // Provider resolution
 // ---------------------------------------------------------------------------
 
+// directProviders are the providers a site can key directly, in the order they are tried, with the default model of
+// each.
+var directProviders = []struct{ key, base, defaultModel string }{
+	{"openai_api_key", "https://api.openai.com/v1", "gpt-4o"},
+	{"deepseek_api_key", "https://api.deepseek.com", "deepseek-flash"},
+	{"anthropic_api_key", "https://api.anthropic.com/v1", "claude-sonnet-4-6"},
+}
+
 func resolveProvider(db *sql.DB, siteName, modelOverride string, dialect ...kdb.Dialect) (providerKey, apiKey, baseURL, model string) {
 	// When Cloud is configured as the shared provider, keep the external
 	// credential there. The Engine sends its completion request to Cloud using
@@ -224,12 +238,7 @@ func resolveProvider(db *sql.DB, siteName, modelOverride string, dialect ...kdb.
 
 	store := secret.NewStore(db, dialect...)
 
-	providers := []struct{ key, base, defaultModel string }{
-		{"openai_api_key", "https://api.openai.com/v1", "gpt-4o"},
-		{"deepseek_api_key", "https://api.deepseek.com", "deepseek-chat"},
-		{"anthropic_api_key", "https://api.anthropic.com/v1", "claude-sonnet-4-6"},
-	}
-	for _, p := range providers {
+	for _, p := range directProviders {
 		if k, err := store.Get(siteName, p.key); err == nil && k != "" {
 			m := p.defaultModel
 			if modelOverride != "" {
@@ -275,8 +284,29 @@ func gatewayHeadersFor(providerKey, site, channel, run string) map[string]string
 	}
 }
 
+// isDeepSeekRequest reports whether a request goes to DeepSeek: to its API, or for a deepseek-* model (the Cloud
+// gateway relays those to DeepSeek).
+func isDeepSeekRequest(baseURL, model string) bool {
+	return strings.Contains(baseURL, "deepseek.com") || strings.HasPrefix(model, "deepseek-")
+}
+
+// requestBody returns the body to send. A DeepSeek request has thinking disabled unless the body already sets it:
+// deepseek-flash thinks by default, which adds reasoning tokens and latency. The caller's map is not changed.
+func requestBody(body map[string]any, baseURL string) map[string]any {
+	model, _ := body["model"].(string)
+	if !isDeepSeekRequest(baseURL, model) {
+		return body
+	}
+	if _, set := body["thinking"]; set {
+		return body
+	}
+	out := maps.Clone(body)
+	out["thinking"] = map[string]any{"type": "disabled"}
+	return out
+}
+
 func callAI(client *http.Client, baseURL, apiKey string, body map[string]any, headers map[string]string) (map[string]any, error) {
-	jsonBody, _ := json.Marshal(body)
+	jsonBody, _ := json.Marshal(requestBody(body, baseURL))
 	req, _ := http.NewRequest("POST", baseURL+"/chat/completions", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)

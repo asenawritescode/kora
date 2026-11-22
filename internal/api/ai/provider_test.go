@@ -221,3 +221,68 @@ func TestGatewayHeadersFor(t *testing.T) {
 		})
 	}
 }
+
+func TestDeepSeekFlashModelConfigAndAlias(t *testing.T) {
+	flash, ok := modelConfigs["deepseek-flash"]
+	if !ok {
+		t.Fatal("deepseek-flash has no model config")
+	}
+	chat, ok := modelConfigs["deepseek-chat"]
+	if !ok {
+		t.Fatal("deepseek-chat alias has no model config")
+	}
+	if flash != chat {
+		t.Fatalf("deepseek-chat alias = %+v, want deepseek-flash %+v", chat, flash)
+	}
+	if flash.MaxRounds != 6 || flash.TokenBudget != 60000 || flash.MaxTokensPerCall != 1024 || flash.HistoryLimit != 12 || flash.MaxToolResultChars != 3000 {
+		t.Fatalf("deepseek-flash config = %+v, want the tuned values", flash)
+	}
+}
+
+func TestDirectDeepSeekDefaultModelIsFlash(t *testing.T) {
+	for _, p := range directProviders {
+		if p.key == "deepseek_api_key" {
+			if p.defaultModel != "deepseek-flash" || p.base != "https://api.deepseek.com" {
+				t.Fatalf("DeepSeek provider = %+v, want base api.deepseek.com and model deepseek-flash", p)
+			}
+			return
+		}
+	}
+	t.Fatal("no DeepSeek direct provider")
+}
+
+func TestRequestBodyDisablesDeepSeekThinking(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		body    map[string]any
+		// want is the thinking field the request must carry; nil means the field must be absent.
+		want map[string]any
+	}{
+		{name: "DeepSeek API", baseURL: "https://api.deepseek.com", body: map[string]any{"model": "deepseek-flash"}, want: map[string]any{"type": "disabled"}},
+		{name: "deepseek model through the gateway", baseURL: "https://cloud.example/internal/engine/ai", body: map[string]any{"model": "deepseek-chat"}, want: map[string]any{"type": "disabled"}},
+		{name: "caller already sets thinking", baseURL: "https://api.deepseek.com", body: map[string]any{"model": "deepseek-flash", "thinking": map[string]any{"type": "enabled"}}, want: map[string]any{"type": "enabled"}},
+		{name: "OpenAI gets no thinking field", baseURL: "https://api.openai.com/v1", body: map[string]any{"model": "gpt-4o"}},
+		{name: "non-DeepSeek gateway model gets no thinking field", baseURL: "https://cloud.example/internal/engine/ai", body: map[string]any{"model": "cloud-managed"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := len(tt.body)
+			got := requestBody(tt.body, tt.baseURL)
+			thinking, present := got["thinking"]
+			if tt.want == nil {
+				if present {
+					t.Fatalf("thinking = %v, want absent", thinking)
+				}
+			} else {
+				gotType, _ := thinking.(map[string]any)
+				if !present || gotType["type"] != tt.want["type"] {
+					t.Fatalf("thinking = %v, want %v", thinking, tt.want)
+				}
+			}
+			if len(tt.body) != before {
+				t.Fatal("requestBody changed the caller's map")
+			}
+		})
+	}
+}
