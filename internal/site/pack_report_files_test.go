@@ -35,6 +35,20 @@ func TestPackPartIgnoresRetiredReportFiles(t *testing.T) {
 	}
 }
 
+// The Engine validates a composed release before Cloud accepts it. Report files from a
+// published module must validate with no findings, next to the real POS files.
+func TestValidatePackAcceptsRetiredReportFiles(t *testing.T) {
+	files := readPackFiles(t, filepath.Join("..", "..", "config", "pos"), "")
+	files = append(files, PackFile{Path: "reports/components/633d951f29be55aa/sales_overview.yaml", ContentType: "report", Content: "name: sales_overview\n"})
+	v, err := ValidatePack(PackManifest{SchemaVersion: 1, Name: "pos", Version: "1.0.0"}, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.Valid {
+		t.Fatalf("report files rejected: %+v", v.Findings)
+	}
+}
+
 func TestParseConfigPackStillRejectsUnknownContentType(t *testing.T) {
 	files := []PackFile{{Path: "charts/x.yaml", ContentType: "chart", Content: "name: x\n"}}
 	if _, _, err := parseConfigPack("retail", files); err == nil {

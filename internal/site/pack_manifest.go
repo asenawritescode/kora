@@ -389,6 +389,8 @@ func validatePackFileSyntax(file PackFile) error {
 			return fmt.Errorf("script file is empty")
 		}
 		return nil
+	case "report":
+		return nil // retired: releases published with reports/ still validate; installs skip them (withoutRetiredReports)
 	case "pack":
 		if !isPackManifestPath(file.Path) {
 			return fmt.Errorf("content type pack requires path %s or components/<ns>/%s", packFileName, packFileName)
