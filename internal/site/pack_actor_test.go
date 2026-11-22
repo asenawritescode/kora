@@ -52,6 +52,9 @@ transaction:
 			if !tc.wantCode && len(got) != 0 {
 				t.Fatalf("want no actor finding, got %#v", got)
 			}
+			if tc.wantCode && (got[0].Severity != "warning" || !validation.Valid) {
+				t.Fatalf("an actor finding must warn without invalidating the pack: severity %q, valid %v", got[0].Severity, validation.Valid)
+			}
 			if tc.wantCode && !strings.Contains(got[0].Message, "Till Session.cashier") {
 				t.Fatalf("finding does not name the field: %q", got[0].Message)
 			}
