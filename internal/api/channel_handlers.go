@@ -432,7 +432,7 @@ func (h *Handler) HandleChannelTools(c *gin.Context) {
 		return
 	}
 	channel := strings.TrimSpace(c.DefaultQuery("channel", "web"))
-	catalog := ai.BuildToolCatalog(h.siteRegistry(c))
+	catalog := ai.BuildToolCatalog(h.siteRegistry(c), ai.CatalogOptions{})
 	configRevision := c.GetUint64("site_config_revision")
 	filtered := make([]ai.ToolDescriptor, 0, len(catalog.Tools))
 	for _, tool := range catalog.Tools {
@@ -470,7 +470,7 @@ func (h *Handler) handleChannelTool(c *gin.Context, readOnly bool) {
 		writeError(c, http.StatusBadRequest, "validation.required_field", "tool_name is required", map[string]any{"field": "tool_name"})
 		return
 	}
-	safety := ai.BuildToolCatalog(h.siteRegistry(c))
+	safety := ai.BuildToolCatalog(h.siteRegistry(c), ai.CatalogOptions{})
 	var descriptor *ai.ToolDescriptor
 	for i := range safety.Tools {
 		if safety.Tools[i].Name == req.ToolName {
@@ -482,7 +482,7 @@ func (h *Handler) handleChannelTool(c *gin.Context, readOnly bool) {
 		writeError(c, http.StatusNotFound, "tool.not_found", "tool not found", nil)
 		return
 	}
-	if docType, operation, ok := permissionTargetForTool(h.siteRegistry(c), req.ToolName); ok {
+	if docType, operation, ok := ai.RecordToolTarget(h.siteRegistry(c), req.ToolName, req.Args); ok {
 		if _, forbidden := checkPerm(c, h.siteRegistry(c), docType, operation); forbidden {
 			return
 		}
@@ -512,6 +512,7 @@ func (h *Handler) handleChannelTool(c *gin.Context, readOnly bool) {
 	result := ai.ExecuteTool(h.siteTx(c), h.siteRegistry(c), ai.ToolRequest{
 		Name: req.ToolName, Args: req.Args, Owner: owner, Site: siteNameStr, Confirmed: true,
 		IdempotencyKey: strings.TrimSpace(c.GetHeader("Idempotency-Key")), Execution: execution,
+		Commands: h.kernelCommands(h.runtimeService(c, siteNameStr)),
 	})
 	status := "success"
 	var errorMessage string
@@ -593,38 +594,6 @@ func ternary[T any](condition bool, yes, no T) T {
 		return yes
 	}
 	return no
-}
-
-func permissionTargetForTool(reg *doctype.Registry, name string) (string, string, bool) {
-	for _, item := range []struct {
-		suffix    string
-		operation string
-	}{
-		{suffix: "_find", operation: "read"},
-		{suffix: "_list", operation: "read"},
-		{suffix: "_get", operation: "read"},
-		{suffix: "_create", operation: "create"},
-		{suffix: "_update", operation: "write"},
-		{suffix: "_delete", operation: "delete"},
-	} {
-		if strings.HasSuffix(name, item.suffix) {
-			key := strings.TrimSpace(strings.TrimSuffix(name, item.suffix))
-			for _, dt := range reg.All() {
-				if sanitizeToolDoctypeName(dt.Name) == key {
-					return dt.Name, item.operation, true
-				}
-			}
-			return "", "", false
-		}
-	}
-	return "", "", false
-}
-
-func sanitizeToolDoctypeName(name string) string {
-	value := strings.ToLower(strings.TrimSpace(name))
-	value = strings.ReplaceAll(value, " ", "_")
-	value = strings.ReplaceAll(value, "-", "_")
-	return value
 }
 
 func optionalTime(value sql.NullTime) *time.Time {

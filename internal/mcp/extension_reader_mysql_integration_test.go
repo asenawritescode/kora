@@ -52,8 +52,8 @@ func TestExtensionReadExecutorMySQLOwnerScopedRead(t *testing.T) {
 		t.Fatal("create MCP read reader:", err)
 	}
 	result, err := reader.Execute(context.Background(), ai.ToolDescriptor{
-		ID: "tenant.task_list", Source: "tenant", Name: "task_list", Operation: "list", Doctype: "Task",
-	}, map[string]any{"limit": 10})
+		ID: "tenant.find_records", Source: "tenant", Name: "find_records", Operation: "find",
+	}, map[string]any{"record_type": "Task", "limit": 10})
 	if err != nil {
 		t.Fatal("execute authorized tenant read:", err)
 	}
@@ -62,9 +62,10 @@ func TestExtensionReadExecutorMySQLOwnerScopedRead(t *testing.T) {
 	}
 
 	result, err = reader.Execute(context.Background(), ai.ToolDescriptor{
-		ID: "tenant.task_find", Source: "tenant", Name: "task_find", Operation: "find", Doctype: "Task",
+		ID: "tenant.find_records", Source: "tenant", Name: "find_records", Operation: "find",
 	}, map[string]any{
-		"filters": []any{map[string]any{"field": "title", "op": "=", "value": "mine"}},
+		"record_type": "Task",
+		"filters":     []any{map[string]any{"field": "title", "op": "=", "value": "mine"}},
 		"limit":   10,
 	})
 	if err != nil {

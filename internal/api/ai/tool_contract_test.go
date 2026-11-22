@@ -22,24 +22,24 @@ func TestToolCatalogContractParity(t *testing.T) {
 		},
 	})
 
-	catalog := BuildToolCatalog(reg)
+	catalog := BuildToolCatalog(reg, CatalogOptions{})
 	contractCat := ToContractCatalog(catalog)
 
 	if len(contractCat.Tools) != len(catalog.Tools) {
 		t.Fatalf("contract tool count = %d, want %d", len(contractCat.Tools), len(catalog.Tools))
 	}
 
-	create := findTool(t, catalog.Tools, "customer_create")
-	contractCreate := findContractTool(t, contractCat.Tools, "customer_create")
+	create := findTool(t, catalog.Tools, "create_record")
+	contractCreate := findContractTool(t, contractCat.Tools, "create_record")
 
-	if contractCreate.Operation != "create" || contractCreate.Doctype != "Customer" {
-		t.Errorf("contract create op/doctype = %q/%q, want create/Customer", contractCreate.Operation, contractCreate.Doctype)
+	if contractCreate.Operation != "create" {
+		t.Errorf("contract create op = %q, want create", contractCreate.Operation)
 	}
 	if contractCreate.RequiresConfirmation || contractCreate.RequiresRecentAuth || contractCreate.SafetyLevel != "guarded" {
 		t.Errorf("contract create should use explicit user intent with guarded kernel authorization: %+v", contractCreate)
 	}
-	contractUpdate := findContractTool(t, contractCat.Tools, "customer_update")
-	if contractUpdate.Operation != "update" || contractUpdate.Doctype != "Customer" || contractUpdate.RequiresConfirmation || contractUpdate.RequiresRecentAuth {
+	contractUpdate := findContractTool(t, contractCat.Tools, "update_record")
+	if contractUpdate.Operation != "update" || contractUpdate.RequiresConfirmation || contractUpdate.RequiresRecentAuth {
 		t.Errorf("contract update should use explicit user intent with guarded kernel authorization: %+v", contractUpdate)
 	}
 	contractBundle := findContractTool(t, contractCat.Tools, "mutate_records")
@@ -70,7 +70,7 @@ func TestOpenAIToolsProjectFromCatalog(t *testing.T) {
 		},
 	})
 
-	catalog := BuildToolCatalog(reg)
+	catalog := BuildToolCatalog(reg, CatalogOptions{})
 	openAITools := buildOpenAIToolsFromCatalog(catalog)
 
 	if len(openAITools) != len(catalog.Tools) {
@@ -99,7 +99,7 @@ func TestOpenAIToolsProjectFromCatalog(t *testing.T) {
 }
 
 func TestMetricsToolsAreExposedAndRetiredAnalyticsAreNot(t *testing.T) {
-	catalog := BuildToolCatalog(doctype.NewRegistry())
+	catalog := BuildToolCatalog(doctype.NewRegistry(), CatalogOptions{})
 	for _, name := range []string{toolListMetrics, toolQueryMetrics, toolDrillMetrics, toolAskChoice} {
 		tool := findTool(t, catalog.Tools, name)
 		if tool.SafetyLevel != "safe" {

@@ -103,7 +103,7 @@ func (s *Server) registerTools() {
 		return
 	}
 
-	catalog := ai.BuildToolCatalog(s.registry)
+	catalog := ai.BuildToolCatalog(s.registry, ai.CatalogOptions{})
 	for _, tool := range catalog.Tools {
 		if tool.Source != "tenant" {
 			continue
@@ -117,7 +117,7 @@ func (s *Server) registerTools() {
 
 func isReadOperation(operation string) bool {
 	switch operation {
-	case "find", "list", "get":
+	case "find", "list", "get", "describe":
 		return true
 	default:
 		return false

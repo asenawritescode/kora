@@ -100,8 +100,9 @@ func TestAIRecordMutationUsesKernelReceiptAndAudit(t *testing.T) {
 		return fmt.Sprint(results[0]["content"])
 	}
 	createArgs := map[string]any{"title": "Initial"}
-	created := callTool("call-create-1", "task_create", createArgs, "run-1", "step-1")
-	replayedCreate := callTool("call-create-1", "task_create", createArgs, "run-1", "step-1")
+	createCall := map[string]any{"record_type": "Task", "data": createArgs}
+	created := callTool("call-create-1", "create_record", createCall, "run-1", "step-1")
+	replayedCreate := callTool("call-create-1", "create_record", createCall, "run-1", "step-1")
 	if !strings.HasPrefix(created, "Created Task \"") || replayedCreate != created {
 		t.Fatalf("AI create/replay outputs differ: first=%q replay=%q", created, replayedCreate)
 	}
@@ -112,14 +113,14 @@ func TestAIRecordMutationUsesKernelReceiptAndAudit(t *testing.T) {
 	}
 	name := created[nameStart:nameEnd]
 
-	updateArgs := map[string]any{"name": name, "title": "Updated"}
-	updated := callTool("call-update-1", "task_update", updateArgs, "run-1", "step-2")
-	replayedUpdate := callTool("call-update-1", "task_update", updateArgs, "run-1", "step-2")
+	updateCall := map[string]any{"record_type": "Task", "name": name, "data": map[string]any{"title": "Updated"}}
+	updated := callTool("call-update-1", "update_record", updateCall, "run-1", "step-2")
+	replayedUpdate := callTool("call-update-1", "update_record", updateCall, "run-1", "step-2")
 	if !strings.HasPrefix(updated, "Updated Task \"") || replayedUpdate != updated {
 		t.Fatalf("AI update/replay outputs differ: first=%q replay=%q", updated, replayedUpdate)
 	}
 	var pendingApprovals int
-	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_ai_approval WHERE site = ? AND tool_name = 'task_update'", site).Scan(&pendingApprovals); err != nil {
+	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_ai_approval WHERE site = ? AND tool_name = 'update_record'", site).Scan(&pendingApprovals); err != nil {
 		t.Fatalf("count AI update approvals: %v", err)
 	}
 	if pendingApprovals != 0 {
@@ -128,7 +129,7 @@ func TestAIRecordMutationUsesKernelReceiptAndAudit(t *testing.T) {
 
 	channelArgs := map[string]any{"title": "Channel"}
 	const channelKey = "external-channel-retry-0001"
-	channelRequest := ToolRequest{Name: "task_create", Args: channelArgs, Owner: "alice@example.test", Site: site, Confirmed: true, IdempotencyKey: channelKey, Execution: execution}
+	channelRequest := ToolRequest{Name: "create_record", Args: map[string]any{"record_type": "Task", "data": channelArgs}, Owner: "alice@example.test", Site: site, Confirmed: true, IdempotencyKey: channelKey, Execution: execution}
 	channelCreate := ExecuteTool(tx, registry, channelRequest)
 	channelReplay := ExecuteTool(tx, registry, channelRequest)
 	if !strings.HasPrefix(channelCreate, "Created Task \"") || channelReplay != channelCreate {

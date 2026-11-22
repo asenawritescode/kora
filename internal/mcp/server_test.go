@@ -153,7 +153,7 @@ func TestProjectedMCPToolsMirrorCatalog(t *testing.T) {
 		t.Fatal("expected server to initialize")
 	}
 
-	catalog := ai.BuildToolCatalog(reg)
+	catalog := ai.BuildToolCatalog(reg, ai.CatalogOptions{})
 	if len(catalog.Tools) == 0 {
 		t.Fatal("expected tool catalog entries")
 	}
@@ -200,12 +200,12 @@ func TestReadOnlyModePublishesOnlyFindListGetTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		got[tool.Name] = true
 	}
-	for _, name := range []string{"validate_yaml", "task_find", "task_list", "task_get"} {
+	for _, name := range []string{"validate_yaml", "find_records", "get_record", "describe_record_type"} {
 		if !got[name] {
 			t.Errorf("read-only MCP tools omit %q: %#v", name, got)
 		}
 	}
-	for _, name := range []string{"task_create", "task_update"} {
+	for _, name := range []string{"create_record", "update_record"} {
 		if got[name] {
 			t.Errorf("read-only MCP tools expose mutation %q", name)
 		}
@@ -223,8 +223,8 @@ func TestExtensionReadExecutorRejectsMutationBeforeAuthentication(t *testing.T) 
 		t.Fatal("NewExtensionReader:", err)
 	}
 	_, err = reader.Execute(context.Background(), ai.ToolDescriptor{
-		ID: "tenant.task_create", Source: "tenant", Name: "task_create", Operation: "create", Doctype: "Task",
-	}, map[string]any{"title": "untrusted"})
+		ID: "tenant.create_record", Source: "tenant", Name: "create_record", Operation: "create",
+	}, map[string]any{"record_type": "Task", "data": map[string]any{"title": "untrusted"}})
 	if err == nil || !strings.Contains(err.Error(), "not an authorized DocType read") {
 		t.Fatalf("mutation tool error = %v, want read-only rejection", err)
 	}
@@ -287,8 +287,8 @@ func TestExtensionReadExecutorRejectsRevokedCredential(t *testing.T) {
 		t.Fatal("NewExtensionReader:", err)
 	}
 	_, err = reader.Execute(context.Background(), ai.ToolDescriptor{
-		ID: "tenant.task_list", Source: "tenant", Name: "task_list", Operation: "list", Doctype: "Task",
-	}, map[string]any{})
+		ID: "tenant.find_records", Source: "tenant", Name: "find_records", Operation: "find",
+	}, map[string]any{"record_type": "Task"})
 	if err == nil || !strings.Contains(err.Error(), "authentication failed") {
 		t.Fatalf("revoked extension credential error = %v", err)
 	}
@@ -310,8 +310,8 @@ func TestExtensionReadExecutorWaitHonorsCallerCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err = reader.Execute(ctx, ai.ToolDescriptor{
-		ID: "tenant.task_list", Source: "tenant", Name: "task_list", Operation: "list", Doctype: "Task",
-	}, map[string]any{})
+		ID: "tenant.find_records", Source: "tenant", Name: "find_records", Operation: "find",
+	}, map[string]any{"record_type": "Task"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled MCP read error = %v", err)
 	}

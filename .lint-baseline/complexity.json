@@ -183,9 +183,9 @@
    "statements": 41
   },
   "internal/api/ai::executeSingleTool": {
-   "cognitive": 65,
-   "cyclomatic": 60,
-   "statements": 153
+   "cognitive": 17,
+   "cyclomatic": 28,
+   "statements": 73
   },
   "internal/api/ai::executeToolCallsForAI": {
    "lines": 113

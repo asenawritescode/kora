@@ -19,7 +19,7 @@ func TestToolProjectionParityAcrossAdapters(t *testing.T) {
 		},
 	})
 
-	catalog := BuildToolCatalog(reg)
+	catalog := BuildToolCatalog(reg, CatalogOptions{})
 	contractCatalog := ToContractCatalog(catalog)
 	openAITools := buildOpenAIToolsFromCatalog(catalog)
 	channelVersion := contract.ToolCatalog{Version: contractCatalog.Version, Tools: contractCatalog.Tools}
@@ -31,14 +31,14 @@ func TestToolProjectionParityAcrossAdapters(t *testing.T) {
 		t.Fatalf("openai tool count = %d, want %d", len(openAITools), len(catalog.Tools))
 	}
 
-	create := findTool(t, catalog.Tools, "customer_create")
-	contractCreate := findContractTool(t, contractCatalog.Tools, "customer_create")
+	create := findTool(t, catalog.Tools, "create_record")
+	contractCreate := findContractTool(t, contractCatalog.Tools, "create_record")
 	if contractCreate.Name != create.Name || contractCreate.Operation != create.Operation || contractCreate.Doctype != create.Doctype {
 		t.Fatalf("contract projection lost identity: got %+v, want %+v", contractCreate, create)
 	}
 
-	if !containsOpenAITool(openAITools, "customer_create") {
-		t.Fatal("openai projection missing customer_create")
+	if !containsOpenAITool(openAITools, "create_record") {
+		t.Fatal("openai projection missing create_record")
 	}
 
 	if _, err := json.Marshal(contractCatalog); err != nil {
@@ -53,7 +53,7 @@ func TestToolProjectionParityAcrossAdapters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal contract catalog: %v", err)
 	}
-	if !strings.Contains(string(wire), `"customer_create"`) {
+	if !strings.Contains(string(wire), `"create_record"`) {
 		t.Fatalf("contract catalog missing tool name in JSON: %s", wire)
 	}
 }

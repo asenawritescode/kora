@@ -79,8 +79,10 @@ func (r *ExtensionReader) Execute(ctx context.Context, tool ai.ToolDescriptor, a
 	if ctx == nil {
 		return "", errors.New("MCP request context is required")
 	}
-	dt := r.registry.Get(tool.Doctype)
-	if tool.Source != "tenant" || tool.ID != "tenant."+tool.Name || !isReadOperation(tool.Operation) || dt == nil || tool.Name != sanitizeName(dt.Name)+"_"+tool.Operation {
+	// The fixed record tools name their record type in the arguments, so the read is authorized
+	// against the type the call actually names.
+	_, permission, ok := ai.RecordToolTarget(r.registry, tool.Name, args)
+	if tool.Source != "tenant" || tool.ID != "tenant."+tool.Name || !isReadOperation(tool.Operation) || !ok || permission != "read" {
 		return "", errors.New("MCP tool is not an authorized DocType read operation")
 	}
 

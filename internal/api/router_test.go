@@ -851,34 +851,6 @@ func TestHandleCreate_DoctypeNotFound(t *testing.T) {
 	}
 }
 
-func TestPermissionTargetForTool_UsesExactRegisteredDoctypeName(t *testing.T) {
-	reg := doctype.NewRegistry()
-	reg.Register(&doctype.DocType{Name: "API Key"})
-	reg.Register(&doctype.DocType{Name: "E-mail Template"})
-
-	docType, operation, ok := permissionTargetForTool(reg, "api_key_create")
-	if !ok {
-		t.Fatal("expected API Key tool name to resolve")
-	}
-	if docType != "API Key" {
-		t.Fatalf("doctype = %q, want %q", docType, "API Key")
-	}
-	if operation != "create" {
-		t.Fatalf("operation = %q, want %q", operation, "create")
-	}
-
-	docType, operation, ok = permissionTargetForTool(reg, "e_mail_template_list")
-	if !ok {
-		t.Fatal("expected E-mail Template tool name to resolve")
-	}
-	if docType != "E-mail Template" {
-		t.Fatalf("doctype = %q, want %q", docType, "E-mail Template")
-	}
-	if operation != "read" {
-		t.Fatalf("operation = %q, want %q", operation, "read")
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Permission Denied
 // ---------------------------------------------------------------------------

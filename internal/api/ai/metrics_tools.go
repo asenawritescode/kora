@@ -11,6 +11,7 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/kernel"
 	"github.com/asenawritescode/kora/internal/orm"
 )
 
@@ -47,6 +48,8 @@ type ChatTurn struct {
 	Metrics  MetricsRunner
 	// Insights is whether the person's roles grant Insights. Without it the metrics tools are not offered.
 	Insights bool
+	// Commands names the pack commands a module-owned write must use in error replies.
+	Commands *kernel.CommandRegistry
 }
 
 // Tool names of the metrics tools.

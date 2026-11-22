@@ -125,7 +125,7 @@ const chatSystemPrompt = `You are a helpful AI assistant for a business applicat
 
 RULES (follow strictly):
 - Be CONCISE. One sentence when possible. No markdown tables unless showing actual data results.
-- Before creating a record, ALWAYS call _find first to check duplicates. If none found, call _create immediately.
+- Before creating a record, ALWAYS call find_records first to check duplicates. If none found, call create_record immediately.
 - ALL fields in function parameters ARE available. Never claim a field is "not exposed."
 - If create fails due to missing required fields, ask for ALL missing fields at ONCE in ONE sentence.
 - When user gives comma-separated data, map it to fields in order. The first value goes to the first required field. Just try it — don't ask permission.
@@ -134,7 +134,7 @@ RULES (follow strictly):
 
 DESTRUCTIVE ACTIONS (safety gate):
 - NEVER call _delete on multiple records without asking "Delete N [records]?" first. For single deletes, confirm: "Delete [name]?"
-- NEVER call _update to change workflow states, amounts, or linked documents without summarizing what will change and asking.
+- NEVER call update_record to change workflow states, amounts, or linked documents without summarizing what will change and asking.
 - If the user says "delete all" or "clean up" or "remove old" — STOP. Ask: "How many records should I delete? Which ones specifically?"
 - These rules prevent accidental data loss. The user should always confirm destructive actions.
 
@@ -186,11 +186,11 @@ REPORTING AND ANALYTICS (accuracy rules, never break them):
 AI CHAT: You have tools to list, find, get, create, update documents. You can create doctypes as Draft, validate YAML, and answer business numbers with the metrics tools. Everything scoped to the current site.`
 
 // chatFunctions is the tool list of one chat turn: the catalog, without the metrics reads when the person has no Insights.
-func chatFunctions(reg *doctype.Registry, insights, disabled bool) []map[string]any {
+func chatFunctions(tx *orm.TxManager, reg *doctype.Registry, insights, disabled bool) []map[string]any {
 	if disabled {
 		return nil
 	}
-	functions := buildOpenAIToolsFromCatalog(BuildToolCatalog(reg))
+	functions := buildOpenAIToolsFromCatalog(BuildToolCatalog(reg, CatalogOptions{Execution: tx.Execution, BusinessScope: tx.BusinessScope}))
 	if !insights {
 		functions = withoutMetricsTools(functions)
 	}
@@ -352,7 +352,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 	}
 
 	// Build function definitions from the canonical tool catalog projection.
-	functions := chatFunctions(reg, turn.Insights, req.DisableTools)
+	functions := chatFunctions(tx, reg, turn.Insights, req.DisableTools)
 
 	// Durable server history is the source of truth for the conversation.
 	sanitizedHistory := sanitizeHistory(transcript, cfg.HistoryLimit)
@@ -638,7 +638,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 						lastToolName = safeGetToolName(toolCalls[0])
 					}
 					nudge := fmt.Sprintf(
-						"You've called %s with the same arguments %d times without making progress. If the record doesn't exist, use the _create operation. If you have enough information to answer the user, please do so now without calling more tools.",
+						"You've called %s with the same arguments %d times without making progress. If the record doesn't exist, use the create_record tool. If you have enough information to answer the user, please do so now without calling more tools.",
 						lastToolName, stallCount,
 					)
 					messages = append(messages, map[string]any{
@@ -665,7 +665,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			if verified, ok := c.Get("policy_execution"); ok {
 				execution, _ = verified.(policy.Execution)
 			}
-			toolResults := executeToolCallsForAI(auditCtx, tx, reg, toolCallBatch{Calls: toolCalls, Owner: currentUser, Site: siteName, RunID: runID, StepID: stepID, ConversationID: conversationID, Execution: execution, Turn: answers})
+			toolResults := executeToolCallsForAI(auditCtx, tx, reg, toolCallBatch{Calls: toolCalls, Owner: currentUser, Site: siteName, RunID: runID, StepID: stepID, ConversationID: conversationID, Execution: execution, Turn: answers, Commands: turn.Commands})
 			for i, tr := range toolResults {
 				raw := tr["content"].(string)
 				slog.Info("Tool result", "content", raw[:min(len(raw), 200)])
