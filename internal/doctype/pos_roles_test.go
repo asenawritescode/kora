@@ -50,7 +50,10 @@ func TestPOSRolePermissions(t *testing.T) {
 		{"Cashier", "Register", "write", false},
 		{"Cashier", "Stock Entry", "create", false},
 		{"Cashier", "Stock Balance", "write", false},
-		{"Cashier", "Item", "read", false}, // Item carries cost
+		{"Cashier", "Item", "read", true}, // owner 2026-11-22: cashiers read items so analytics shows names (cost visible)
+		{"Cashier", "Item", "write", false},
+		{"Cashier", "Item", "create", false},
+		{"Cashier", "Item", "delete", false},
 		{"Manager", "Sale", "read", true},
 		{"Manager", "Sale", "write", false},
 		{"Manager", "Till Session", "write", false},
