@@ -132,6 +132,12 @@ func seedGoldenSales(ctx context.Context, t *testing.T, database *sql.DB, dialec
 			t.Fatalf("site setting %s: %v", kv[0], err)
 		}
 	}
+	// The two cashiers of the sales: alice has a full name, bob only an email, so his row is labelled by it.
+	for _, u := range [][3]string{{"alice", "alice@shop.test", "Alice Wanjiru"}, {"bob", "bob@shop.test", ""}} {
+		if _, err := database.ExecContext(ctx, kdb.Rebind(d, "INSERT INTO _kora_user (name, site, email, password_hash, full_name) VALUES (?, ?, ?, 'x', ?)"), u[0], goldenSite, u[1], u[2]); err != nil {
+			t.Fatalf("seed user %s: %v", u[0], err)
+		}
+	}
 	for _, row := range [][2]string{{"CUST-1", "Active"}, {"CUST-2", "Inactive"}} {
 		if _, err := database.ExecContext(ctx, kdb.Rebind(d, fmt.Sprintf("INSERT INTO %s (name, status) VALUES (?, ?)", d.QuoteIdent("tabCustomer"))), row[0], row[1]); err != nil {
 			t.Fatalf("customer %s: %v", row[0], err)
@@ -505,6 +511,20 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 				want := []string{"Soda 3", "Juice 3", "Bread 3"}
 				if card.Kind != "table" || !card.Verified || !sameSet(rowValues(card), want) {
 					t.Fatalf("rows = %v (kind %s verified %v), want %v verified", rowValues(card), card.Kind, card.Verified, want)
+				}
+			},
+		}}},
+		{name: "sales by cashier are labelled with the cashiers' names", user: goldenAdminUser, roles: doctype.AdminRole, turns: []goldenTurn{{
+			message: "What were my sales by cashier last week?",
+			steps: []modelStep{
+				{tool: "query_metrics", args: `{"metrics":["sales"],"dimensions":["owner"],"period":{"preset":"last_week"},"grain":"range"}`},
+				{content: "Alice Wanjiru sold KES 1,350 and bob@shop.test sold KES 470 last week."},
+			},
+			check: func(t *testing.T, got ai.ChatResponse, _ []string) {
+				card := requireCards(t, got, 1)[0]
+				want := []string{"Alice Wanjiru KES 1,350", "bob@shop.test KES 470"}
+				if card.Kind != "table" || !card.Verified || !sameSet(rowValues(card), want) {
+					t.Fatalf("rows = %v (kind %s), want %v", rowValues(card), card.Kind, want)
 				}
 			},
 		}}},

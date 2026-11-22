@@ -22,10 +22,18 @@ func (e Engine) labelsOf(ctx context.Context, p plan, agg aggregate, keys []stri
 	}
 	out := make([]map[string]string, len(p.dims))
 	for i, dim := range p.dims {
-		if dim.label == nil {
+		var (
+			titles map[string]string
+			err    error
+		)
+		switch {
+		case dim.user:
+			titles, err = e.userNames(ctx, codesOf(agg, keys, i))
+		case dim.label != nil:
+			titles, err = e.titles(ctx, dim.label, codesOf(agg, keys, i))
+		default:
 			continue
 		}
-		titles, err := e.titles(ctx, dim.label, codesOf(agg, keys, i))
 		if err != nil {
 			return nil, err
 		}
@@ -34,14 +42,64 @@ func (e Engine) labelsOf(ctx context.Context, p plan, agg aggregate, keys []stri
 	return out, nil
 }
 
-// labelled reports whether any dimension names a record type whose titles label it.
+// labelled reports whether any dimension is labelled: it names a record type whose titles label it, or it groups
+// by user logins.
 func (p plan) labelled() bool {
 	for _, dim := range p.dims {
-		if dim.label != nil {
+		if dim.label != nil || dim.user {
 			return true
 		}
 	}
 	return false
+}
+
+// userNames reads the name of each user login of the site: the full name, else the email, else the login. A login
+// with no user has no name.
+func (e Engine) userNames(ctx context.Context, logins []string) (map[string]string, error) {
+	out := make(map[string]string, len(logins))
+	for start := 0; start < len(logins); start += labelChunk {
+		end := min(start+labelChunk, len(logins))
+		chunk := logins[start:end]
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, e.Site)
+		for _, login := range chunk {
+			args = append(args, login)
+		}
+		stmt := fmt.Sprintf("SELECT name, full_name, email FROM _kora_user WHERE site = ? AND name IN (%s)",
+			strings.TrimSuffix(strings.Repeat("?, ", len(chunk)), ", "))
+		rows, err := e.DB.QueryContext(ctx, db.Rebind(e.Dialect, stmt), args...)
+		if err != nil {
+			return nil, fmt.Errorf("metrics: read user names: %w", err)
+		}
+		if err := scanUserNames(rows, out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// scanUserNames reads the rows of a user-name lookup into out and closes them.
+func scanUserNames(rows *sql.Rows, out map[string]string) error {
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var login string
+		var fullName, email sql.NullString
+		if err := rows.Scan(&login, &fullName, &email); err != nil {
+			return fmt.Errorf("metrics: scan user names: %w", err)
+		}
+		switch {
+		case fullName.String != "":
+			out[login] = fullName.String
+		case email.String != "":
+			out[login] = email.String
+		default:
+			out[login] = login
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("metrics: read user names: %w", err)
+	}
+	return nil
 }
 
 // codesOf lists the distinct non-empty values dimension i takes across keys, in key order. The Other

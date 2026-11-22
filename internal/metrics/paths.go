@@ -26,7 +26,12 @@ type dimension struct {
 	joins []join           // one per Link field followed; empty for a plain fact dimension
 	leaf  string           // field read from the last joined record type; empty for a plain fact dimension
 	label *doctype.DocType // record type whose titles label the group values; nil for none
+	user  bool             // the group values are user logins, labelled with the users' names
 }
+
+// ownerColumn is the fact column that holds the record owner: the login of the user who made the record. Every
+// fact table has it, so a query can group by it without a declared dimension, as it groups by status.
+const ownerColumn = "owner"
 
 // join is a LEFT JOIN from prev, through its Link column field, to the linked record type. It matches
 // on the record name, which is unique, so it never repeats a fact row.
@@ -63,6 +68,9 @@ func factDimOf(f *doctype.FactModel, name string) (doctype.FactDimension, int, b
 	if f.GroupsByStatus(parts[0]) {
 		return doctype.FactDimension{Field: doctype.StatusColumn}, 1, true
 	}
+	if parts[0] == ownerColumn {
+		return doctype.FactDimension{Field: ownerColumn}, 1, true
+	}
 	return doctype.FactDimension{}, 0, false
 }
 
@@ -76,9 +84,13 @@ func (p *plan) dimensionOf(cat Catalog, name string, index int) (dimension, erro
 	dim := dimension{name: name, alias: fd.ColumnName(), line: fieldPath(fd.Field).isLine()}
 	rest := strings.Split(name, ".")[segments:]
 	if len(rest) == 0 {
+		if fd.Field == ownerColumn {
+			dim.user = true
+			return dim, nil
+		}
 		if holder := p.holderOf(cat, fd); holder != nil {
-			if fld := holder.GetField(fd.ColumnName()); fld != nil && fld.Fieldtype == "Link" {
-				dim.label = p.labelTarget(cat, fld)
+			if fld := holder.GetField(fd.ColumnName()); fld != nil {
+				p.labelField(cat, &dim, fld)
 			}
 		}
 		return dim, nil
@@ -150,10 +162,19 @@ func (p *plan) leafOf(cat Catalog, dim dimension, last *doctype.DocType, leafNam
 		return dimension{}, fmt.Errorf("dimension %q: %q is not a dimension field of %s", dim.name, leafName, last.Name)
 	}
 	dim.leaf = leafName
-	if fld.Fieldtype == "Link" {
-		dim.label = p.labelTarget(cat, fld)
-	}
+	p.labelField(cat, &dim, fld)
 	return dim, nil
+}
+
+// labelField sets how a group value of field fld is labelled: a Link names the record whose titles label it, and a
+// User field names the logins whose users' names label it.
+func (p *plan) labelField(cat Catalog, dim *dimension, fld *doctype.Field) {
+	switch fld.Fieldtype {
+	case "Link":
+		dim.label = p.labelTarget(cat, fld)
+	case "User":
+		dim.user = true
+	}
 }
 
 // labelTarget is the record type a Link field names when the caller may read it, otherwise nil. A
@@ -172,7 +193,7 @@ type fieldKind string
 // groupable reports whether a field of this kind can group a query: the kinds a facts dimension takes.
 func (k fieldKind) groupable() bool {
 	switch k {
-	case "Link", "Select", "Data", "Check":
+	case "Link", "User", "Select", "Data", "Check":
 		return true
 	}
 	return false

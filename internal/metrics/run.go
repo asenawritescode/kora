@@ -33,6 +33,8 @@ type Engine struct {
 	Dialect db.Dialect
 	Catalog Catalog
 	Timeout time.Duration // zero means defaultTimeout
+	// Site is the tenant the query runs for; a dimension of user logins is labelled with that site's users.
+	Site string
 }
 
 // bucketKey identifies one bucket of one group.

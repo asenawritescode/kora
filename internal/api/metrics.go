@@ -357,7 +357,7 @@ func (m metricsAPI) readyEngine(c *gin.Context, database *sql.DB, cat metrics.Ca
 		writeError(c, http.StatusServiceUnavailable, "server.store_unavailable", "Metrics not available for this site", nil)
 		return metrics.Engine{}, false
 	}
-	engine := metrics.Engine{DB: database, Dialect: siteDialectFromContext(c, m.dialect), Catalog: cat}
+	engine := metrics.Engine{DB: database, Dialect: siteDialectFromContext(c, m.dialect), Catalog: cat, Site: c.GetString("site_name")}
 	empty := resultOf(metrics.Result{})
 	empty.Rows = []contract.MetricRow{}
 	return engine, !answerBuilding(c, engine, models, period, empty)
@@ -636,7 +636,7 @@ func (m metricsAPI) resolveDrill(c *gin.Context, req contract.MetricDrillRequest
 		internalError(c, "loading tenant business clock", err)
 		return drillRun{}, false
 	}
-	engine := metrics.Engine{DB: database, Dialect: dialect, Catalog: cat}
+	engine := metrics.Engine{DB: database, Dialect: dialect, Catalog: cat, Site: c.GetString("site_name")}
 	return drillRun{engine: engine, name: name, scope: scope, clock: clock, registry: registry, models: metrics.Models(ms)}, true
 }
 
