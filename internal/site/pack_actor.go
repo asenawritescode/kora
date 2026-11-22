@@ -27,7 +27,8 @@ type actorWrite struct {
 // of a DocType declared in this pack when that field is not a User field. A
 // User field is the only place an internal user is referenced; a Data field
 // would hold the login as free text. Targets outside the pack are skipped,
-// because the composition may supply them.
+// because the composition may supply them. The findings are warnings: releases published before this rule
+// store the cashier as Data and must still apply; the repository's own packs are held to it by tests.
 func checkActorWrites(commands []packCommand, docTypes map[string]*doctype.DocType, add func(code, file, message string)) {
 	for _, cmd := range commands {
 		for _, w := range actorWrites(cmd.def) {

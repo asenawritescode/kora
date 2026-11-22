@@ -45,6 +45,11 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 		result.Valid = false
 		result.Findings = append(result.Findings, PackFinding{Code: code, Severity: "error", Path: file, Message: message})
 	}
+	// warn records a finding that does not make the pack invalid: an authoring rule that already-published
+	// releases may break, so applying them keeps working while new packs are told what to change.
+	warn := func(code, file, message string) {
+		result.Findings = append(result.Findings, PackFinding{Code: code, Severity: "warning", Path: file, Message: message})
+	}
 	if manifest.SchemaVersion != 1 {
 		add("schema_version", "", "unsupported pack manifest schema version")
 	}
@@ -153,7 +158,7 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 			}
 		}
 	}
-	checkActorWrites(commands, docTypes, add)
+	checkActorWrites(commands, docTypes, warn)
 	for _, rule := range assignmentRules {
 		if !userFields[rule.doctype][rule.field] {
 			add("assignment_scope_field", rule.path, fmt.Sprintf("if_assigned field %q for %s/%s must name a User field declared in the package", rule.field, rule.role, rule.doctype))
