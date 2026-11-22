@@ -390,10 +390,10 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 
 	// --- Multi-Round Tool Execution Loop ---
 	var (
-		totalTokens int      // approximate running token count
-		stallCount  int      // consecutive identical tool calls
-		toolErrors  int      // cumulative tool errors for circuit breaker
-		lastSigs    []string // tool call signatures from previous round
+		runUsage   Usage    // the provider usage of this run so far, summed over its rounds
+		stallCount int      // consecutive identical tool calls
+		toolErrors int      // cumulative tool errors for circuit breaker
+		lastSigs   []string // tool call signatures from previous round
 	)
 
 	for round := 0; round < cfg.MaxRounds; round++ {
@@ -421,8 +421,8 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			CurrentStepID:  stepID,
 			InputMessage:   req.Message,
 		})
-		aiResp, err := callAIWithRetry(baseURL, apiKey, aiBody, cfg, func(attempt int, status string, latency time.Duration, attemptErr error) {
-			tokens := map[contract.UsageClass]int64{}
+		aiResp, err := callAIWithRetry(baseURL, apiKey, aiBody, cfg, func(attempt int, status string, latency time.Duration, usage Usage, attemptErr error) {
+			tokens := usage.tokenClasses()
 			if status == "failed" {
 				tokens[contract.UsageClassPartial] = 0
 			}
@@ -529,25 +529,13 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		finishReason := safeGetString(choice, "finish_reason")
 		content := safeGetString(msg, "content")
 
-		// Track token usage if available.
-		tokens := map[contract.UsageClass]int64{}
-		if usage := safeGetMap(aiResp, "usage"); usage != nil {
-			if tt, ok := usage["total_tokens"].(float64); ok {
-				totalTokens += int(tt)
-				tokens[contract.UsageClassTotal] = int64(tt)
-			}
-			if tt, ok := usage["prompt_tokens"].(float64); ok {
-				tokens[contract.UsageClassInput] = int64(tt)
-			}
-			if tt, ok := usage["completion_tokens"].(float64); ok {
-				tokens[contract.UsageClassOutput] = int64(tt)
-			}
+		// Sum the round's usage into the run. Without provider usage, estimate from the content: 4 chars ≈ 1 token.
+		if usage := parseUsage(aiResp); usage.reported() {
+			runUsage = runUsage.add(usage)
 		} else {
-			// Rough estimate: 4 chars ≈ 1 token.
-			estimated := len(content) / 4
-			totalTokens += estimated
-			tokens[contract.UsageClassPartial] = int64(estimated)
+			runUsage.Total += int64(len(content) / 4)
 		}
+		totalTokens := int(runUsage.Total)
 		_ = RecordAudit(auditCtx, tx.DB, AuditEvent{
 			Site:           siteName,
 			RunID:          runID,

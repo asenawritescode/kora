@@ -276,7 +276,8 @@ func newAIHTTPClient(timeoutSec int) *http.Client {
 	}
 }
 
-type providerAttemptRecorder func(attempt int, status string, latency time.Duration, err error)
+// providerAttemptRecorder hears each provider attempt. Usage is the call's usage on a completed attempt and zero otherwise.
+type providerAttemptRecorder func(attempt int, status string, latency time.Duration, usage Usage, err error)
 
 // callAIWithRetry calls the AI provider with exponential backoff on transient errors.
 func callAIWithRetry(baseURL, apiKey string, body map[string]any, cfg AIConfig, record providerAttemptRecorder) (map[string]any, error) {
@@ -293,13 +294,13 @@ func callAIWithRetry(baseURL, apiKey string, body map[string]any, cfg AIConfig, 
 		result, err := callAI(client, baseURL, apiKey, body)
 		if err == nil {
 			if record != nil {
-				record(attempt+1, "completed", time.Since(start), nil)
+				record(attempt+1, "completed", time.Since(start), parseUsage(result), nil)
 			}
 			return result, nil
 		}
 
 		if record != nil {
-			record(attempt+1, "failed", time.Since(start), err)
+			record(attempt+1, "failed", time.Since(start), Usage{}, err)
 		}
 		lastErr = err
 
