@@ -257,8 +257,8 @@ func TestExtensionReadExecutorRejectsRevokedCredential(t *testing.T) {
 		t.Fatal("sqlmock.New:", err)
 	}
 	defer database.Close()
-	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token_hash = \\? AND is_active = 1").
-		WithArgs("tenant.example", auth.HashExtensionAccessToken("revoked-token")).
+	mock.ExpectQuery("SELECT name, api_permissions FROM _kora_extension WHERE site = \\? AND access_token_hash = \\? AND is_active = \\?").
+		WithArgs("tenant.example", auth.HashExtensionAccessToken("revoked-token"), true).
 		WillReturnRows(sqlmock.NewRows([]string{"name", "api_permissions"}))
 	reader, err := NewExtensionReader(ExtensionReaderOptions{Database: database, Dialect: kdb.Resolve("mysql"), Registry: registryWithTask(), TenantID: contract.TenantID("stable-tenant"), Site: "tenant.example", Token: "revoked-token"})
 	if err != nil {

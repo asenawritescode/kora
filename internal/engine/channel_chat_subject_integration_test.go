@@ -114,9 +114,9 @@ func TestChannelChatSubjectUserAcrossDialects(t *testing.T) {
 				c.Set("site_registry", loaded.Registry)
 				c.Set("site_runtime_services", services)
 			}
-			// Issuing is Cloud's extension call. Its bearer check is stubbed here: on Postgres the extension token lookup
-			// compares a boolean column with 1 and never authenticates, so the channel route, which runs through the
-			// real SiteGuard, is the part under test.
+			// Issuing is Cloud's extension call; its bearer is stubbed so the test needs no managed-token
+			// provisioning. The extension token lookup has its own dialect test in internal/extension/sqlstore.
+			// The channel chat route runs through the real SiteGuard.
 			asCloudExtension := func(c *gin.Context) {
 				c.Set("auth_type", "extension")
 				c.Set("extension_name", channelChatClient)

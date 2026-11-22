@@ -28,7 +28,7 @@ func (s *Store) query(q string) string { return db.Rebind(s.dialect, q) }
 func (s *Store) VerifyAccessToken(ctx context.Context, site, tokenHash string) (extension.Credential, error) {
 	var name string
 	var permissions sql.NullString
-	err := s.database.QueryRowContext(ctx, s.query(`SELECT name, api_permissions FROM _kora_extension WHERE site = ? AND access_token_hash = ? AND is_active = 1`), site, tokenHash).Scan(&name, &permissions)
+	err := s.database.QueryRowContext(ctx, s.query(`SELECT name, api_permissions FROM _kora_extension WHERE site = ? AND access_token_hash = ? AND is_active = ?`), site, tokenHash, true).Scan(&name, &permissions)
 	if errors.Is(err, sql.ErrNoRows) {
 		return extension.Credential{}, extension.ErrNotFound
 	}
