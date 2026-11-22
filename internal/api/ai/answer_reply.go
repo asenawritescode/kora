@@ -6,24 +6,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
-
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/orm"
-	"github.com/asenawritescode/kora/internal/policy"
 )
 
 // newAnswerTurn starts the answer state of one chat turn: what the person may see on a card, and the metrics
 // runner. Only the administrator may pin a question or share it with the shop.
-func newAnswerTurn(c *gin.Context, turn ChatTurn, currency string) *answerTurn {
-	var execution policy.Execution
-	if verified, ok := c.Get("policy_execution"); ok {
-		execution, _ = verified.(policy.Execution)
-	}
+func newAnswerTurn(turn ChatTurn, currency string) *answerTurn {
 	return &answerTurn{
 		run:  turn.Metrics,
-		page: cardPage{Currency: currency, CanShare: executionHasRole(execution, doctype.AdminRole)},
+		page: cardPage{Currency: currency, CanShare: executionHasRole(turn.Execution, doctype.AdminRole)},
 	}
 }
 

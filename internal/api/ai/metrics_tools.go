@@ -13,6 +13,7 @@ import (
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/kernel"
 	"github.com/asenawritescode/kora/internal/orm"
+	"github.com/asenawritescode/kora/internal/policy"
 )
 
 // MetricsRoute names one metrics read the chat may run. Each route is served by the API handler of the same
@@ -52,6 +53,13 @@ type ChatTurn struct {
 	Commands *kernel.CommandRegistry
 	// Operations offers and runs the pack-action tools. Nil leaves them out.
 	Operations ModuleOperations
+	// Execution is the verified identity of the turn: its roles decide the record and action tools.
+	Execution policy.Execution
+	// Channel is the channel the turn answers on, "" for the workspace. A channel offers only the tools it allows
+	// and adds its reply style to the turn context.
+	Channel string
+	// SessionID, CorrelationID and IdempotencyKey are the request's audit fields.
+	SessionID, CorrelationID, IdempotencyKey string
 }
 
 // Tool names of the metrics tools.

@@ -11,28 +11,40 @@ import (
 
 // HandleChat processes one turn through the durable AI chat workflow.
 func (h *Handler) HandleChat(c *gin.Context) {
+	turn, ok := h.chatTurn(c)
+	if !ok {
+		return
+	}
+	ai.ServeChat(c, turn)
+}
+
+// chatTurn is the request's input to a chat turn, shared by the workspace chat and the channel chat: the tenant
+// transaction scoped to the request, the verified identity and the handler's services. It writes the refusal and
+// returns false when the request has no tenant database or no verified identity.
+func (h *Handler) chatTurn(c *gin.Context) (ai.ChatTurn, bool) {
 	reg := h.siteRegistry(c)
 	siteNameRaw, _ := c.Get("site_name")
 	siteName, _ := siteNameRaw.(string)
 	baseTx := h.siteTx(c)
 	if baseTx == nil {
 		writeError(c, http.StatusServiceUnavailable, "database.unavailable", "Tenant database is unavailable.", nil)
-		return
+		return ai.ChatTurn{}, false
 	}
 	txCopy := *baseTx
 	tx := &txCopy
-	if execution, ok := requestExecution(c); ok {
+	execution, hasExecution := requestExecution(c)
+	if hasExecution {
 		tx.BusinessScope = businessScopeFromRequest(c, execution)
 	}
 
 	currentUser, verified := requestUserID(c)
 	if !verified {
 		writeError(c, http.StatusUnauthorized, "auth.execution_required", "Verified execution identity is required.", nil)
-		return
+		return ai.ChatTurn{}, false
 	}
-
-	ai.HandleChat(c, ai.ChatTurn{Tx: tx, Registry: reg, Site: siteName, User: currentUser, Metrics: h.metricsRunner(c),
-		Insights: insightsAllowed(c, reg), Commands: h.kernelCommands(h.runtimeService(c, siteName)), Operations: NewAIModuleOperations(h, c)})
+	return ai.ChatTurn{Tx: tx, Registry: reg, Site: siteName, User: currentUser, Metrics: h.metricsRunner(c),
+		Insights: insightsAllowed(c, reg), Commands: h.kernelCommands(h.runtimeService(c, siteName)), Operations: NewAIModuleOperations(h, c),
+		Execution: execution, SessionID: c.GetString("session_sid"), CorrelationID: c.GetString("correlation_id"), IdempotencyKey: c.GetString("idempotency_key")}, true
 }
 
 type aiChatConversationResponse struct {

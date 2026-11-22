@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/oklog/ulid/v2"
 
 	"github.com/asenawritescode/kora/internal/orm"
@@ -242,8 +241,8 @@ func executionOwner(exec policy.Execution) string {
 
 // turnPreviewsContext is the open-previews block of a chat turn. A read failure is logged and
 // leaves the turn without the block; the person can still ask again.
-func turnPreviewsContext(ctx context.Context, turn ChatTurn, c *gin.Context, conversationID string) string {
-	caller := pendingCaller{Site: turn.Site, ConversationID: conversationID, ActorID: previewOwner(c, turn.Tx, turn.User)}
+func turnPreviewsContext(ctx context.Context, turn ChatTurn, conversationID string) string {
+	caller := pendingCaller{Site: turn.Site, ConversationID: conversationID, ActorID: previewOwner(turn.Execution, turn.Tx, turn.User)}
 	block, err := openPreviewsBlurb(ctx, turn.Tx.DB, caller)
 	if err != nil {
 		slog.Warn("AI open previews unavailable", "site", turn.Site, "error", err)
@@ -253,11 +252,7 @@ func turnPreviewsContext(ctx context.Context, turn ChatTurn, c *gin.Context, con
 
 // previewOwner is the actor a chat turn's previews are stored under. It resolves the way the
 // tool path does: the verified execution, then the transaction's, else the current user.
-func previewOwner(c *gin.Context, tx *orm.TxManager, currentUser string) string {
-	var exec policy.Execution
-	if verified, ok := c.Get("policy_execution"); ok {
-		exec, _ = verified.(policy.Execution)
-	}
+func previewOwner(exec policy.Execution, tx *orm.TxManager, currentUser string) string {
 	if !exec.Valid() {
 		exec = tx.Execution
 	}
@@ -265,6 +260,13 @@ func previewOwner(c *gin.Context, tx *orm.TxManager, currentUser string) string 
 		return executionOwner(exec)
 	}
 	return currentUser
+}
+
+// AwaitingConfirmation reports whether the conversation holds a preview the caller can still confirm.
+func AwaitingConfirmation(ctx context.Context, turn ChatTurn, conversationID string) (bool, error) {
+	caller := pendingCaller{Site: turn.Site, ConversationID: conversationID, ActorID: previewOwner(turn.Execution, turn.Tx, turn.User)}
+	previews, err := listOpenPreviews(WithDialect(ctx, turn.Tx.Dialect), turn.Tx.DB, caller)
+	return len(previews) > 0, err
 }
 
 // listOpenPreviews returns the caller's previews of this conversation that can still be

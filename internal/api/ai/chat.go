@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,7 +22,6 @@ import (
 	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/orm"
-	"github.com/asenawritescode/kora/internal/policy"
 	"github.com/asenawritescode/kora/internal/secret"
 	"github.com/asenawritescode/kora/internal/tenanttime"
 )
@@ -197,16 +197,40 @@ func buildChatMessages(standing string, history []ChatMessage, turnContext, mess
 	return append(messages, map[string]any{"role": "user", "content": message})
 }
 
-// chatFunctions is the tool list of one chat turn: the catalog, without the metrics reads when the person has no Insights.
-func chatFunctions(tx *orm.TxManager, reg *doctype.Registry, insights, disabled bool, operations ModuleOperations) []map[string]any {
+// chatFunctions is the tool list of one chat turn: the catalog, without the metrics reads when the person has no
+// Insights, and on a channel only the tools that channel allows.
+func chatFunctions(turn ChatTurn, reg *doctype.Registry, disabled bool) []map[string]any {
 	if disabled {
 		return nil
 	}
-	functions := buildOpenAIToolsFromCatalog(BuildToolCatalog(reg, CatalogOptions{Execution: tx.Execution, BusinessScope: tx.BusinessScope, Operations: operations}))
-	if !insights {
+	catalog := BuildToolCatalog(reg, CatalogOptions{Execution: turn.Tx.Execution, BusinessScope: turn.Tx.BusinessScope, Operations: turn.Operations})
+	if turn.Channel != "" {
+		catalog.Tools = toolsOnChannel(catalog.Tools, turn.Channel)
+	}
+	functions := buildOpenAIToolsFromCatalog(catalog)
+	if !turn.Insights {
 		functions = withoutMetricsTools(functions)
 	}
 	return functions
+}
+
+func toolsOnChannel(tools []ToolDescriptor, channel string) []ToolDescriptor {
+	kept := make([]ToolDescriptor, 0, len(tools))
+	for _, tool := range tools {
+		if slices.Contains(tool.ChannelAllowlist, channel) {
+			kept = append(kept, tool)
+		}
+	}
+	return kept
+}
+
+// channelReplyStyle tells the model how a channel reads its replies. It is empty on the workspace chat, and it sits
+// in the turn context, so the standing prompt stays the same for every channel.
+func channelReplyStyle(channel string) string {
+	if channel != "whatsapp" {
+		return ""
+	}
+	return "REPLY STYLE: this reply goes to WhatsApp. Plain text only, no markdown. At most 300 characters. Offer choices as a numbered list."
 }
 
 // insightsNoteFor is what the model is told about Insights: nothing when the person has it.
@@ -279,15 +303,8 @@ func openConversation(ctx context.Context, tx *orm.TxManager, key conversationKe
 	}
 }
 
-// HandleChat processes a chat message, calls the AI provider with function definitions,
-// executes any tool calls via the ORM, and returns the AI's response.
-func HandleChat(c *gin.Context, turn ChatTurn) {
-	tx, reg, siteName, currentUser := turn.Tx, turn.Registry, turn.Site, turn.User
-	requestCtx := WithDialect(c.Request.Context(), tx.Dialect)
-	currency, currencyErr := siteCurrencyForChat(requestCtx, tx.DB, siteName, tx.Dialect)
-	if currencyErr != nil {
-		slog.Warn("AI chat could not read site currency", "site", siteName, "error", currencyErr)
-	}
+// ServeChat serves one workspace chat turn: it decodes the request, runs the turn and writes the reply.
+func ServeChat(c *gin.Context, turn ChatTurn) {
 	var req ChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -295,13 +312,48 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		})
 		return
 	}
-	if len(req.Context.ThreadID) > 100 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": "Invalid conversation identifier."}})
+	outcome := HandleChat(c.Request.Context(), turn, req)
+	if outcome.Failure != nil {
+		c.JSON(outcome.Status, outcome.Failure)
 		return
+	}
+	writeChatResponse(c, outcome.Reply)
+}
+
+// ChatOutcome is what one chat turn answered: the reply, or the status and error body of the refusal.
+type ChatOutcome struct {
+	Status  int
+	Reply   ChatResponse
+	Failure gin.H
+	// Usage is the provider usage of the turn, summed over its rounds.
+	Usage Usage
+	// ConversationID is the conversation the turn ran in; empty when the turn was refused before it opened one.
+	ConversationID string
+}
+
+func replyOutcome(reply ChatResponse) ChatOutcome {
+	return ChatOutcome{Status: http.StatusOK, Reply: reply}
+}
+
+func failOutcome(status int, body gin.H) ChatOutcome {
+	return ChatOutcome{Status: status, Failure: body}
+}
+
+// HandleChat runs one chat turn for a decoded request: it persists the message, runs the provider and tool loop, and
+// returns the outcome. The workspace chat and the channel chat both run it.
+func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOutcome) {
+	tx, reg, siteName, currentUser := turn.Tx, turn.Registry, turn.Site, turn.User
+	requestCtx := WithDialect(ctx, tx.Dialect)
+	currency, currencyErr := siteCurrencyForChat(requestCtx, tx.DB, siteName, tx.Dialect)
+	if currencyErr != nil {
+		slog.Warn("AI chat could not read site currency", "site", siteName, "error", currencyErr)
+	}
+	if len(req.Context.ThreadID) > 100 {
+		return failOutcome(http.StatusBadRequest, gin.H{"error": gin.H{"message": "Invalid conversation identifier."}})
 	}
 	runID := ulid.Make().String()
 	subjectKey := ConversationSubjectKey(currentUser, req.Context)
-	auditCtx := enrichAuditContext(requestCtx, currentUser, c.GetString("session_sid"), c.GetString("correlation_id"), c.GetString("idempotency_key"))
+	auditCtx := enrichAuditContext(requestCtx, currentUser, turn.SessionID, turn.CorrelationID, turn.IdempotencyKey)
 
 	// Read the configured AI provider key.
 	providerKey, apiKey, baseURL, model := resolveProvider(tx.DB, siteName, req.Model, tx.Dialect)
@@ -310,7 +362,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		if strings.TrimSpace(os.Getenv("KORA_CLOUD_AI_GATEWAY_URL")) != "" {
 			message = "Kigae Cloud's shared AI provider is unavailable. Ask your administrator to reconnect the Cloud provider."
 		}
-		c.JSON(http.StatusServiceUnavailable, gin.H{
+		out = failOutcome(http.StatusServiceUnavailable, gin.H{
 			"error": gin.H{
 				"code":    "ai.provider_not_configured",
 				"message": message,
@@ -328,23 +380,23 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		Model:          model,
 		HTTPTimeoutSec: cfg.HTTPTimeoutSec,
 	}); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
+		out = failOutcome(http.StatusBadRequest, gin.H{
 			"error": gin.H{"message": "Invalid AI provider configuration: " + err.Error()},
 		})
 		return
 	}
 	if err := EnsureAIRunTables(requestCtx, tx.DB, tx.Dialect); err != nil {
 		slog.Error("AI run storage initialization failed", "site", siteName, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to initialize AI run storage."}})
+		out = failOutcome(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to initialize AI run storage."}})
 		return
 	}
 	conv, convStatus, convMessage := openConversation(requestCtx, tx, conversationKey{Site: siteName, SubjectKey: subjectKey, RunID: runID, Message: req.Message})
 	if convStatus != http.StatusOK {
-		c.JSON(convStatus, gin.H{"error": gin.H{"message": convMessage}})
+		out = failOutcome(convStatus, gin.H{"error": gin.H{"message": convMessage}})
 		return
 	}
 	conversationID, transcript := conv.ID, conv.Transcript
-	turnContext := turnContextMessage(businessDayBlurb(requestCtx, tx.DB, tx.Dialect, siteName, time.Now()), pageContextBlurb(req.Context), followUpBlurb(conv.LastQuestion), turnPreviewsContext(requestCtx, turn, c, conversationID))
+	turnContext := turnContextMessage(businessDayBlurb(requestCtx, tx.DB, tx.Dialect, siteName, time.Now()), pageContextBlurb(req.Context), followUpBlurb(conv.LastQuestion), turnPreviewsContext(requestCtx, turn, conversationID), channelReplyStyle(turn.Channel))
 	if err := UpsertRun(requestCtx, tx.DB, RunRecord{
 		ID:             runID,
 		Site:           siteName,
@@ -355,16 +407,16 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		Model:          model,
 		Provider:       providerKey,
 	}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to persist AI run."}})
+		out = failOutcome(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to persist AI run."}})
 		return
 	}
 	if err := AppendConversationMessage(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID, Role: "user", Content: req.Message, Kind: "message"}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to save your message."}})
+		out = failOutcome(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to save your message."}})
 		return
 	}
 
 	// Build function definitions from the canonical tool catalog projection.
-	functions := chatFunctions(tx, reg, turn.Insights, req.DisableTools, turn.Operations)
+	functions := chatFunctions(turn, reg, req.DisableTools)
 
 	// Durable server history is the source of truth for the conversation.
 	sanitizedHistory := sanitizeHistory(transcript, cfg.HistoryLimit)
@@ -385,14 +437,14 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 	}
 
 	if estimatePromptTokens(messages, functions) > cfg.TokenBudget {
-		c.JSON(http.StatusBadRequest, gin.H{
+		out = failOutcome(http.StatusBadRequest, gin.H{
 			"error": gin.H{"message": "AI request exceeds the configured token budget."},
 		})
 		return
 	}
 	reservation, err := ReserveBudget(requestCtx, tx.DB, BudgetRequest{Site: siteName, Model: model, RequestedTokens: estimatePromptTokens(messages, functions) + cfg.MaxTokensPerCall, Budget: cfg.TokenBudget, Note: "chat request"})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
+		out = failOutcome(http.StatusBadRequest, gin.H{
 			"error": gin.H{"message": err.Error()},
 		})
 		return
@@ -401,7 +453,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		_ = ReleaseBudget(requestCtx, tx.DB, reservation)
 	}()
 
-	answers := newAnswerTurn(c, turn, currency)
+	answers := newAnswerTurn(turn, currency)
 
 	// --- Multi-Round Tool Execution Loop ---
 	var (
@@ -411,6 +463,11 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		toolErrors int      // cumulative tool errors for circuit breaker
 		lastSigs   []string // tool call signatures from previous round
 	)
+
+	defer func() {
+		out.Usage = runUsage
+		out.ConversationID = conversationID
+	}()
 
 	for round := 0; round < cfg.MaxRounds; round++ {
 		stepID := ulid.Make().String()
@@ -489,7 +546,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			// On first-round failure, return an error.
 			// On later rounds, return whatever tool results we've accumulated.
 			if round == 0 {
-				c.JSON(http.StatusInternalServerError, gin.H{
+				out = failOutcome(http.StatusInternalServerError, gin.H{
 					"error": gin.H{"message": "AI provider error: " + err.Error()},
 				})
 				return
@@ -514,7 +571,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 				Model:          model,
 				Provider:       providerKey,
 			})
-			writeChatResponse(c, ChatResponse{Reply: fallbackReply, Action: "partial", RunID: runID})
+			out = replyOutcome(ChatResponse{Reply: fallbackReply, Action: "partial", RunID: runID})
 			return
 		}
 
@@ -536,7 +593,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 				},
 			})
 			slog.Error("AI provider returned malformed response", "error", respErr, "response", aiResp)
-			c.JSON(http.StatusInternalServerError, gin.H{
+			out = failOutcome(http.StatusInternalServerError, gin.H{
 				"error": gin.H{"message": respErr.Error()},
 			})
 			return
@@ -607,7 +664,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			}
 			content = answers.finalReply(content, req.Message)
 			completeAnswer(requestCtx, tx, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, SubjectKey: subjectKey, Model: model, Provider: providerKey, Content: content, Messages: messages, Cards: answers.cards(), Question: answers.lastQuestion()})
-			writeChatResponse(c, ChatResponse{Reply: content, RunID: runID, Cards: answers.cards()})
+			out = replyOutcome(ChatResponse{Reply: content, RunID: runID, Cards: answers.cards()})
 			return
 
 		case "tool_calls":
@@ -615,7 +672,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			if len(toolCalls) == 0 {
 				// finish_reason says tool_calls but none present — treat as stop.
 				if content != "" {
-					writeChatResponse(c, ChatResponse{Reply: answers.finalReply(content, req.Message), RunID: runID, Cards: answers.cards()})
+					out = replyOutcome(ChatResponse{Reply: answers.finalReply(content, req.Message), RunID: runID, Cards: answers.cards()})
 					return
 				}
 				continue
@@ -655,11 +712,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 					slog.Info("AI tool call", "name", safeGetString(fn, "name"), "args", safeGetString(fn, "arguments"))
 				}
 			}
-			var execution policy.Execution
-			if verified, ok := c.Get("policy_execution"); ok {
-				execution, _ = verified.(policy.Execution)
-			}
-			toolResults := RunToolTurn(auditCtx, tx, reg, toolCallBatch{Calls: toolCalls, Owner: currentUser, Site: siteName, RunID: runID, StepID: stepID, ConversationID: conversationID, Execution: execution, Turn: answers, Commands: turn.Commands, Operations: turn.Operations})
+			toolResults := RunToolTurn(auditCtx, tx, reg, toolCallBatch{Calls: toolCalls, Owner: currentUser, Site: siteName, RunID: runID, StepID: stepID, ConversationID: conversationID, Execution: turn.Execution, Turn: answers, Commands: turn.Commands, Operations: turn.Operations})
 			for i, tr := range toolResults {
 				raw := tr["content"].(string)
 				slog.Info("Tool result", "content", raw[:min(len(raw), 200)])
@@ -676,7 +729,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			// --- Clarifying question: the turn ends here, with the choices shown to the person. The question is
 			// only known once its tool has run, so the check follows the execution, before the model is asked again. ---
 			if answers.choice != nil {
-				writeChatResponse(c, endWithChoice(requestCtx, tx, answers.choice, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, Model: model, Provider: providerKey}))
+				out = replyOutcome(endWithChoice(requestCtx, tx, answers.choice, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, Model: model, Provider: providerKey}))
 				return
 			}
 
@@ -743,11 +796,11 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 				Model:          model,
 				Provider:       providerKey,
 			})
-			writeChatResponse(c, ChatResponse{Reply: content, Action: "truncated", RunID: runID, Cards: answers.cards()})
+			out = replyOutcome(ChatResponse{Reply: content, Action: "truncated", RunID: runID, Cards: answers.cards()})
 			return
 
 		case "content_filter":
-			writeChatResponse(c, ChatResponse{
+			out = replyOutcome(ChatResponse{
 				Reply: "I can't respond to that request due to content policies.",
 				RunID: runID,
 			})
@@ -787,7 +840,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 					Provider:       providerKey,
 				})
 				_ = SummarizeRun(requestCtx, tx.DB, runID)
-				writeChatResponse(c, ChatResponse{Reply: content, RunID: runID, Cards: answers.cards()})
+				out = replyOutcome(ChatResponse{Reply: content, RunID: runID, Cards: answers.cards()})
 				return
 			}
 			// Otherwise continue the loop.
@@ -798,7 +851,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 
 	// --- SAFETY NET: Max rounds exhausted ---
 	slog.Warn("Max rounds exhausted in chat loop", "max_rounds", cfg.MaxRounds)
-	writeChatResponse(c, ChatResponse{
+	out = replyOutcome(ChatResponse{
 		Reply:  storedMaxRoundsReply(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID}, stepsDone, req.Message),
 		Action: "max_rounds_reached",
 		RunID:  runID,
@@ -815,6 +868,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		Provider:       providerKey,
 	})
 	_ = SummarizeRun(requestCtx, tx.DB, runID)
+	return
 }
 
 // storedMaxRoundsReply builds the round-cap reply and saves it to the conversation like any other reply, so the next
