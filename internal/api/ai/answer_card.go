@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -247,7 +248,7 @@ func comparedName(compare string) string {
 // fillTable sets up to five rows of a table card, with the total when it cuts the rows.
 func fillTable(card *contract.AnswerCard, q queryAnswer, cat *metricsCatalog, currency string) {
 	format := formatOf(q, cat)
-	rows := q.result.Rows
+	rows := rankedRows(q)
 	for _, row := range rows {
 		for i, raw := range row.Values {
 			if len(card.Rows) == maxCardRows {
@@ -264,6 +265,31 @@ func fillTable(card *contract.AnswerCard, q queryAnswer, cat *metricsCatalog, cu
 	if len(rows) > maxCardRows {
 		card.Meta.Shown, card.Meta.Total = maxCardRows, len(rows)
 	}
+}
+
+// rankedRows puts a top-N result in rank order, so the rows a card keeps are the best groups. The engine returns
+// groups in key order; without this a card cut to five rows would show the first five keys, not the top five.
+func rankedRows(q queryAnswer) []contract.MetricRow {
+	rows := q.result.Rows
+	if q.request.Top == 0 || len(q.request.Dimensions) != 1 || len(rows) == 0 || len(rows[0].Values) == 0 {
+		return rows
+	}
+	ranked := slices.Clone(rows)
+	slices.SortStableFunc(ranked, func(a, b contract.MetricRow) int {
+		av, aok := valueOf(a.Values[0])
+		bv, bok := valueOf(b.Values[0])
+		switch {
+		case aok != bok:
+			if aok {
+				return -1
+			}
+			return 1
+		case !aok:
+			return 0
+		}
+		return bv.Cmp(av)
+	})
+	return ranked
 }
 
 // rowLabel names one row: its group's title when the record has one, else the group values, else the bucket.
