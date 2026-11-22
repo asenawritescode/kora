@@ -23,13 +23,13 @@ type actorWrite struct {
 	record, field string
 }
 
-// checkActorWrites reports every command value that writes $actor into a field
-// of a DocType declared in this pack when that field is not a User field. A
-// User field is the only place an internal user is referenced; a Data field
-// would hold the login as free text. Targets outside the pack are skipped,
-// because the composition may supply them. The findings are warnings: releases published before this rule
-// store the cashier as Data and must still apply; the repository's own packs are held to it by tests.
-func checkActorWrites(commands []packCommand, docTypes map[string]*doctype.DocType, add func(code, file, message string)) {
+// actorWriteWarnings reports every command value that writes $actor into a field of a DocType declared in this
+// pack when that field is not a User field. A User field is the only place an internal user is referenced; a Data
+// field would hold the login as free text. Targets outside the pack are skipped, because the composition may
+// supply them. The findings are warnings, which do not make a pack invalid: releases published before this rule
+// store the cashier as Data and must still apply. The repository's own packs are held to it by tests.
+func actorWriteWarnings(commands []packCommand, docTypes map[string]*doctype.DocType) []PackFinding {
+	var out []PackFinding
 	for _, cmd := range commands {
 		for _, w := range actorWrites(cmd.def) {
 			target := docTypes[strings.ToLower(strings.TrimSpace(w.record))]
@@ -40,9 +40,11 @@ func checkActorWrites(commands []packCommand, docTypes map[string]*doctype.DocTy
 			if field == nil || field.Fieldtype == "User" {
 				continue
 			}
-			add("actor_field_not_user", cmd.path, cmd.def.FullName()+" writes $actor to "+target.Name+"."+w.field+", which is a "+field.Fieldtype+" field; declare it fieldtype: User so it stores a login reference")
+			out = append(out, PackFinding{Code: "actor_field_not_user", Severity: "warning", Path: cmd.path,
+				Message: cmd.def.FullName() + " writes $actor to " + target.Name + "." + w.field + ", which is a " + field.Fieldtype + " field; declare it fieldtype: User so it stores a login reference"})
 		}
 	}
+	return out
 }
 
 // actorWrites lists the fields of a command that a write step fills with $actor.
