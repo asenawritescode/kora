@@ -307,6 +307,12 @@ func TestPackActionsChatAcrossDialects(t *testing.T) {
 			if n := count("Sale"); n != "1" {
 				t.Fatalf("sales after confirm_write = %s, want 1", n)
 			}
+			// Each provider call stored its usage. The scripted model reports 10 input, 10 output and 20 total tokens.
+			tokens := one("SELECT tokens FROM _kora_ai_usage WHERE site = ? AND status = ? ORDER BY occurred_at DESC", siteName, "completed")
+			t.Logf("stored usage tokens: %s", tokens)
+			if !strings.Contains(tokens, `"total":20`) {
+				t.Fatalf("stored usage tokens = %s, want the scripted total of 20", tokens)
+			}
 			// The provider was offered the two pack-action tools and the run answered "completed".
 			if first := model.bodies[0]; !strings.Contains(first, `"name":"run_action"`) || !strings.Contains(first, `"name":"list_actions"`) || !strings.Contains(first, `"name":"confirm_write"`) {
 				t.Fatalf("pack-action tools were not offered: %.300s", first)
