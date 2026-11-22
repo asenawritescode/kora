@@ -65,7 +65,10 @@ type ChannelSessionIssueRequestV2 struct {
 	SenderAddress   string `json:"sender_address"`
 	// SubjectUser, when set, names the enabled tenant user the session runs as. The session then uses that user's
 	// roles and ignores Permissions.
-	SubjectUser    string            `json:"subject_user,omitempty"`
+	SubjectUser string `json:"subject_user,omitempty"`
+	// SubjectEmail, when set instead of SubjectUser, is the email address the sender proved they control (for
+	// example by a one-time code). It must belong to exactly one enabled user of the site, who becomes the subject.
+	SubjectEmail   string            `json:"subject_email,omitempty"`
 	Permissions    []PermissionGrant `json:"permissions"`
 	TrustedUntil   string            `json:"trusted_until"`
 	SensitiveUntil string            `json:"sensitive_until,omitempty"`

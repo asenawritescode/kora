@@ -162,6 +162,32 @@ func TestChannelChatSubjectUserAcrossDialects(t *testing.T) {
 				}
 				return session.Data.AccessToken
 			}
+			// Cloud names the subject by the email the sender proved with a one-time code. The lookup ignores case,
+			// refuses unknown and disabled users, and refuses a request that sets both subject fields.
+			issueByEmail := func(email string, extra map[string]any) *httptest.ResponseRecorder {
+				t.Helper()
+				body := map[string]any{
+					"client_name": channelChatClient, "conversation_key": "wa-thread-1", "provider": "twilio_whatsapp",
+					"sender_address": "+254700000001", "subject_email": email, "permissions": []any{},
+					"trusted_until": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+				}
+				for k, v := range extra {
+					body[k] = v
+				}
+				return do(http.MethodPost, "/api/internal/channel/sessions/issue", "", body)
+			}
+			if out := issueByEmail(strings.ToUpper(channelChatSubject+"@channel.example.test"), nil); out.Code != http.StatusCreated {
+				t.Fatalf("issue by email = %d: %s", out.Code, out.Body)
+			}
+			if out := issueByEmail("nobody@channel.example.test", nil); out.Code != http.StatusForbidden {
+				t.Fatalf("issue by unknown email = %d, want 403", out.Code)
+			}
+			if out := issueByEmail(channelChatDisabled+"@channel.example.test", nil); out.Code != http.StatusForbidden {
+				t.Fatalf("issue by a disabled user's email = %d, want 403", out.Code)
+			}
+			if out := issueByEmail(channelChatSubject+"@channel.example.test", map[string]any{"subject_user": channelChatSubject}); out.Code != http.StatusBadRequest {
+				t.Fatalf("issue with both subject fields = %d, want 400", out.Code)
+			}
 			type chatReply struct {
 				Data struct {
 					Result               string `json:"result"`

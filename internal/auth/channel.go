@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	kdb "github.com/asenawritescode/kora/internal/db"
@@ -69,6 +70,22 @@ func LoadChannelSubject(ctx context.Context, db *sql.DB, dialect kdb.QueryDialec
 	}
 	user.Roles = splitRolesStr(roles)
 	return &user, nil
+}
+
+// ChannelSubjectByEmail returns the name of the enabled site user whose email is email, compared without case.
+// A missing or disabled user is ErrSubjectUnavailable.
+func ChannelSubjectByEmail(ctx context.Context, db *sql.DB, dialect kdb.QueryDialect, site, email string) (string, error) {
+	var name string
+	var enabled bool
+	err := db.QueryRowContext(ctx, kdb.Rebind(dialect, `SELECT name, enabled FROM _kora_user WHERE site = ? AND LOWER(email) = ?`),
+		site, strings.ToLower(strings.TrimSpace(email))).Scan(&name, &enabled)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !enabled) {
+		return "", ErrSubjectUnavailable
+	}
+	if err != nil {
+		return "", err
+	}
+	return name, nil
 }
 
 func CreateChannelSession(db *sql.DB, dialect kdb.QueryDialect, params ChannelSessionCreateParams) (string, *ChannelSession, error) {

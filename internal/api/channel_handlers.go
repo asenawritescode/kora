@@ -70,8 +70,8 @@ func (h *Handler) HandleChannelSessionIssue(c *gin.Context) {
 	if clientName == "" {
 		clientName = c.GetString("extension_name")
 	}
-	subjectUser := strings.TrimSpace(req.SubjectUser)
-	if subjectUser != "" && !h.checkChannelSubject(c, siteNameStr, subjectUser) {
+	subjectUser, ok := h.resolveChannelSubject(c, siteNameStr, req.SubjectUser, req.SubjectEmail)
+	if !ok {
 		return
 	}
 	token, session, err := auth.CreateChannelSession(h.queryDB(c), h.siteDialect(c), auth.ChannelSessionCreateParams{
@@ -99,6 +99,32 @@ func (h *Handler) HandleChannelSessionIssue(c *gin.Context) {
 }
 
 // checkChannelSubject answers 403 and reports false when subject is not an enabled user of the site.
+// resolveChannelSubject returns the user a new channel session acts as: subject_user as given, or the user whose
+// email is subject_email. Neither means a delegated session (""). It writes the error and returns false on refusal.
+func (h *Handler) resolveChannelSubject(c *gin.Context, site, user, email string) (string, bool) {
+	user, email = strings.TrimSpace(user), strings.TrimSpace(email)
+	if user != "" && email != "" {
+		writeError(c, http.StatusBadRequest, "validation.invalid_field", "set subject_user or subject_email, not both", map[string]any{"field": "subject_email"})
+		return "", false
+	}
+	if email != "" {
+		name, err := auth.ChannelSubjectByEmail(c.Request.Context(), h.queryDB(c), h.siteDialect(c), site, email)
+		if errors.Is(err, auth.ErrSubjectUnavailable) {
+			writeError(c, http.StatusForbidden, "auth.subject_user_unavailable", "subject_email must belong to an enabled user of this site", nil)
+			return "", false
+		}
+		if err != nil {
+			internalError(c, "resolve channel subject by email", err)
+			return "", false
+		}
+		return name, true
+	}
+	if user == "" {
+		return "", true
+	}
+	return user, h.checkChannelSubject(c, site, user)
+}
+
 func (h *Handler) checkChannelSubject(c *gin.Context, site, subject string) bool {
 	_, err := auth.LoadChannelSubject(c.Request.Context(), h.queryDB(c), h.siteDialect(c), site, subject)
 	if err == nil {

@@ -1201,6 +1201,9 @@
         "sensitive_until": {
           "type": "string"
         },
+        "subject_email": {
+          "type": "string"
+        },
         "subject_user": {
           "type": "string"
         },
@@ -7496,6 +7499,9 @@
           "type": "string"
         },
         "sensitive_until": {
+          "type": "string"
+        },
+        "subject_email": {
           "type": "string"
         },
         "subject_user": {
