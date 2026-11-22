@@ -1,6 +1,7 @@
 package facts
 
 import (
+	"errors"
 	"sort"
 	"strings"
 	"testing"
@@ -172,7 +173,10 @@ func TestMap(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			head, lines := Map(tc.dt, tc.change, tc.clock)
+			head, lines, err := Map(tc.dt, tc.change, tc.clock)
+			if err != nil {
+				t.Fatalf("map: %v", err)
+			}
 			if got := summary(head); got != tc.header {
 				t.Fatalf("header = %s\nwant    %s", got, tc.header)
 			}
@@ -225,7 +229,10 @@ func TestMapMissingAxisIsZeroDate(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			head, _ := Map(saleFacts(), Change{RecordID: "SAL-1", Data: map[string]any{"posting_date": tc.posting}}, tenanttime.Default())
+			head, _, err := Map(saleFacts(), Change{RecordID: "SAL-1", Data: map[string]any{"posting_date": tc.posting}}, tenanttime.Default())
+			if err != nil {
+				t.Fatalf("map: %v", err)
+			}
 			if head.BusinessDate != (tenanttime.Date{}) {
 				t.Fatalf("business date = %v, want zero", head.BusinessDate)
 			}
@@ -250,7 +257,10 @@ func TestLegalEntity(t *testing.T) {
 			dt.Fields = append(dt.Fields, doctype.Field{Fieldname: "branch", Fieldtype: "Link"})
 			change := Change{RecordID: "SAL-1", Owner: "u1", Sequence: 7, OccurredAt: time.Date(2026, 11, 18, 9, 0, 0, 0, time.UTC),
 				Data: map[string]any{"posting_date": "2026-11-18", "branch": "BR-1"}}
-			head, _ := Map(dt, change, tenanttime.Clock{})
+			head, _, err := Map(dt, change, tenanttime.Clock{})
+			if err != nil {
+				t.Fatalf("map: %v", err)
+			}
 			if head.LegalEntity != tc.want {
 				t.Fatalf("LegalEntity = %q, want %q", head.LegalEntity, tc.want)
 			}
@@ -295,7 +305,10 @@ func TestExcludedStatus(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			head, lines := Map(dt, tc.change, tenanttime.Clock{})
+			head, lines, err := Map(dt, tc.change, tenanttime.Clock{})
+			if err != nil {
+				t.Fatalf("map: %v", err)
+			}
 			if got := summary(head); got != tc.header {
 				t.Errorf("header = %s\nwant    %s", got, tc.header)
 			}
@@ -306,6 +319,30 @@ func TestExcludedStatus(t *testing.T) {
 				if got := summary(l); got != tc.lines[i] {
 					t.Errorf("line %d = %s\nwant       %s", i, got, tc.lines[i])
 				}
+			}
+		})
+	}
+}
+
+// A child line without a name has no id, so Map refuses it on either side of a change: a line row is never
+// written under an empty id, which would collide with every other line of the record.
+func TestMapRejectsLineWithoutName(t *testing.T) {
+	nameless := map[string]any{"item": "I1", "amount": "40.25"}
+	tests := []struct {
+		name   string
+		change Change
+	}{
+		{"insert", Change{RecordID: "SAL-1", Data: map[string]any{"posting_date": "2026-11-18", "items": []any{nameless}}}},
+		{"update removes a nameless old line", Change{RecordID: "SAL-1",
+			Data:    map[string]any{"posting_date": "2026-11-18", "items": []any{line("L1", "I1", "40.25")}},
+			OldData: map[string]any{"posting_date": "2026-11-18", "items": []any{nameless}}}},
+		{"delete", Change{RecordID: "SAL-1", Deleted: true, OldData: map[string]any{"posting_date": "2026-11-18", "items": []any{nameless}}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := Map(saleFacts(), tc.change, tenanttime.Default())
+			if !errors.Is(err, errLineWithoutID) {
+				t.Fatalf("error = %v, want errLineWithoutID", err)
 			}
 		})
 	}

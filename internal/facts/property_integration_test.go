@@ -98,7 +98,10 @@ func TestSummariesEqualSourceAfterRandomStreams(t *testing.T) {
 
 				var rows []Row
 				for name, data := range source {
-					head, lines := Map(held, Change{RecordID: name, Sequence: seq, Data: data}, tenanttime.Clock{})
+					head, lines, err := Map(held, Change{RecordID: name, Sequence: seq, Data: data}, tenanttime.Clock{})
+					if err != nil {
+						t.Fatalf("map: %v", err)
+					}
 					rows = append(rows, head)
 					rows = append(rows, lines...)
 				}

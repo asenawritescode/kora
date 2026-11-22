@@ -46,7 +46,10 @@ func TestFactTablesAcceptMappedRows(t *testing.T) {
 				Data: map[string]any{"posting_date": "2026-11-18", "total": "100.50", "status": "Paid", "register": "R1",
 					"items": []any{line("L1", "I1", "40.25"), line("L2", "I2", "60.25")}},
 			}
-			head, lines := Map(dt, change, tenanttime.Default())
+			head, lines, err := Map(dt, change, tenanttime.Default())
+			if err != nil {
+				t.Fatalf("map: %v", err)
+			}
 			rows := append([]Row{head}, lines...)
 			for _, r := range rows {
 				table := dt.Facts.TableName(dt)

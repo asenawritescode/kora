@@ -82,15 +82,22 @@ func (b *Builder) Consume(ctx context.Context, tx *sql.Tx, event contract.EventE
 	if change.Owner, change.Created, err = b.author(ctx, tx, dt, change); err != nil {
 		return err
 	}
-	head, lines := Map(dt, change, clock)
+	head, lines, err := Map(dt, change, clock)
+	if err != nil {
+		return fmt.Errorf("facts: %s %s: %w", dt.Name, change.RecordID, err)
+	}
 	if head.BusinessDate == (tenanttime.Date{}) {
 		return fmt.Errorf("facts: %s %s has no business date on axis %q", dt.Name, change.RecordID, dt.Facts.Time)
 	}
 	if err := b.writeRows(ctx, tx, dt, head, lines); err != nil {
 		return err
 	}
+	left, err := leftDate(dt, change, clock)
+	if err != nil {
+		return err
+	}
 	// Backdating moves a record between partitions: mark the day it left as well as the day it reached.
-	return b.markDirtyDates(ctx, tx, dt.Name, []tenanttime.Date{head.BusinessDate, leftDate(dt, change, clock)})
+	return b.markDirtyDates(ctx, tx, dt.Name, []tenanttime.Date{head.BusinessDate, left})
 }
 
 // writeRows stores the header row and its line rows.
@@ -107,12 +114,15 @@ func (b *Builder) writeRows(ctx context.Context, tx *sql.Tx, dt *doctype.DocType
 }
 
 // leftDate is the day a record left when this change moved it, or the zero Date.
-func leftDate(dt *doctype.DocType, change Change, clock tenanttime.Clock) tenanttime.Date {
+func leftDate(dt *doctype.DocType, change Change, clock tenanttime.Clock) (tenanttime.Date, error) {
 	if change.OldData == nil || change.Deleted {
-		return tenanttime.Date{}
+		return tenanttime.Date{}, nil
 	}
-	old, _ := Map(dt, Change{RecordID: change.RecordID, Created: change.Created, Deleted: true, OldData: change.OldData}, clock)
-	return old.BusinessDate
+	old, _, err := Map(dt, Change{RecordID: change.RecordID, Created: change.Created, Deleted: true, OldData: change.OldData}, clock)
+	if err != nil {
+		return tenanttime.Date{}, fmt.Errorf("facts: %s %s: %w", dt.Name, change.RecordID, err)
+	}
+	return old.BusinessDate, nil
 }
 
 // markDirtyDates marks each non-zero partition day for recomputation.

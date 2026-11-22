@@ -330,7 +330,10 @@ func (c *DriftChecker) expectedHeaders(ctx context.Context, tx *sql.Tx, dt *doct
 	}
 	for _, name := range names {
 		row := records[name]
-		head, _ := Map(dt, Change{RecordID: name, Owner: text(row["owner"]), Created: instant(row["creation"]), Data: row}, clock)
+		head, _, err := Map(dt, Change{RecordID: name, Owner: text(row["owner"]), Created: instant(row["creation"]), Data: row}, clock)
+		if err != nil {
+			return nil, fmt.Errorf("facts: %s %s: %w", dt.Name, name, err)
+		}
 		if head.BusinessDate == day && !head.Deleted {
 			expected[name] = canonicalHeader(dt, head)
 		}

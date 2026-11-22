@@ -139,7 +139,10 @@ func (r *Rebuilder) writeChunk(ctx context.Context, tx *sql.Tx, job *Job, dt *do
 		row := records[name]
 		change := Change{RecordID: name, Owner: text(row["owner"]), Created: instant(row["creation"]),
 			Sequence: job.StartSequence, OccurredAt: now, Data: row}
-		head, lines := Map(dt, change, clock)
+		head, lines, err := Map(dt, change, clock)
+		if err != nil {
+			return fmt.Errorf("facts: %s %s: %w", dt.Name, name, err)
+		}
 		if head.BusinessDate == (tenanttime.Date{}) {
 			return fmt.Errorf("facts: %s %s has no business date on axis %q", dt.Name, name, dt.Facts.Time)
 		}
