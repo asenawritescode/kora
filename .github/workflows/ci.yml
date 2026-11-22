@@ -287,7 +287,7 @@ jobs:
           KORA_DB_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
           KORA_ORM_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
         run: >-
-          go test -tags=integration ./internal/db -run 'TestNameAllocationIssuesUniqueNamesUnderConcurrency|TestReserveSeriesRangeGivesDisjointRangesToTwoTills' -count=1 -timeout=5m &&
+          go test -tags=integration ./internal/db -run 'TestNameAllocationIssuesUniqueNamesUnderConcurrency|TestReserveSeriesRangeGivesDisjointRangesToTwoTills|TestRetiredAnalyticsTablesDropIdempotentlyKeepingProjectionStorage' -count=1 -timeout=5m &&
           go test -tags=integration ./internal/orm -run TestReserveNumberBlockRecordsDisjointOpenBlocksForTwoTills -count=1 -timeout=5m
 
       - name: Test number blocks on disposable MySQL

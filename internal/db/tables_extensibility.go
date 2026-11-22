@@ -3,12 +3,6 @@ package db
 // ExtensibilityTablesMySQL returns MySQL-specific extensibility DDL.
 func ExtensibilityTablesMySQL() []string {
 	return []string{
-		`CREATE TABLE IF NOT EXISTS _kora_analytics_metric (
-			name VARCHAR(140) NOT NULL, label VARCHAR(255) NOT NULL DEFAULT '', type VARCHAR(50) NOT NULL DEFAULT '',
-			doctype VARCHAR(140) NOT NULL DEFAULT '', field_name VARCHAR(140) NOT NULL DEFAULT '',
-			link_field VARCHAR(140) NOT NULL DEFAULT '', group_by_field VARCHAR(140) NOT NULL DEFAULT '',
-			site VARCHAR(140) NOT NULL DEFAULT '', PRIMARY KEY (site, name)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 		`CREATE TABLE IF NOT EXISTS _kora_script (
 			name VARCHAR(140) PRIMARY KEY,
 			site VARCHAR(140) NOT NULL DEFAULT '',
@@ -149,12 +143,6 @@ func ExtensibilityTablesMySQL() []string {
 // ExtensibilityTablesPostgres returns PostgreSQL-specific system DDL.
 func ExtensibilityTablesPostgres() []string {
 	return []string{
-		`CREATE TABLE IF NOT EXISTS _kora_analytics_metric (
-			name VARCHAR(140) NOT NULL, label VARCHAR(255) NOT NULL DEFAULT '', type VARCHAR(50) NOT NULL DEFAULT '',
-			doctype VARCHAR(140) NOT NULL DEFAULT '', field_name VARCHAR(140) NOT NULL DEFAULT '',
-			link_field VARCHAR(140) NOT NULL DEFAULT '', group_by_field VARCHAR(140) NOT NULL DEFAULT '',
-			site VARCHAR(140) NOT NULL DEFAULT '', PRIMARY KEY (site, name)
-		)`,
 		`CREATE TABLE IF NOT EXISTS _kora_script (
 			name VARCHAR(140) PRIMARY KEY, site VARCHAR(140) NOT NULL DEFAULT '',
 			script_type VARCHAR(50) NOT NULL DEFAULT 'doc_event', doctype VARCHAR(140) NOT NULL DEFAULT '',

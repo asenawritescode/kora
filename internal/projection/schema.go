@@ -24,6 +24,9 @@ func EnsureSchema(ctx context.Context, database *sql.DB, dialect kdb.SchemaDiale
 		timestampType, dataType = "TIMESTAMP", "TEXT"
 	}
 	quote := func(name string) string { return dialect.QuoteIdent(name) }
+	// Projection storage: these two tables belong to internal/projection (the
+	// "_kora_analytics_" prefix is historical). Fences serialise rebuilds per
+	// site; published snapshots hold module projection output.
 	statements := []string{
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 			site VARCHAR(140) NOT NULL PRIMARY KEY,

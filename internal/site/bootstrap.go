@@ -16,7 +16,7 @@ import (
 )
 
 // Increment this when BootstrapSystemTables gains or changes system DDL.
-const systemBootstrapVersion = 33
+const systemBootstrapVersion = 34
 
 // isIdempotentSQLError returns true if the error is expected during
 // idempotent DDL execution (CREATE IF NOT EXISTS, ALTER TABLE ADD COLUMN,
@@ -102,6 +102,13 @@ func BootstrapSystemTables(ctx context.Context, database *sql.DB, dialect db.Dia
 	}
 	for _, ddl := range extDDL {
 		if err := execDDL(ddl, "creating extensibility table"); err != nil {
+			return err
+		}
+	}
+	// The analytics counter and rollup engine is gone. Drop its tables from
+	// tenants that ran an earlier bootstrap; the statements are idempotent.
+	for _, ddl := range db.RetiredAnalyticsDropDDL(dialect) {
+		if err := execDDL(ddl, "dropping retired analytics table"); err != nil {
 			return err
 		}
 	}
