@@ -2152,7 +2152,7 @@
    "cyclomatic": 22
   },
   "internal/scheduler::(*Scheduler).runEmailReport": {
-   "cognitive": 22,
+   "cognitive": 21,
    "cyclomatic": 16
   },
   "internal/scheduler::(*Scheduler).runOccurrence": {

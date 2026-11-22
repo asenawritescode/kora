@@ -9,7 +9,9 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/orm"
 	"github.com/asenawritescode/kora/internal/policy"
+	"github.com/asenawritescode/kora/internal/titles"
 )
 
 // maxLinkTitleNames bounds the distinct link values resolved per target for one
@@ -103,26 +105,89 @@ func (s sitePrintSource) printLinkTitles(c *gin.Context, doc map[string]any, dt 
 	registry := s.h.siteRegistry(c)
 	tx := s.h.siteTx(c)
 	return addLinkTitles(doc, dt, registry, func(target *doctype.DocType, names []string) (map[string]string, error) {
-		title, ok := titleReadable(target, registry)
-		if !ok {
-			return nil, nil
-		}
-		filter, err := json.Marshal([][]any{{"name", "in", names}})
-		if err != nil {
-			return nil, err
-		}
-		docs, _, err := tx.GetListWithScope(target, string(filter), "name", len(names), 0, policy.RowScope{}, []string{title}, "")
-		if err != nil {
-			return nil, fmt.Errorf("resolving %s titles: %w", target.Name, err)
-		}
-		out := make(map[string]string, len(docs))
-		for _, d := range docs {
-			if v, ok := d.Get(title).(string); ok {
-				out[d.Name] = v
-			}
-		}
-		return out, nil
+		return scopedLinkTitles(tx, registry, target, names, 0)
 	})
+}
+
+// scopedLinkTitles reads the titles of names of target through the caller's scoped list read. A title that is itself a
+// Link is followed through the same read, at most titles.MaxLinkHops times; a linked record the caller cannot read is
+// absent, so its link keeps the raw value.
+func scopedLinkTitles(tx *orm.TxManager, reg *doctype.Registry, target *doctype.DocType, names []string, hops int) (map[string]string, error) {
+	title, ok := titleReadable(target, reg)
+	if !ok {
+		return nil, nil
+	}
+	out, err := scopedTitleValues(tx, target, title, names)
+	if err != nil {
+		return nil, err
+	}
+	next := linkedTitleTarget(target, title, reg)
+	if next == nil || hops+1 > titles.MaxLinkHops {
+		return out, nil
+	}
+	linked, err := scopedLinkTitles(tx, reg, next, distinctValues(out), hops+1)
+	if err != nil {
+		return nil, err
+	}
+	substituteLinked(out, linked)
+	return out, nil
+}
+
+// scopedTitleValues reads the raw title field of names of target through the scoped list read.
+func scopedTitleValues(tx *orm.TxManager, target *doctype.DocType, title string, names []string) (map[string]string, error) {
+	filter, err := json.Marshal([][]any{{"name", "in", names}})
+	if err != nil {
+		return nil, err
+	}
+	docs, _, err := tx.GetListWithScope(target, string(filter), "name", len(names), 0, policy.RowScope{}, []string{title}, "")
+	if err != nil {
+		return nil, fmt.Errorf("resolving %s titles: %w", target.Name, err)
+	}
+	out := make(map[string]string, len(docs))
+	for _, d := range docs {
+		if v, ok := d.Get(title).(string); ok {
+			out[d.Name] = v
+		}
+	}
+	return out, nil
+}
+
+// distinctValues lists the distinct non-empty values of m.
+func distinctValues(m map[string]string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range m {
+		if v != "" && !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// substituteLinked replaces each value of out that names a linked title with that title.
+func substituteLinked(out, linked map[string]string) {
+	for name, code := range out {
+		if t := linked[code]; t != "" {
+			out[name] = t
+		}
+	}
+}
+
+// linkedTitleTarget is the record type the title field of target links to, when its titles may be read; otherwise nil.
+func linkedTitleTarget(target *doctype.DocType, title string, reg *doctype.Registry) *doctype.DocType {
+	f := target.GetField(title)
+	if f == nil || f.Fieldtype != "Link" {
+		return nil
+	}
+	next := reg.Get(strings.TrimSpace(f.Options))
+	if next == nil {
+		return nil
+	}
+	if _, ok := titleReadable(next, reg); !ok {
+		return nil
+	}
+	return next
 }
 
 func titleReadable(target *doctype.DocType, reg *doctype.Registry) (string, bool) {

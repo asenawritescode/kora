@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -273,12 +274,37 @@ func findRecords(tx *orm.TxManager, dt *doctype.DocType, args map[string]any, ro
 	if total == 0 {
 		return fmt.Sprintf("No %s found.", dt.Name)
 	}
+	if err := showLinkTitles(tx, dt, docs); err != nil {
+		return aiToolError{Code: errGuardFailed, Message: "Could not search " + dt.Name + "."}.text()
+	}
 	summaries := make([]string, 0, len(docs))
 	for i, doc := range docs {
 		summaries = append(summaries, formatDocSummary(dt, doc, i+1))
 	}
 	header := fmt.Sprintf("Found %d %s, showing %d:", total, dt.Name, len(docs))
 	return header + "\n" + strings.Join(summaries, "\n")
+}
+
+// showLinkTitles sets each document's title field to its display title, so a Link title shows the linked
+// record's title rather than its code. A document without the field keeps it absent.
+func showLinkTitles(tx *orm.TxManager, dt *doctype.DocType, docs []*doctype.Document) error {
+	if dt.TitleField == "" || len(docs) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(docs))
+	for _, doc := range docs {
+		names = append(names, doc.Name)
+	}
+	found, err := tx.ResolveTitles(context.Background(), dt, names)
+	if err != nil {
+		return err
+	}
+	for _, doc := range docs {
+		if _, ok := doc.Fields[dt.TitleField]; ok && found[doc.Name] != "" {
+			doc.Fields[dt.TitleField] = found[doc.Name]
+		}
+	}
+	return nil
 }
 
 func getRecord(tx *orm.TxManager, dt *doctype.DocType, args map[string]any, rowScope policy.RowScope) string {
