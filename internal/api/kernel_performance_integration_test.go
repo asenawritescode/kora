@@ -595,9 +595,9 @@ func TestAIMutationLoad(t *testing.T) {
 			user := fmt.Sprintf("ai-load-%02d@example.test", workerID)
 			for mutationIndex := 0; mutationIndex < mutationsPerWorker; mutationIndex++ {
 				key := fmt.Sprintf("ai-load-%02d-%02d", workerID, mutationIndex)
-				args := map[string]any{"title": key}
+				args := map[string]any{"record_type": "TestDoc", "data": map[string]any{"title": key}}
 				started := time.Now()
-				result := koraai.ExecuteTool(tx, registry, koraai.ToolRequest{Name: "TestDoc_create", Args: args, Owner: user, Site: site, Confirmed: true, IdempotencyKey: key})
+				result := koraai.ExecuteTool(tx, registry, koraai.ToolRequest{Name: "create_record", Args: args, Owner: user, Site: site, Confirmed: true, IdempotencyKey: key})
 				latencies <- time.Since(started)
 				if !strings.HasPrefix(result, `Created TestDoc "`) {
 					errors <- fmt.Errorf("AI create %s returned %q", key, result)

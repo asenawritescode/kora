@@ -260,7 +260,7 @@ func TestAIAndHTTPAdaptersShareMutationReceipt(t *testing.T) {
 		SiteName: site, Outbox: outbox.NewSQLWriter(kdb.Resolve("mysql")), Execution: execution,
 	}
 	aiResult := aiadapter.ExecuteTool(manager, registry, aiadapter.ToolRequest{
-		Name: "testdoc_create", Args: map[string]any{"title": title}, Owner: execution.Actor().PrincipalID, Site: site,
+		Name: "create_record", Args: map[string]any{"record_type": "TestDoc", "data": map[string]any{"title": title}}, Owner: execution.Actor().PrincipalID, Site: site,
 		Confirmed: true, IdempotencyKey: clientKey, Execution: execution,
 	})
 	if !strings.HasPrefix(aiResult, "Created TestDoc \"") {
@@ -1166,7 +1166,7 @@ func TestConfirmedChannelMutationUsesKernelReceiptAndPreservesResponse(t *testin
 	invoke := func() *httptest.ResponseRecorder {
 		recorder := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(recorder)
-		ctx.Request = httptest.NewRequest(http.MethodPost, "/api/internal/channel/tools/mutate", strings.NewReader(`{"tool_name":"testdoc_create","args":{"title":"channel retry"}}`))
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/api/internal/channel/tools/mutate", strings.NewReader(`{"tool_name":"create_record","args":{"record_type":"TestDoc","data":{"title":"channel retry"}}}`))
 		ctx.Request.Header.Set("Content-Type", "application/json")
 		ctx.Request.Header.Set("X-Kora-Confirm", "confirmed")
 		ctx.Request.Header.Set("Idempotency-Key", "channel-test-retry-0001")
