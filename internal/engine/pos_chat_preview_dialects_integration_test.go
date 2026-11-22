@@ -138,14 +138,7 @@ func TestPOSChatSaleIsPreviewedThenConfirmedAcrossDialects(t *testing.T) {
 			// Administrator-free seeds, as the cashier-day test does.
 			seed := func(doc, name string, cols map[string]any) {
 				t.Helper()
-				keys, marks, args := []string{dialect.QuoteIdent("name")}, []string{"?"}, []any{name}
-				for k, v := range cols {
-					keys, marks, args = append(keys, dialect.QuoteIdent(k)), append(marks, "?"), append(args, v)
-				}
-				q := "INSERT INTO " + tbl(doc) + " (" + strings.Join(keys, ",") + ") VALUES (" + strings.Join(marks, ",") + ")"
-				if _, err := database.Exec(db.Rebind(dialect, q), args...); err != nil {
-					t.Fatalf("seed %s: %v", doc, err)
-				}
+				seedChatRow(t, database, dialect, loaded.Registry, doc, name, cols)
 			}
 			seed("Location", "LOC-1", map[string]any{"location_name": "Main"})
 			seed("Register", "REG-1", map[string]any{"register_name": "Front", "location": "LOC-1", "enabled": true})

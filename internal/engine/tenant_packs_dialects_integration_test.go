@@ -4,9 +4,7 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +15,6 @@ import (
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/query"
 	"github.com/asenawritescode/kora/internal/site"
-	"github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 )
 
@@ -115,42 +112,4 @@ func TestTenantPackQueriesPrintAndRequiresAcrossDialects(t *testing.T) {
 			}
 		})
 	}
-}
-
-// isolatedDB gives the run its own MySQL database or Postgres database because
-// pack imports write global per-database DocType rows.
-func isolatedDB(t *testing.T, driver, dsn string) (*sql.DB, string) {
-	t.Helper()
-	admin, err := sql.Open(driver, dsn)
-	if err != nil || admin.Ping() != nil {
-		t.Fatalf("connect %s: %v", driver, err)
-	}
-	name := fmt.Sprintf("kora_packs_%x", time.Now().UnixNano())
-	target := dsn
-	if driver == "postgres" {
-		if _, err := admin.Exec(`CREATE DATABASE "` + name + `"`); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { admin.Exec(`DROP DATABASE "` + name + `" WITH (FORCE)`); admin.Close() })
-		u, _ := url.Parse(dsn)
-		u.Path = "/" + name
-		target = u.String()
-	} else {
-		if _, err := admin.Exec("CREATE DATABASE `" + name + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { admin.Exec("DROP DATABASE `" + name + "`"); admin.Close() })
-		cfg, err := mysql.ParseDSN(dsn)
-		if err != nil {
-			t.Fatal(err)
-		}
-		cfg.DBName = name // DSNs naming a database must not be shared across tenants
-		target = cfg.FormatDSN()
-	}
-	conn, err := sql.Open(driver, target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { conn.Close() })
-	return conn, name
 }
