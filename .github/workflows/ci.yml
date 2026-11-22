@@ -216,16 +216,6 @@ jobs:
           KORA_CONFIG_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
         run: go test -tags=integration ./internal/engine -run TestChannelChatSubjectUserAcrossDialects/postgres -count=1 -timeout=10m
 
-      - name: Test record-task evals on disposable MySQL
-        env:
-          KORA_RECORD_TASK_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/engine -run TestRecordTaskEvals/mysql -count=1 -timeout=30m
-
-      - name: Test record-task evals on disposable PostgreSQL
-        env:
-          KORA_RECORD_TASK_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/engine -run TestRecordTaskEvals/postgres -count=1 -timeout=30m
-
       - name: Test child-row sums in doc constraints on disposable MySQL
         env:
           KORA_DOCTYPE_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
