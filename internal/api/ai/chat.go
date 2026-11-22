@@ -332,6 +332,13 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 	var functions []map[string]any
 	if !req.DisableTools {
 		functions = buildOpenAIToolsFromCatalog(BuildToolCatalog(reg))
+		if !turn.Insights {
+			functions = withoutMetricsTools(functions)
+		}
+	}
+	insightsNote := ""
+	if !turn.Insights {
+		insightsNote = insightsUnavailableNote
 	}
 
 	// Durable server history is the source of truth for the conversation.
@@ -340,7 +347,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 	// Build messages array with system instructions.
 	messages := []map[string]any{{
 		"role":    "system",
-		"content": chatSystemPrompt + financialDisplayContext(currency) + contextBlurb,
+		"content": chatSystemPrompt + financialDisplayContext(currency) + contextBlurb + insightsNote,
 	}}
 	for _, h := range sanitizedHistory {
 		messages = append(messages, map[string]any{"role": h.Role, "content": h.Content})

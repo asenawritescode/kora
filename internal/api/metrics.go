@@ -41,13 +41,42 @@ type metricsAPI struct {
 func registerMetricsRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry, siteDB *sql.DB, dialect db.Dialect) metricsAPI {
 	dashboardDefs := newVersionCache[[]metrics.Dashboard]()
 	api := newMetricsAPI(registry, siteDB, dialect)
-	api.mount(apiGroup.Group("/metrics"))
+	guard := insightsGuard(registry)
+	api.mount(apiGroup.Group("/metrics", guard))
 	dashboardsAPI{metricsAPI: api, loadDefs: func(c *gin.Context) ([]metrics.Dashboard, error) {
 		return cachedConfigValue(c, dashboardDefs, getSiteDB(c, siteDB), siteDialectFromContext(c, dialect), readDashboardDefs)
-	}}.mount(apiGroup.Group("/dashboards"))
+	}}.mount(apiGroup.Group("/dashboards", guard))
 	registerExploreRoutes(apiGroup, registry)
-	reportsAPI{metrics: api}.mount(apiGroup.Group("/explore/reports"))
+	reportsAPI{metrics: api}.mount(apiGroup.Group("/explore/reports", guard))
 	return api
+}
+
+// insightsGuard admits a request only when its roles grant Insights. Every metrics, explore, dashboard, drill,
+// saved-report and pin route is behind it.
+func insightsGuard(registry *doctype.Registry) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !requireInsights(c, registry) {
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// insightsAllowed reports whether the verified caller's roles grant Insights.
+func insightsAllowed(c *gin.Context, registry *doctype.Registry) bool {
+	execution, valid := requestExecution(c)
+	return valid && analyticsRegistry(c, registry).InsightsAllowed(execution.Actor().Roles)
+}
+
+// requireInsights answers 403 metrics.insights_forbidden and reports false when the caller's roles do not grant
+// Insights.
+func requireInsights(c *gin.Context, registry *doctype.Registry) bool {
+	if insightsAllowed(c, registry) {
+		return true
+	}
+	writeError(c, http.StatusForbidden, "metrics.insights_forbidden", "Insights is not available for your role", nil)
+	return false
 }
 
 // versionCache keeps each site's parsed configuration with the version it came from. A request reads only

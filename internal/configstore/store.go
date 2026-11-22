@@ -358,10 +358,10 @@ func (s *Store) SaveRoles(roles []*doctype.Role, site string) error {
 // SaveRolesTx is like SaveRoles but uses an existing transaction.
 func (s *Store) SaveRolesTx(tx *sql.Tx, roles []*doctype.Role, site string) error {
 	for _, role := range roles {
-		upsertSQL := `INSERT INTO _kora_role (name, workspace_access, description, site)
-			VALUES (?, ?, ?, ?) ` + s.Dialect.UpsertClause(
-			[]string{"name"}, []string{"workspace_access", "description", "site"})
-		_, err := tx.Exec(db.Rebind(s.Dialect, upsertSQL), role.Name, boolToInt(role.WorkspaceAccess), role.Description, site)
+		upsertSQL := `INSERT INTO _kora_role (name, workspace_access, insights_access, description, site)
+			VALUES (?, ?, ?, ?, ?) ` + s.Dialect.UpsertClause(
+			[]string{"name"}, []string{"workspace_access", "insights_access", "description", "site"})
+		_, err := tx.Exec(db.Rebind(s.Dialect, upsertSQL), role.Name, boolToInt(role.WorkspaceAccess), boolToInt(role.InsightsAllowed()), role.Description, site)
 		if err != nil {
 			return fmt.Errorf("saving role %s: %w", role.Name, err)
 		}
@@ -498,7 +498,7 @@ func (s *Store) AutoCreatePermissionsForDoctype(doctypeName string, site string)
 
 // LoadRoles loads all roles from _kora_role.
 func (s *Store) LoadRoles(site string) ([]*doctype.Role, error) {
-	rows, err := s.DB.Query(db.Rebind(s.Dialect, "SELECT name, workspace_access, description FROM _kora_role WHERE site = ? OR site = '' ORDER BY name"), site)
+	rows, err := s.DB.Query(db.Rebind(s.Dialect, "SELECT name, workspace_access, insights_access, description FROM _kora_role WHERE site = ? OR site = '' ORDER BY name"), site)
 	if err != nil {
 		return nil, err
 	}
@@ -507,11 +507,13 @@ func (s *Store) LoadRoles(site string) ([]*doctype.Role, error) {
 	var roles []*doctype.Role
 	for rows.Next() {
 		r := &doctype.Role{}
-		var workspaceAccess int
-		if err := rows.Scan(&r.Name, &workspaceAccess, &r.Description); err != nil {
+		var workspaceAccess, insightsAccess int
+		if err := rows.Scan(&r.Name, &workspaceAccess, &insightsAccess, &r.Description); err != nil {
 			return nil, err
 		}
 		r.WorkspaceAccess = workspaceAccess == 1
+		insights := insightsAccess == 1
+		r.InsightsAccess = &insights
 		roles = append(roles, r)
 	}
 	return roles, rows.Err()

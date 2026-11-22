@@ -31,7 +31,8 @@ func (h *Handler) HandleChat(c *gin.Context) {
 		return
 	}
 
-	ai.HandleChat(c, ai.ChatTurn{Tx: tx, Registry: reg, Site: siteName, User: currentUser, Metrics: h.metricsRunner(c)})
+	ai.HandleChat(c, ai.ChatTurn{Tx: tx, Registry: reg, Site: siteName, User: currentUser, Metrics: h.metricsRunner(c),
+		Insights: insightsAllowed(c, reg)})
 }
 
 type aiChatConversationResponse struct {

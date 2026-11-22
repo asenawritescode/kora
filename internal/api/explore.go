@@ -11,7 +11,7 @@ import (
 
 // registerExploreRoutes mounts GET /explore/catalog, the record types a caller may ask questions of.
 func registerExploreRoutes(apiGroup *gin.RouterGroup, registry *doctype.Registry) {
-	apiGroup.Group("/explore").GET("/catalog", func(c *gin.Context) { exploreCatalog(c, registry) })
+	apiGroup.Group("/explore", insightsGuard(registry)).GET("/catalog", func(c *gin.Context) { exploreCatalog(c, registry) })
 }
 
 // exploreCatalog answers GET /explore/catalog: the record types the caller may question, with the measures and

@@ -48,6 +48,9 @@ func serveMetricsRoutes(m metricsAPI, keys map[any]any, base *http.Request) ai.M
 
 // dispatchMetricsRoute runs the handler behind one metrics route. An unknown route answers 404.
 func dispatchMetricsRoute(m metricsAPI, c *gin.Context, route ai.MetricsRoute) {
+	if !requireInsights(c, m.registry) {
+		return
+	}
 	switch route {
 	case ai.MetricsRouteMetrics:
 		m.list(c)

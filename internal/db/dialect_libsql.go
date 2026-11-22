@@ -594,6 +594,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 			"name" TEXT NOT NULL PRIMARY KEY,
 			"site" TEXT NOT NULL DEFAULT '',
 			"workspace_access" INTEGER NOT NULL DEFAULT 1,
+			"insights_access" INTEGER NOT NULL DEFAULT 1,
 			"description" TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS "idx_role_site" ON "_kora_role" ("site")`,
@@ -761,6 +762,7 @@ func (d *LibSQLDialect) SystemTableSQL() []string {
 		// Add site columns for multi-tenant isolation (LibSQL backwards compat).
 		`ALTER TABLE "_kora_doctype" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE "_kora_role" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_role" ADD COLUMN "insights_access" INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE "_kora_permission" ADD COLUMN "site" TEXT NOT NULL DEFAULT ''`,
 
 		// _kora_view

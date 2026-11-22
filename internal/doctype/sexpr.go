@@ -495,6 +495,9 @@ func writeSExprRole(b *strings.Builder, r *Role, indent string) {
 	if r.WorkspaceAccess {
 		props = append(props, sExprProp{"workspace", "true"})
 	}
+	if r.InsightsAccess != nil {
+		props = append(props, sExprProp{"insights", strconv.FormatBool(*r.InsightsAccess)})
+	}
 	if r.Description != "" {
 		props = append(props, sExprProp{"description", quoteSExprString(r.Description)})
 	}
@@ -1491,6 +1494,10 @@ func parseRole(node *sNode) (*Role, error) {
 	r := &Role{Name: nodeStr(node.Children[1])}
 	kw := extractKeywords(node.Children[2:])
 	r.WorkspaceAccess = kwBool(kw, "workspace")
+	if v, ok := kw["insights"]; ok {
+		insights := v == "true"
+		r.InsightsAccess = &insights
+	}
 	r.Description = kw["description"]
 	return r, nil
 }

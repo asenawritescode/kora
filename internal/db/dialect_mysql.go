@@ -560,6 +560,7 @@ func (d *MySQLDialect) SystemTableSQL() []string {
 		// _kora_role
 		"CREATE TABLE IF NOT EXISTS _kora_role (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tworkspace_access TINYINT(1) NOT NULL DEFAULT 1,\n\t\t\tdescription TEXT\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 		"ALTER TABLE _kora_role ADD COLUMN site VARCHAR(140) NOT NULL DEFAULT ''",
+		"ALTER TABLE _kora_role ADD COLUMN insights_access TINYINT(1) NOT NULL DEFAULT 1",
 
 		// _kora_permission
 		"CREATE TABLE IF NOT EXISTS _kora_permission (\n\t\t\tname VARCHAR(140) PRIMARY KEY,\n\t\t\tsite VARCHAR(140) NOT NULL DEFAULT '',\n\t\t\tdoctype VARCHAR(140) NOT NULL,\n\t\t\trole VARCHAR(140) NOT NULL,\n\t\t\tcan_read TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_write TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_create TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_delete TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_submit TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_cancel TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_amend TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_export TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_import TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tcan_report TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tif_owner TINYINT(1) NOT NULL DEFAULT 0,\n\t\t\tif_assigned TEXT NULL,\n\t\t\tscope_json TEXT NULL,\n\t\t\tUNIQUE KEY idx_doctype_role (doctype, role)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",

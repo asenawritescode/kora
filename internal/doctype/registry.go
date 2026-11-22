@@ -206,6 +206,15 @@ func (r *Registry) CanUser(userRoles []string, doctype, operation string) (allow
 	return r.Permissions.UserCan(userRoles, doctype, operation)
 }
 
+// InsightsAllowed reports whether any of userRoles grants Insights in the tenant permission matrix. A nil
+// registry grants nothing.
+func (r *Registry) InsightsAllowed(userRoles []string) bool {
+	if r == nil {
+		return false
+	}
+	return r.Permissions.InsightsAllowed(userRoles)
+}
+
 // RowScopeFor returns operation-specific row restrictions from the current
 // tenant permission matrix.
 func (r *Registry) RowScopeFor(userRoles []string, doctype, operation string) (bool, []string) {

@@ -165,15 +165,17 @@ func getUserPermissions(reg *doctype.Registry, c *gin.Context, dt string) map[st
 
 // NavigationResponse is the full navigation config for the SPA sidebar.
 type NavigationResponse struct {
-	Modules               []ModuleGroup  `json:"modules"`
-	Views                 []ViewNavItem  `json:"views,omitempty"`
-	HasConfiguration      bool           `json:"has_configuration"`
-	Branding              Branding       `json:"branding"`
-	Copy                  ExperienceCopy `json:"copy"`
-	User                  UserInfo       `json:"user"`
-	AdminCapabilities     []string       `json:"admin_capabilities"`
-	CapabilitiesVersion   string         `json:"capabilities_version,omitempty"`
-	SupportedCapabilities []string       `json:"supported_capabilities,omitempty"`
+	Modules           []ModuleGroup  `json:"modules"`
+	Views             []ViewNavItem  `json:"views,omitempty"`
+	HasConfiguration  bool           `json:"has_configuration"`
+	Branding          Branding       `json:"branding"`
+	Copy              ExperienceCopy `json:"copy"`
+	User              UserInfo       `json:"user"`
+	AdminCapabilities []string       `json:"admin_capabilities"`
+	// Insights is whether the caller's roles grant Insights (metrics, explore, dashboards, saved reports).
+	Insights              bool     `json:"insights"`
+	CapabilitiesVersion   string   `json:"capabilities_version,omitempty"`
+	SupportedCapabilities []string `json:"supported_capabilities,omitempty"`
 }
 
 // ModuleGroup is a group of DocTypes under a module.
@@ -405,6 +407,7 @@ func (h *Handler) HandleSystemNavigation(c *gin.Context) {
 			Copy:                  experience.Copy,
 			User:                  user,
 			AdminCapabilities:     adminCapabilities,
+			Insights:              insightsAllowed(c, reg),
 			CapabilitiesVersion:   "2",
 			SupportedCapabilities: supportedCapabilities,
 		},

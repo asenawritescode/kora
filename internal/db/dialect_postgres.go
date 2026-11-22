@@ -631,6 +631,7 @@ func (d *PostgresDialect) SystemTableSQL() []string {
 			"description" TEXT
 		)`,
 		`ALTER TABLE "_kora_role" ADD COLUMN "site" VARCHAR(140) NOT NULL DEFAULT ''`,
+		`ALTER TABLE "_kora_role" ADD COLUMN "insights_access" SMALLINT NOT NULL DEFAULT 1`,
 
 		// _kora_permission
 		`CREATE TABLE IF NOT EXISTS "_kora_permission" (

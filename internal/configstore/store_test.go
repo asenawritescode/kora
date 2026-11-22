@@ -190,7 +190,7 @@ func TestSaveRoles_RoundTrip(t *testing.T) {
 	for _, role := range roles {
 		expectUpsert := `INSERT INTO _kora_role`
 		mock.ExpectExec(expectUpsert).
-			WithArgs(role.Name, 1, role.Description, "").
+			WithArgs(role.Name, 1, 1, role.Description, "").
 			WillReturnResult(sqlmock.NewResult(1, 1))
 	}
 	mock.ExpectExec(`UPDATE _kora_auth_revision SET policy_revision = policy_revision \+ 1 WHERE id = 1`).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -312,11 +312,11 @@ func TestLoadRoles(t *testing.T) {
 
 	s := newStore(db)
 
-	rows := sqlmock.NewRows([]string{"name", "workspace_access", "description"}).
-		AddRow("Admin", 1, "Administrator").
-		AddRow("Guest", 0, "Guest access")
+	rows := sqlmock.NewRows([]string{"name", "workspace_access", "insights_access", "description"}).
+		AddRow("Admin", 1, 1, "Administrator").
+		AddRow("Guest", 0, 0, "Guest access")
 
-	mock.ExpectQuery("SELECT name, workspace_access, description FROM _kora_role WHERE site = \\? OR site = '' ORDER BY name").
+	mock.ExpectQuery("SELECT name, workspace_access, insights_access, description FROM _kora_role WHERE site = \\? OR site = '' ORDER BY name").
 		WillReturnRows(rows)
 
 	roles, err := s.LoadRoles("")
@@ -331,6 +331,12 @@ func TestLoadRoles(t *testing.T) {
 	}
 	if roles[1].WorkspaceAccess {
 		t.Error("Guest should NOT have workspace access")
+	}
+	if roles[1].InsightsAllowed() {
+		t.Error("Guest should NOT have insights")
+	}
+	if !roles[0].InsightsAllowed() {
+		t.Error("Admin should have insights")
 	}
 }
 

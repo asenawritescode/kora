@@ -45,6 +45,8 @@ type ChatTurn struct {
 	Site     string
 	User     string
 	Metrics  MetricsRunner
+	// Insights is whether the person's roles grant Insights. Without it the metrics tools are not offered.
+	Insights bool
 }
 
 // Tool names of the metrics tools.
@@ -510,6 +512,22 @@ func (t *answerTurn) sparkline(req contract.MetricQueryRequest, meta contract.Me
 func RunMetricsTool(run MetricsRunner, name string, args map[string]any) string {
 	return executeMetricsTool(&answerTurn{run: run}, name, args)
 }
+
+// withoutMetricsTools drops the metrics tools from a tool list, for a person whose roles do not grant Insights.
+func withoutMetricsTools(functions []map[string]any) []map[string]any {
+	out := make([]map[string]any, 0, len(functions))
+	for _, fn := range functions {
+		switch safeGetString(safeGetMap(fn, "function"), "name") {
+		case toolListMetrics, toolQueryMetrics, toolDrillMetrics:
+			continue
+		}
+		out = append(out, fn)
+	}
+	return out
+}
+
+// insightsUnavailableNote tells the model what to say when the person has no Insights.
+const insightsUnavailableNote = "\n\nInsights is not available for this person's role. You have no metrics tools. If they ask for a business number, say that Insights is not available for their role, give no number, and do not guess."
 
 // MetricsToolDescriptors are the read metrics tools, for a client that projects them next to its other tools.
 func MetricsToolDescriptors() []ToolDescriptor {
