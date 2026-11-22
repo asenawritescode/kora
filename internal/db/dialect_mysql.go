@@ -407,7 +407,10 @@ func (d *MySQLDialect) UpsertIncrementForTable(_ string, conflictCols []string, 
 	return "ON DUPLICATE KEY UPDATE " + strings.Join(parts, ", ")
 }
 
-func (d *MySQLDialect) InsertOrIgnorePrefix() string { return "INSERT IGNORE" }
+// InsertIgnoreSQL turns the leading INSERT into INSERT IGNORE.
+func (d *MySQLDialect) InsertIgnoreSQL(insert string) string {
+	return strings.Replace(insert, "INSERT", "INSERT IGNORE", 1)
+}
 
 // SharedRowLock is MySQL's locking read: FOR SHARE.
 func (d *MySQLDialect) SharedRowLock() string { return " FOR SHARE" }

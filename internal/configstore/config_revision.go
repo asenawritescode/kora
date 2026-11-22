@@ -32,10 +32,7 @@ func SeedConfigRevision(ctx context.Context, database *sql.DB, dialect db.Dialec
 	if ctx == nil || database == nil || dialect == nil {
 		return fmt.Errorf("seed config revision requires context, database, and dialect")
 	}
-	query := dialect.InsertOrIgnorePrefix() + ` INTO _kora_config_revision (id, revision) VALUES (1, 1)`
-	if dialect.DriverName() == "postgres" {
-		query += ` ON CONFLICT (id) DO NOTHING`
-	}
+	query := dialect.InsertIgnoreSQL(`INSERT INTO _kora_config_revision (id, revision) VALUES (1, 1)`)
 	if _, err := database.ExecContext(ctx, query); err != nil {
 		return fmt.Errorf("initialize tenant config revision: %w", err)
 	}

@@ -440,7 +440,10 @@ func (d *LibSQLDialect) UpsertIncrementForTable(_ string, conflictCols []string,
 	return fmt.Sprintf("ON CONFLICT(%s) DO UPDATE SET %s", strings.Join(quotedCols, ", "), strings.Join(parts, ", "))
 }
 
-func (d *LibSQLDialect) InsertOrIgnorePrefix() string { return "INSERT OR IGNORE" }
+// InsertIgnoreSQL turns the leading INSERT into INSERT OR IGNORE.
+func (d *LibSQLDialect) InsertIgnoreSQL(insert string) string {
+	return strings.Replace(insert, "INSERT", "INSERT OR IGNORE", 1)
+}
 
 // SharedRowLock is empty: SQLite has no row locks and no FOR SHARE.
 func (d *LibSQLDialect) SharedRowLock() string { return "" }

@@ -346,7 +346,7 @@ func BootstrapSystemTables(ctx context.Context, database *sql.DB, dialect db.Dia
 	if err := execDDL(authRevisionDDL, "creating authorization revision state"); err != nil {
 		return err
 	}
-	seedAuthRevision := dialect.InsertOrIgnorePrefix() + ` INTO _kora_auth_revision (id, policy_revision, membership_revision) VALUES (1, 1, 1)`
+	seedAuthRevision := dialect.InsertIgnoreSQL(`INSERT INTO _kora_auth_revision (id, policy_revision, membership_revision) VALUES (1, 1, 1)`)
 	if err := execDDL(seedAuthRevision, "initializing authorization revision state"); err != nil {
 		return err
 	}
@@ -398,7 +398,7 @@ func seedDefaultAdministratorRole(ctx context.Context, database *sql.DB, dialect
 	if ctx == nil {
 		return errors.New("seeding default administrator role requires context")
 	}
-	query := dialect.InsertOrIgnorePrefix() + ` INTO _kora_role (name, description) VALUES ('Administrator', 'Full access to all doctypes')`
+	query := dialect.InsertIgnoreSQL(`INSERT INTO _kora_role (name, description) VALUES ('Administrator', 'Full access to all doctypes')`)
 	if _, err := database.ExecContext(ctx, query); err != nil {
 		return fmt.Errorf("seeding default administrator role: %w", err)
 	}

@@ -50,7 +50,7 @@ func TestSeedConfigRevisionIsIdempotentForPostgresMigrationRetry(t *testing.T) {
 	}
 	defer database.Close()
 	dialect := db.Resolve("postgres")
-	query := `INSERT INTO _kora_config_revision (id, revision) VALUES (1, 1) ON CONFLICT (id) DO NOTHING`
+	query := `INSERT INTO _kora_config_revision (id, revision) VALUES (1, 1) ON CONFLICT DO NOTHING`
 	mock.ExpectExec(regexp.QuoteMeta(query)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(query)).WillReturnResult(sqlmock.NewResult(0, 0))
 	for i := 0; i < 2; i++ {

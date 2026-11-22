@@ -457,13 +457,9 @@ func (d *PostgresDialect) UpsertIncrementForTable(tableName string, conflictCols
 	return fmt.Sprintf("ON CONFLICT(%s) DO UPDATE SET %s", strings.Join(quotedCols, ", "), strings.Join(parts, ", "))
 }
 
-func (d *PostgresDialect) InsertOrIgnorePrefix() string {
-	// PostgreSQL does not have INSERT IGNORE. The equivalent is
-	// INSERT ... ON CONFLICT DO NOTHING, which is a suffix, not a prefix.
-	// Returning "INSERT" here means the calling code will produce a plain
-	// INSERT without conflict handling. For the PoC this is acceptable —
-	// the bootstrap code discards errors from this call.
-	return "INSERT"
+// InsertIgnoreSQL appends ON CONFLICT DO NOTHING: PostgreSQL has no INSERT IGNORE prefix.
+func (d *PostgresDialect) InsertIgnoreSQL(insert string) string {
+	return insert + " ON CONFLICT DO NOTHING"
 }
 
 // SharedRowLock is PostgreSQL's locking read: FOR SHARE.
