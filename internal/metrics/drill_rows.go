@@ -162,11 +162,14 @@ func (p plan) recordsFrom(d db.Dialect, group map[string]string) (string, []any)
 	rp.records = true
 	var args []any
 	s := p.series[0]
-	union := rp.factsUnion(d, &args)
+	// Build one union only: each fact part appends its arguments, so a discarded part would leave extra args.
+	var union string
 	if s.line && !p.hasLineDim() {
 		// A line sum counts line rows only: a header row has no line value, and a record without a matching
 		// line is not in the number.
 		union = rp.factsPart(d, p.model.Facts.LineTableName(p.model), true, &args)
+	} else {
+		union = rp.factsUnion(d, &args)
 	}
 	value := "1"
 	conds := s.conds
