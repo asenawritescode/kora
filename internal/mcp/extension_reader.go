@@ -138,6 +138,24 @@ func (r *ExtensionReader) Metrics(ctx context.Context) (ai.MetricsRunner, error)
 	}, nil
 }
 
+// InsightsAllowed is the InsightsGate of the reader's credential: it authenticates the credential and applies the
+// rule the HTTP Insights routes apply to the roles it carries.
+func (r *ExtensionReader) InsightsAllowed(ctx context.Context) (bool, error) {
+	if ctx == nil {
+		return false, errors.New("MCP request context is required")
+	}
+	authCtx, release, err := r.admit(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer release()
+	execution, err := r.authenticate(authCtx)
+	if err != nil {
+		return false, err
+	}
+	return r.registry.InsightsAllowed(execution.Actor().Roles), nil
+}
+
 // admit takes one read slot and bounds the call by extensionReadTimeout. The returned function releases both.
 func (r *ExtensionReader) admit(ctx context.Context) (context.Context, func(), error) {
 	queryCtx, cancel := context.WithTimeout(ctx, extensionReadTimeout)

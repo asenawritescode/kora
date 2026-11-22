@@ -23,9 +23,6 @@ import (
 // refuses a credential the tenant does not hold. Each run gets its own database with the system tables, dropped
 // when the test ends. The DSNs must point to disposable services.
 func TestKoraMCPServesMetricsToAuthenticatedExtension(t *testing.T) {
-	// Postgres is not listed yet: extension credentials never verify there, because internal/extension/sqlstore
-	// compares the BOOLEAN is_active column with 1. Add {"postgres", "postgres", "KORA_MCP_DISPOSABLE_POSTGRES_DSN"}
-	// once that query is fixed.
 	for _, tc := range []struct{ name, driver, env string }{
 		{"mysql", "mysql", "KORA_MCP_DISPOSABLE_MYSQL_DSN"},
 	} {
@@ -45,7 +42,7 @@ func TestKoraMCPServesMetricsToAuthenticatedExtension(t *testing.T) {
 			if err != nil {
 				t.Fatal("create extension reader:", err)
 			}
-			server := NewReadOnlyWithExecutor(registry, "tenant.example", reader.Execute, WithMetrics(reader.Metrics))
+			server := NewReadOnlyWithExecutor(registry, "tenant.example", reader.Execute, WithMetrics(reader.Metrics, reader.InsightsAllowed))
 			session := connectServer(t, server)
 
 			tools, err := session.ListTools(ctx, nil)
@@ -77,7 +74,7 @@ func TestKoraMCPServesMetricsToAuthenticatedExtension(t *testing.T) {
 			if err != nil {
 				t.Fatal("create reader for a credential the tenant does not hold:", err)
 			}
-			refused := NewReadOnlyWithExecutor(registry, "tenant.example", stranger.Execute, WithMetrics(stranger.Metrics))
+			refused := NewReadOnlyWithExecutor(registry, "tenant.example", stranger.Execute, WithMetrics(stranger.Metrics, stranger.InsightsAllowed))
 			result, err := connectServer(t, refused).CallTool(ctx, &sdkmcp.CallToolParams{
 				Name: "query_metrics", Arguments: map[string]any{"metrics": []string{"items_sold"}},
 			})

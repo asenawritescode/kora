@@ -76,7 +76,7 @@ Configure Claude Desktop to use it:
 			if err != nil {
 				return fmt.Errorf("configuring authenticated read-only MCP tools: %w", err)
 			}
-			server = mcp.NewReadOnlyWithExecutor(reg, siteName, reader.Execute, mcp.WithMetrics(reader.Metrics))
+			server = mcp.NewReadOnlyWithExecutor(reg, siteName, reader.Execute, mcp.WithMetrics(reader.Metrics, reader.InsightsAllowed))
 		}
 		return server.Run(context.Background())
 	},
