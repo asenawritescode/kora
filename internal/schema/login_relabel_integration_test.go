@@ -37,11 +37,11 @@ func TestDataToUserRelabelIsNotBlockedAndKeepsLogins(t *testing.T) {
 			if err != nil {
 				t.Fatalf("plan before: %v", err)
 			}
-			if err := ApplySnapshotActivationDDL(ctx, database.DB, dialect, plan); err != nil {
-				t.Fatalf("apply before: %v", err)
+			if applyErr := ApplySnapshotActivationDDL(ctx, database.DB, dialect, plan); applyErr != nil {
+				t.Fatalf("apply before: %v", applyErr)
 			}
 			table := dialect.QuoteIdent(before.RawTableName())
-			if _, err := database.DB.ExecContext(ctx, fmt.Sprintf("INSERT INTO %s (name, cashier) VALUES ('TS-1', 'ana.login')", table)); err != nil {
+			if _, err = database.DB.ExecContext(ctx, fmt.Sprintf("INSERT INTO %s (name, cashier) VALUES ('TS-1', 'ana.login')", table)); err != nil {
 				t.Fatalf("seed old Data cashier: %v", err)
 			}
 

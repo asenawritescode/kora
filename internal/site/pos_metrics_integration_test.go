@@ -241,6 +241,7 @@ func feedSaleEvents(t *testing.T, conn *sql.DB, dialect kdb.Dialect, reg *doctyp
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = rows.Close() }()
 	type stored struct {
 		payload string
 		seq     int64
@@ -249,12 +250,11 @@ func feedSaleEvents(t *testing.T, conn *sql.DB, dialect kdb.Dialect, reg *doctyp
 	for rows.Next() {
 		var s stored
 		if err := rows.Scan(&s.payload, &s.seq); err != nil {
-			_ = rows.Close()
 			t.Fatal(err)
 		}
 		events = append(events, s)
 	}
-	if err := rows.Close(); err != nil {
+	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
 	if len(events) == 0 {
