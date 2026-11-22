@@ -6261,7 +6261,9 @@
       "output",
       "reasoning",
       "total",
-      "partial"
+      "partial",
+      "cached_input",
+      "cache_write"
     ]
   }
 }
