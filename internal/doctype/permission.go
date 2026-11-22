@@ -382,9 +382,14 @@ func permissionAllows(p *Permission, operation string) bool {
 	}
 }
 
-// InsightsAllowed reports whether any of userRoles grants Insights. The admin role always does, and a role
-// the matrix does not define grants it by default, as an unset insights_access does.
+// InsightsAllowed reports whether userRoles grant Insights. The admin role always does. An identity with no
+// roles (an extension, for example) is not denied by a role flag: record read permissions still apply. Otherwise
+// the identity is denied only when every one of its roles sets insights_access: false; a role the matrix does
+// not define grants it by default, as an unset insights_access does.
 func (pm *PermissionMatrix) InsightsAllowed(userRoles []string) bool {
+	if len(userRoles) == 0 {
+		return true
+	}
 	for _, name := range userRoles {
 		if name == AdminRole {
 			return true
