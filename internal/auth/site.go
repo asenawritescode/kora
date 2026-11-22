@@ -200,17 +200,16 @@ func (g *SiteGuard) authenticateChannelSession(c *gin.Context, token string) boo
 		return false
 	}
 
-	session, err := AuthenticateChannelSession(c.Request.Context(), sqlDB, kdb.Resolve(c.GetString("site_db_type")), token)
+	dialect := kdb.Resolve(c.GetString("site_db_type"))
+	session, err := AuthenticateChannelSession(c.Request.Context(), sqlDB, dialect, token)
 	if err != nil {
 		return false
 	}
+	if session.SubjectUser != "" {
+		return bindSubjectChannelSession(c, sqlDB, dialect, session)
+	}
 
-	c.Set("auth_type", "channel_session")
-	c.Set("channel_session_id", session.ID)
-	c.Set("channel_client_name", session.ClientName)
-	c.Set("channel_permissions", session.Permissions)
-	c.Set("channel_conversation_key", session.ConversationKey)
-	c.Set("channel_sender_address", session.SenderAddress)
+	setChannelSessionContext(c, session)
 	actor := contract.ActorContext{
 		PrincipalID: "channel:" + session.ID, PrincipalType: contract.PrincipalAgent,
 		Site: c.GetString("site_name"), Channel: session.Provider, DeviceID: session.ClientName,
@@ -222,6 +221,43 @@ func (g *SiteGuard) authenticateChannelSession(c *gin.Context, token string) boo
 	}
 	c.Set("policy_execution", execution)
 	return true
+}
+
+// bindSubjectChannelSession runs a channel session as its subject user. The user's roles are read from the user
+// record on every request, so a disabled or removed user loses access at once. Such a session has no delegated grants:
+// the role matrix decides what it may do.
+func bindSubjectChannelSession(c *gin.Context, database *sql.DB, dialect kdb.QueryDialect, session *ChannelSession) bool {
+	site := c.GetString("site_name")
+	user, err := LoadChannelSubject(c.Request.Context(), database, dialect, site, session.SubjectUser)
+	if err != nil {
+		return false
+	}
+	tenantID := c.GetString("site_id")
+	if tenantID == "" {
+		tenantID = site
+	}
+	execution, err := policy.NewVerifiedExecution(contract.TenantID(tenantID), contract.ActorContext{
+		PrincipalID: user.Name, PrincipalType: contract.PrincipalHuman, SubjectUserID: user.Name,
+		Site: site, Roles: user.Roles, Channel: session.Provider, DeviceID: session.ClientName,
+		AuthSessionID: session.ID, AuthenticatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		return false
+	}
+	setChannelSessionContext(c, session)
+	c.Set("channel_subject_user", user.Name)
+	c.Set("policy_execution", execution)
+	return true
+}
+
+// setChannelSessionContext records the channel session's identity fields in the request context.
+func setChannelSessionContext(c *gin.Context, session *ChannelSession) {
+	c.Set("auth_type", "channel_session")
+	c.Set("channel_session_id", session.ID)
+	c.Set("channel_client_name", session.ClientName)
+	c.Set("channel_permissions", session.Permissions)
+	c.Set("channel_conversation_key", session.ConversationKey)
+	c.Set("channel_sender_address", session.SenderAddress)
 }
 
 // authenticateExtension verifies a Bearer access token against the _kora_extension table.

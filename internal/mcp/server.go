@@ -5,6 +5,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -28,19 +29,31 @@ type Server struct {
 	mode     Mode
 	executor VerifiedToolExecutor
 	metrics  MetricsFactory
+	insights InsightsGate
 }
 
 // MetricsFactory returns the runner of the metrics tools for one call. The runner must act as the caller the call
 // authenticated as, so the reads apply the same grants, scope and business clock as the API.
 type MetricsFactory func(ctx context.Context) (ai.MetricsRunner, error)
 
+// InsightsGate reports whether the authenticated identity of the call may use Insights, by the rule the HTTP routes
+// apply. An error means the identity could not be established, which denies it.
+type InsightsGate func(ctx context.Context) (bool, error)
+
+// ErrInsightsForbidden refuses a metrics call from an identity whose roles do not grant Insights.
+var ErrInsightsForbidden = errors.New("mcp: Insights is not available for this identity")
+
 // Option configures a Server at construction.
 type Option func(*Server)
 
 // WithMetrics adds the metrics read tools (list_metrics, query_metrics, drill_metrics). Each call takes its runner from
-// the factory; without this option the server has no metrics tools.
-func WithMetrics(factory MetricsFactory) Option {
-	return func(s *Server) { s.metrics = factory }
+// the factory and is admitted by the gate first. The tools are listed only while the gate admits the identity, and a
+// call by name is refused with ErrInsightsForbidden when it does not.
+func WithMetrics(factory MetricsFactory, gate InsightsGate) Option {
+	return func(s *Server) {
+		s.metrics = factory
+		s.insights = gate
+	}
 }
 
 // VerifiedToolExecutor is supplied only by an adapter that authenticates the
@@ -90,7 +103,7 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) registerTools() {
 	// Config generation tools.
 	s.addConfigTools()
-	if s.metrics != nil {
+	if s.metrics != nil && s.listsMetrics() {
 		for _, tool := range ai.MetricsToolDescriptors() {
 			s.addMetricsTool(tool)
 		}
@@ -103,7 +116,7 @@ func (s *Server) registerTools() {
 		return
 	}
 
-	catalog := ai.BuildToolCatalog(s.registry)
+	catalog := ai.BuildToolCatalog(s.registry, ai.CatalogOptions{})
 	for _, tool := range catalog.Tools {
 		if tool.Source != "tenant" {
 			continue
@@ -115,9 +128,34 @@ func (s *Server) registerTools() {
 	}
 }
 
+// listsMetrics reports whether the identity may see the metrics tools. A missing gate or a gate that errs hides them.
+func (s *Server) listsMetrics() bool {
+	if s.insights == nil {
+		return false
+	}
+	ok, err := s.insights(context.Background())
+	return err == nil && ok
+}
+
+// metricsRunner admits one metrics call through the gate, then takes the runner of the caller. A denied identity gets
+// an error even when it calls the tool by name.
+func (s *Server) metricsRunner(ctx context.Context) (ai.MetricsRunner, error) {
+	if s.insights == nil {
+		return nil, ErrInsightsForbidden
+	}
+	ok, err := s.insights(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrInsightsForbidden
+	}
+	return s.metrics(ctx)
+}
+
 func isReadOperation(operation string) bool {
 	switch operation {
-	case "find", "list", "get":
+	case "find", "list", "get", "describe":
 		return true
 	default:
 		return false
@@ -183,18 +221,11 @@ func (s *Server) addProjectedTool(tool ai.ToolDescriptor) {
 func (s *Server) addMetricsTool(tool ai.ToolDescriptor) {
 	mcp.AddTool(s.srv, &mcp.Tool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema},
 		func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, any, error) {
-			run, err := s.metrics(ctx)
+			run, err := s.metricsRunner(ctx)
 			if err != nil {
 				return nil, nil, err
 			}
 			text := ai.RunMetricsTool(run, tool.Name, args)
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil, nil
 		})
-}
-
-func sanitizeName(name string) string {
-	s := strings.ToLower(name)
-	s = strings.ReplaceAll(s, " ", "_")
-	s = strings.ReplaceAll(s, "-", "_")
-	return s
 }

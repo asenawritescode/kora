@@ -151,9 +151,9 @@
    "lines": 185
   },
   "internal/api/ai::HandleChat": {
-   "cognitive": 116,
-   "cyclomatic": 52,
-   "statements": 221
+   "cognitive": 103,
+   "cyclomatic": 46,
+   "statements": 209
   },
   "internal/api/ai::ValidateProviderProfile": {
    "cyclomatic": 16
@@ -183,12 +183,12 @@
    "statements": 41
   },
   "internal/api/ai::executeSingleTool": {
-   "cognitive": 65,
-   "cyclomatic": 60,
-   "statements": 153
+   "cognitive": 17,
+   "cyclomatic": 28,
+   "statements": 73
   },
   "internal/api/ai::executeToolCallsForAI": {
-   "lines": 113
+   "lines": 108
   },
   "internal/api/ai::executeUpdateDoctypeDraft": {
    "cognitive": 16
@@ -361,8 +361,8 @@
    "cyclomatic": 18
   },
   "internal/api::(*Handler).handleChannelTool": {
-   "cognitive": 22,
-   "cyclomatic": 20
+   "cognitive": 20,
+   "cyclomatic": 19
   },
   "internal/api::(*Handler).handleSystemRealtimeSSE": {
    "cognitive": 20
@@ -442,9 +442,6 @@
   },
   "internal/api::HandleDeleteSite": {
    "statements": 93
-  },
-  "internal/api::HandleExecutePublishedOperation": {
-   "statements": 47
   },
   "internal/api::HandleImport": {
    "statements": 134
@@ -526,7 +523,7 @@
    "statements": 78
   },
   "internal/api::RegisterRoutesOnGroup": {
-   "statements": 72
+   "statements": 65
   },
   "internal/api::RegisterSystemRoutes": {
    "statements": 41
@@ -617,7 +614,7 @@
    "cognitive": 16
   },
   "internal/api::handleChannelTool": {
-   "statements": 49
+   "statements": 48
   },
   "internal/api::handleConfigurationCheck": {
    "cognitive": 37,
@@ -1008,7 +1005,7 @@
    "lines": 259
   },
   "internal/db::ExtensibilityTablesMySQL": {
-   "lines": 136
+   "lines": 115
   },
   "internal/db::LoadSchema": {
    "statements": 41
@@ -1256,7 +1253,7 @@
    "cyclomatic": 16
   },
   "internal/engine::(*kernelCommandProviderHandle).InvokeCapability": {
-   "cyclomatic": 31
+   "cyclomatic": 30
   },
   "internal/engine::(*kernelCommandProviderHandle).Resolve": {
    "cognitive": 22,
@@ -1395,9 +1392,9 @@
    "statements": 99
   },
   "internal/engine::executePublishedOperation": {
-   "cognitive": 103,
-   "cyclomatic": 90,
-   "statements": 99
+   "cognitive": 99,
+   "cyclomatic": 87,
+   "statements": 92
   },
   "internal/engine::grantTenantMember": {
    "cognitive": 18,
@@ -2155,7 +2152,7 @@
    "cyclomatic": 22
   },
   "internal/scheduler::(*Scheduler).runEmailReport": {
-   "cognitive": 22,
+   "cognitive": 21,
    "cyclomatic": 16
   },
   "internal/scheduler::(*Scheduler).runOccurrence": {

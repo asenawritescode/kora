@@ -822,6 +822,31 @@ func (s *Scheduler) runDoctypeAlert(ctx context.Context, job *JobConfig) error {
 	return nil
 }
 
+// reportTitles is the title each report line shows for the documents: the display title (a Link title followed to
+// the linked record), else the stored title field, else the record name.
+func reportTitles(ctx context.Context, tx *orm.TxManager, dt *doctype.DocType, docs []*doctype.Document) (map[string]string, error) {
+	names := make([]string, 0, len(docs))
+	for _, doc := range docs {
+		names = append(names, doc.Name)
+	}
+	linkTitles, err := tx.ResolveTitles(ctx, dt, names)
+	if err != nil {
+		return nil, fmt.Errorf("resolve report titles: %w", err)
+	}
+	out := make(map[string]string, len(docs))
+	for _, doc := range docs {
+		title := linkTitles[doc.Name]
+		if title == "" {
+			title = doc.GetString(dt.TitleField)
+		}
+		if title == "" {
+			title = doc.Name
+		}
+		out[doc.Name] = title
+	}
+	return out, nil
+}
+
 func (s *Scheduler) runEmailReport(ctx context.Context, job *JobConfig) error {
 	doctypeName, _ := job.Config["doctype"].(string)
 	if doctypeName == "" {
@@ -861,12 +886,12 @@ func (s *Scheduler) runEmailReport(ctx context.Context, job *JobConfig) error {
 	var body strings.Builder
 	body.WriteString(message)
 	body.WriteString("\n\n")
+	linkTitles, err := reportTitles(ctx, &tx, dt, docs)
+	if err != nil {
+		return err
+	}
 	for _, doc := range docs {
-		title := doc.GetString(dt.TitleField)
-		if title == "" {
-			title = doc.Name
-		}
-		body.WriteString(fmt.Sprintf("- %s: %s\n", doc.Name, title))
+		body.WriteString(fmt.Sprintf("- %s: %s\n", doc.Name, linkTitles[doc.Name]))
 	}
 	body.WriteString(fmt.Sprintf("\nTotal: %d records\n", total))
 

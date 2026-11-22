@@ -135,12 +135,21 @@ func (h *Handler) legacyRuntimeService(site string) SiteRuntimeService {
 
 // NewHandler creates a new API handler.
 func NewHandler(registry *doctype.Registry, txManager *orm.TxManager) *Handler {
-	return &Handler{
+	h := &Handler{
 		Registry:      registry,
 		TxManager:     txManager,
 		AuthProviders: auth.NewProviderRegistry(),
 		AgentStores:   map[string]*org.AgentStore{},
 	}
+	// The metrics API reads the site database and dialect from each request, so a handler built without the
+	// router (tests, tools) still answers Ask Zana's metrics reads. The router replaces it with its own.
+	var siteDB *sql.DB
+	var dialect kdb.Dialect
+	if txManager != nil {
+		siteDB, dialect = txManager.DB, txManager.Dialect
+	}
+	h.metrics = newMetricsAPI(registry, siteDB, dialect)
+	return h
 }
 
 // siteRegistry returns the registry for the current request's site.
@@ -844,6 +853,21 @@ type RouteOptions struct {
 // Engine composes it with tenant middleware's pinned service snapshot and an
 // explicit cache owner; registry is the fallback used when a request carries
 // no site registry.
+// registerChannelRoutes mounts the managed channel routes: Cloud's session, chat and tool calls.
+func registerChannelRoutes(apiGroup *gin.RouterGroup, handler *Handler) {
+	channel := apiGroup.Group("/internal/channel")
+	{
+		channel.POST("/sessions/issue", handler.HandleChannelSessionIssue)
+		channel.POST("/chat", handler.HandleChannelChat)
+		channel.POST("/managed-client/rotate", handler.HandleManagedChannelClientRotate)
+		channel.POST("/managed-client/revoke", handler.HandleManagedChannelClientRevoke)
+		channel.POST("/sessions/revoke", handler.HandleChannelSessionRevoke)
+		channel.GET("/tools", handler.HandleChannelTools)
+		channel.POST("/query", handler.HandleChannelQuery)
+		channel.POST("/mutate", handler.HandleChannelMutate)
+	}
+}
+
 func RegisterRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry, txManager *orm.TxManager, opts RouteOptions) {
 	handler := NewHandler(registry, txManager)
 	handler.RealtimeConnections = opts.RealtimeConnections
@@ -919,16 +943,7 @@ func RegisterRoutesOnGroup(apiGroup *gin.RouterGroup, registry *doctype.Registry
 		}
 	}
 
-	channel := apiGroup.Group("/internal/channel")
-	{
-		channel.POST("/sessions/issue", handler.HandleChannelSessionIssue)
-		channel.POST("/managed-client/rotate", handler.HandleManagedChannelClientRotate)
-		channel.POST("/managed-client/revoke", handler.HandleManagedChannelClientRevoke)
-		channel.POST("/sessions/revoke", handler.HandleChannelSessionRevoke)
-		channel.GET("/tools", handler.HandleChannelTools)
-		channel.POST("/query", handler.HandleChannelQuery)
-		channel.POST("/mutate", handler.HandleChannelMutate)
-	}
+	registerChannelRoutes(apiGroup, handler)
 	apiGroup.GET("/internal/site/identity", handler.HandleManagedSiteIdentity)
 
 	// Custom API methods (user-defined scripts).

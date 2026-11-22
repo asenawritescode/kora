@@ -470,21 +470,20 @@ func TestUpsertIncrement(t *testing.T) {
 	}
 }
 
-func TestInsertOrIgnorePrefix(t *testing.T) {
+func TestInsertIgnoreSQL(t *testing.T) {
+	const insert = "INSERT INTO t (a) VALUES (1)"
 	tests := []struct {
 		name    string
 		dialect Dialect
 		want    string
 	}{
-		{"mysql", &MySQLDialect{}, "INSERT IGNORE"},
-		{"libsql", &LibSQLDialect{}, "INSERT OR IGNORE"},
+		{"mysql", &MySQLDialect{}, "INSERT IGNORE INTO t (a) VALUES (1)"},
+		{"libsql", &LibSQLDialect{}, "INSERT OR IGNORE INTO t (a) VALUES (1)"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.dialect.InsertOrIgnorePrefix()
-			if got != tt.want {
-				t.Errorf("InsertOrIgnorePrefix = %q, want %q", got, tt.want)
+			if got := tt.dialect.InsertIgnoreSQL(insert); got != tt.want {
+				t.Errorf("InsertIgnoreSQL = %q, want %q", got, tt.want)
 			}
 		})
 	}

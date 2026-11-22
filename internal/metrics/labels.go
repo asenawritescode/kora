@@ -8,6 +8,7 @@ import (
 
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
+	"github.com/asenawritescode/kora/internal/titles"
 )
 
 // labelChunk bounds the codes one title statement looks up, so a wide result stays under the
@@ -119,47 +120,16 @@ func codesOf(agg aggregate, keys []string, i int) []string {
 	return codes
 }
 
-// titles reads the title of each code from its record type: the title field, or the name when the
-// record type declares no other. A code with no record has no title.
+// titles reads the display title of each code from its record type, following Link titles through the catalog
+// (see titles.Resolve). A code with no record has no title.
 func (e Engine) titles(ctx context.Context, model *doctype.DocType, codes []string) (map[string]string, error) {
-	title := "name"
-	if f := model.GetField(model.TitleField); f != nil {
-		title = f.Fieldname
-	}
-	out := make(map[string]string, len(codes))
-	for start := 0; start < len(codes); start += labelChunk {
-		end := min(start+labelChunk, len(codes))
-		if err := e.titleChunk(ctx, model, title, codes[start:end], out); err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
+	return titles.Resolve(ctx, titles.Options{DB: e.DB, Dialect: e.Dialect, Link: e.linkTarget}, model, codes)
 }
 
-// titleChunk reads the titles of one chunk of codes into out.
-func (e Engine) titleChunk(ctx context.Context, model *doctype.DocType, title string, codes []string, out map[string]string) error {
-	q := e.Dialect.QuoteIdent
-	args := make([]any, len(codes))
-	for i, c := range codes {
-		args[i] = c
-	}
-	stmt := fmt.Sprintf("SELECT %s, %s FROM %s WHERE %s IN (%s)", q("name"), q(title), q(model.RawTableName()), q("name"),
-		strings.TrimSuffix(strings.Repeat("?, ", len(codes)), ", "))
-	rows, err := e.DB.QueryContext(ctx, db.Rebind(e.Dialect, stmt), args...)
-	if err != nil {
-		return fmt.Errorf("metrics: read titles of %s: %w", model.Name, err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var code string
-		var val sql.NullString
-		if err := rows.Scan(&code, &val); err != nil {
-			return fmt.Errorf("metrics: scan titles of %s: %w", model.Name, err)
-		}
-		out[code] = val.String
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("metrics: read titles of %s: %w", model.Name, err)
+// linkTarget is the record type a Link title names, when its titles may be read; the catalog holds every type.
+func (e Engine) linkTarget(name string) *doctype.DocType {
+	if t := e.Catalog.Models[name]; titles.Readable(t) {
+		return t
 	}
 	return nil
 }

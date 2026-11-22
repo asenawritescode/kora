@@ -234,3 +234,32 @@ func TestPayloadHashBackwardCompatible(t *testing.T) {
 		t.Fatal("reference and account must be part of the payload hash")
 	}
 }
+
+func TestImmediateProviderCapability(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider Provider
+		want     bool
+	}{
+		{name: "cash confirms on request", provider: Cash{}, want: true},
+		{name: "a provider that waits for the customer does not", provider: notImmediate{}, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			imm, ok := tc.provider.(ImmediateProvider)
+			got := ok && imm.ConfirmsOnRequest()
+			if got != tc.want {
+				t.Fatalf("ConfirmsOnRequest = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// notImmediate is a provider whose Request leaves the intent pending until a callback.
+type notImmediate struct{}
+
+func (notImmediate) Name() string { return "stk" }
+
+func (notImmediate) Request(context.Context, Intent) (Outcome, error) {
+	return Outcome{State: StatePending}, nil
+}

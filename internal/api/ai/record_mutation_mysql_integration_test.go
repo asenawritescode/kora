@@ -93,17 +93,23 @@ func TestAIRecordMutationUsesKernelReceiptAndAudit(t *testing.T) {
 			t.Fatal("encode AI tool arguments:", err)
 		}
 		calls := []any{map[string]any{"id": callID, "function": map[string]any{"name": toolName, "arguments": string(argBytes)}}}
-		results := executeToolCallsForAI(tx.Context, tx, registry, toolCallBatch{Calls: calls, Owner: "alice@example.test", Site: site, RunID: runID, StepID: stepID, ConversationID: "conversation-1"})
+		results := RunToolTurn(tx.Context, tx, registry, toolCallBatch{Calls: calls, Owner: "alice@example.test", Site: site, RunID: runID, StepID: stepID, ConversationID: "conversation-1"})
 		if len(results) != 1 {
 			t.Fatalf("tool %s returned %d responses, want one", toolName, len(results))
 		}
 		return fmt.Sprint(results[0]["content"])
 	}
 	createArgs := map[string]any{"title": "Initial"}
-	created := callTool("call-create-1", "task_create", createArgs, "run-1", "step-1")
-	replayedCreate := callTool("call-create-1", "task_create", createArgs, "run-1", "step-1")
+	createCall := map[string]any{"record_type": "Task", "data": createArgs}
+	// A chat create previews; the write runs only when the person confirms in a later turn.
+	preview := callTool("call-create-1", "create_record", createCall, "run-1", "step-1")
+	if !strings.HasPrefix(preview, `{"preview"`) {
+		t.Fatalf("AI create preview = %q, want a preview", preview)
+	}
+	created := callTool("call-confirm-1", "confirm_write", map[string]any{"write_id": writeIDOf(t, preview)}, "run-2", "step-2")
+	replayedCreate := callTool("call-confirm-1", "confirm_write", map[string]any{"write_id": writeIDOf(t, preview)}, "run-3", "step-3")
 	if !strings.HasPrefix(created, "Created Task \"") || replayedCreate != created {
-		t.Fatalf("AI create/replay outputs differ: first=%q replay=%q", created, replayedCreate)
+		t.Fatalf("AI confirm/replay outputs differ: first=%q replay=%q", created, replayedCreate)
 	}
 	nameStart := strings.Index(created, "\"") + 1
 	nameEnd := strings.Index(created[nameStart:], "\"") + nameStart
@@ -112,14 +118,15 @@ func TestAIRecordMutationUsesKernelReceiptAndAudit(t *testing.T) {
 	}
 	name := created[nameStart:nameEnd]
 
-	updateArgs := map[string]any{"name": name, "title": "Updated"}
-	updated := callTool("call-update-1", "task_update", updateArgs, "run-1", "step-2")
-	replayedUpdate := callTool("call-update-1", "task_update", updateArgs, "run-1", "step-2")
+	updateCall := map[string]any{"record_type": "Task", "name": name, "data": map[string]any{"title": "Updated"}}
+	updatePreview := callTool("call-update-1", "update_record", updateCall, "run-3", "step-4")
+	updated := callTool("call-confirm-2", "confirm_write", map[string]any{"write_id": writeIDOf(t, updatePreview)}, "run-4", "step-5")
+	replayedUpdate := callTool("call-confirm-2", "confirm_write", map[string]any{"write_id": writeIDOf(t, updatePreview)}, "run-5", "step-6")
 	if !strings.HasPrefix(updated, "Updated Task \"") || replayedUpdate != updated {
-		t.Fatalf("AI update/replay outputs differ: first=%q replay=%q", updated, replayedUpdate)
+		t.Fatalf("AI update confirm/replay outputs differ: first=%q replay=%q", updated, replayedUpdate)
 	}
 	var pendingApprovals int
-	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_ai_approval WHERE site = ? AND tool_name = 'task_update'", site).Scan(&pendingApprovals); err != nil {
+	if err := database.QueryRow("SELECT COUNT(*) FROM _kora_ai_approval WHERE site = ? AND tool_name = 'update_record'", site).Scan(&pendingApprovals); err != nil {
 		t.Fatalf("count AI update approvals: %v", err)
 	}
 	if pendingApprovals != 0 {
@@ -128,7 +135,7 @@ func TestAIRecordMutationUsesKernelReceiptAndAudit(t *testing.T) {
 
 	channelArgs := map[string]any{"title": "Channel"}
 	const channelKey = "external-channel-retry-0001"
-	channelRequest := ToolRequest{Name: "task_create", Args: channelArgs, Owner: "alice@example.test", Site: site, Confirmed: true, IdempotencyKey: channelKey, Execution: execution}
+	channelRequest := ToolRequest{Name: "create_record", Args: map[string]any{"record_type": "Task", "data": channelArgs}, Owner: "alice@example.test", Site: site, Confirmed: true, IdempotencyKey: channelKey, Execution: execution}
 	channelCreate := ExecuteTool(tx, registry, channelRequest)
 	channelReplay := ExecuteTool(tx, registry, channelRequest)
 	if !strings.HasPrefix(channelCreate, "Created Task \"") || channelReplay != channelCreate {
@@ -142,9 +149,13 @@ func TestAIRecordMutationUsesKernelReceiptAndAudit(t *testing.T) {
 	if title != "Updated" {
 		t.Fatalf("Task title = %q, want Updated", title)
 	}
+	// Previews run the synchronous before-hooks inside their rolled-back transaction: one
+	// create preview (insert and save) and one update preview (save). Confirms and replays
+	// add the same hooks as before. After-hooks are captured in the transaction and do not run
+	// for a preview, so their counts match the direct-write expectations.
 	for event, want := range map[script.Event]int{
-		script.EventBeforeInsert: 2,
-		script.EventBeforeSave:   3,
+		script.EventBeforeInsert: 3,
+		script.EventBeforeSave:   5,
 		script.EventAfterInsert:  2,
 		script.EventAfterSave:    3,
 	} {

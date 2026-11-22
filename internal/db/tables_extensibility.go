@@ -79,27 +79,6 @@ func ExtensibilityTablesMySQL() []string {
 		`ALTER TABLE _kora_extension ADD COLUMN access_token_hash CHAR(64) NOT NULL DEFAULT ''`,
 		`CREATE INDEX idx_ext_access_token_hash ON _kora_extension (access_token_hash)`,
 
-		`CREATE TABLE IF NOT EXISTS _kora_channel_session (
-			id VARCHAR(64) PRIMARY KEY,
-			site VARCHAR(140) NOT NULL DEFAULT '',
-			client_name VARCHAR(140) NOT NULL DEFAULT '',
-			conversation_key VARCHAR(255) NOT NULL DEFAULT '',
-			provider VARCHAR(80) NOT NULL DEFAULT '',
-			sender_address VARCHAR(255) NOT NULL DEFAULT '',
-			token_hash CHAR(64) NOT NULL,
-			api_permissions JSON,
-			trusted_until DATETIME(6) NOT NULL,
-			sensitive_until DATETIME(6),
-			revoked_at DATETIME(6),
-			revoked_reason VARCHAR(255) NOT NULL DEFAULT '',
-			created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-			last_used_at DATETIME(6),
-			UNIQUE KEY uq_channel_token_hash (token_hash),
-			KEY idx_channel_site (site),
-			KEY idx_channel_conversation (conversation_key),
-			KEY idx_channel_trusted_until (trusted_until)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-
 		`CREATE TABLE IF NOT EXISTS _kora_channel_audit (
 			id VARCHAR(64) PRIMARY KEY,
 			site VARCHAR(140) NOT NULL DEFAULT '',
@@ -137,7 +116,34 @@ func ExtensibilityTablesMySQL() []string {
 			INDEX idx_deliv_status (status),
 			INDEX idx_deliv_created (created_at)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-	}, RetiredAnalyticsDropDDL((&MySQLDialect{}))...)
+	}, append(channelSessionTablesMySQL(), RetiredAnalyticsDropDDL((&MySQLDialect{}))...)...)
+}
+
+// channelSessionTablesMySQL is the channel session table and its upgrade to the subject-user column.
+func channelSessionTablesMySQL() []string {
+	return []string{
+		`CREATE TABLE IF NOT EXISTS _kora_channel_session (
+			id VARCHAR(64) PRIMARY KEY,
+			site VARCHAR(140) NOT NULL DEFAULT '',
+			client_name VARCHAR(140) NOT NULL DEFAULT '',
+			conversation_key VARCHAR(255) NOT NULL DEFAULT '',
+			provider VARCHAR(80) NOT NULL DEFAULT '',
+			sender_address VARCHAR(255) NOT NULL DEFAULT '',
+			token_hash CHAR(64) NOT NULL,
+			api_permissions JSON,
+			trusted_until DATETIME(6) NOT NULL,
+			sensitive_until DATETIME(6),
+			revoked_at DATETIME(6),
+			revoked_reason VARCHAR(255) NOT NULL DEFAULT '',
+			created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+			last_used_at DATETIME(6),
+			UNIQUE KEY uq_channel_token_hash (token_hash),
+			KEY idx_channel_site (site),
+			KEY idx_channel_conversation (conversation_key),
+			KEY idx_channel_trusted_until (trusted_until)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		`ALTER TABLE _kora_channel_session ADD COLUMN subject_user VARCHAR(140) NOT NULL DEFAULT ''`,
+	}
 }
 
 // ExtensibilityTablesPostgres returns PostgreSQL-specific system DDL.
@@ -194,6 +200,7 @@ func ExtensibilityTablesPostgres() []string {
 			revoked_reason VARCHAR(255) NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			last_used_at TIMESTAMPTZ
 		)`,
+		`ALTER TABLE _kora_channel_session ADD COLUMN IF NOT EXISTS subject_user VARCHAR(140) NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_channel_site ON _kora_channel_session (site)`,
 		`CREATE INDEX IF NOT EXISTS idx_channel_conversation ON _kora_channel_session (conversation_key)`,
 		`CREATE INDEX IF NOT EXISTS idx_channel_trusted_until ON _kora_channel_session (trusted_until)`,

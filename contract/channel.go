@@ -59,13 +59,47 @@ type ManagedSiteIdentityV2 struct {
 //
 //contract:wire:v2
 type ChannelSessionIssueRequestV2 struct {
-	ClientName      string            `json:"client_name"`
-	ConversationKey string            `json:"conversation_key"`
-	Provider        string            `json:"provider"`
-	SenderAddress   string            `json:"sender_address"`
-	Permissions     []PermissionGrant `json:"permissions"`
-	TrustedUntil    string            `json:"trusted_until"`
-	SensitiveUntil  string            `json:"sensitive_until,omitempty"`
+	ClientName      string `json:"client_name"`
+	ConversationKey string `json:"conversation_key"`
+	Provider        string `json:"provider"`
+	SenderAddress   string `json:"sender_address"`
+	// SubjectUser, when set, names the enabled tenant user the session runs as. The session then uses that user's
+	// roles and ignores Permissions.
+	SubjectUser string `json:"subject_user,omitempty"`
+	// SubjectEmail, when set instead of SubjectUser, is the email address the sender proved they control (for
+	// example by a one-time code). It must belong to exactly one enabled user of the site, who becomes the subject.
+	SubjectEmail   string            `json:"subject_email,omitempty"`
+	Permissions    []PermissionGrant `json:"permissions"`
+	TrustedUntil   string            `json:"trusted_until"`
+	SensitiveUntil string            `json:"sensitive_until,omitempty"`
+}
+
+// ChannelChatRequestV2 is one turn from a managed channel. It needs a channel session issued with a subject user.
+//
+//contract:wire:v2
+type ChannelChatRequestV2 struct {
+	Message         string `json:"message"`
+	ConversationKey string `json:"conversation_key"`
+}
+
+// ChannelChatResponseV2 is the reply to one channel turn. AwaitingConfirmation is true when the conversation holds a
+// preview the person has not yet confirmed.
+//
+//contract:wire:v2
+type ChannelChatResponseV2 struct {
+	Result               string             `json:"result"`
+	Choices              *ChoiceQuestion    `json:"choices,omitempty"`
+	AwaitingConfirmation bool               `json:"awaiting_confirmation"`
+	Usage                ChannelChatUsageV2 `json:"usage"`
+}
+
+// ChannelChatUsageV2 is the model token usage of one channel turn, summed over its provider calls.
+//
+//contract:wire:v2
+type ChannelChatUsageV2 struct {
+	InputTokens       int64 `json:"input_tokens"`
+	CachedInputTokens int64 `json:"cached_input_tokens"`
+	OutputTokens      int64 `json:"output_tokens"`
 }
 
 // ChannelSessionIssueResponseV2 carries a newly issued, short-lived bearer

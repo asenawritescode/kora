@@ -79,8 +79,10 @@ func (r *ExtensionReader) Execute(ctx context.Context, tool ai.ToolDescriptor, a
 	if ctx == nil {
 		return "", errors.New("MCP request context is required")
 	}
-	dt := r.registry.Get(tool.Doctype)
-	if tool.Source != "tenant" || tool.ID != "tenant."+tool.Name || !isReadOperation(tool.Operation) || dt == nil || tool.Name != sanitizeName(dt.Name)+"_"+tool.Operation {
+	// The fixed record tools name their record type in the arguments, so the read is authorized
+	// against the type the call actually names.
+	_, permission, ok := ai.RecordToolTarget(r.registry, tool.Name, args)
+	if tool.Source != "tenant" || tool.ID != "tenant."+tool.Name || !isReadOperation(tool.Operation) || !ok || permission != "read" {
 		return "", errors.New("MCP tool is not an authorized DocType read operation")
 	}
 
@@ -134,6 +136,24 @@ func (r *ExtensionReader) Metrics(ctx context.Context) (ai.MetricsRunner, error)
 		caller := api.MetricsCaller{Context: callCtx, Site: r.siteName, TenantID: string(r.tenantID), Execution: execution}
 		return r.metrics.Runner(caller)(route, body) //nolint:contextcheck // the caller context travels in the request the runner clones
 	}, nil
+}
+
+// InsightsAllowed is the InsightsGate of the reader's credential: it authenticates the credential and applies the
+// rule the HTTP Insights routes apply to the roles it carries.
+func (r *ExtensionReader) InsightsAllowed(ctx context.Context) (bool, error) {
+	if ctx == nil {
+		return false, errors.New("MCP request context is required")
+	}
+	authCtx, release, err := r.admit(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer release()
+	execution, err := r.authenticate(authCtx)
+	if err != nil {
+		return false, err
+	}
+	return r.registry.InsightsAllowed(execution.Actor().Roles), nil
 }
 
 // admit takes one read slot and bounds the call by extensionReadTimeout. The returned function releases both.

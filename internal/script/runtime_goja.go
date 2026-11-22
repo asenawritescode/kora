@@ -183,8 +183,8 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 	if req.Provider != nil {
 		api.docProvider = req.Provider
 		api.secretProvider = req.Provider
-		api.httpProvider = req.Provider
 	}
+	api.httpProvider = outboundHTTPProvider(ctx, req.Provider)
 	vm.Set("kora", api.buildObject(vm))
 
 	vm.Set("__kora_event__", map[string]any{

@@ -177,6 +177,12 @@ type CapabilityLeaseAdmission interface {
 	AdmitCapabilityAttempt(context.Context, contract.CapabilityLease, time.Time) error
 }
 
+// CapabilityLeaseChecker reads a lease and reports whether it is active and unexpired, without
+// admitting an attempt. A preview uses it in place of admission.
+type CapabilityLeaseChecker interface {
+	CheckCapabilityLease(context.Context, contract.CapabilityLease, time.Time) error
+}
+
 // CapabilityLeaseOwnerAdmission persists the provider ownership resolved by
 // the immutable binding when issuing a lease.
 type CapabilityLeaseOwnerAdmission interface {

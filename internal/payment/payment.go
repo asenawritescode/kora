@@ -99,6 +99,13 @@ type Provider interface {
 	Request(ctx context.Context, in Intent) (Outcome, error)
 }
 
+// ImmediateProvider is implemented by a provider whose Request settles the intent at once
+// (state confirmed), so the caller needs no customer action and no callback. Only such a
+// provider can pay a pack action that names a method without a reference.
+type ImmediateProvider interface {
+	ConfirmsOnRequest() bool
+}
+
 // ErrInvalidCallbackToken reports a callback with a wrong or missing token.
 var ErrInvalidCallbackToken = errors.New("payment: invalid callback token")
 
@@ -144,6 +151,9 @@ func (r *Registry) Get(name string) (Provider, bool) {
 type Cash struct{}
 
 func (Cash) Name() string { return "cash" }
+
+// ConfirmsOnRequest reports that cash is confirmed by its Request: the till holds the money.
+func (Cash) ConfirmsOnRequest() bool { return true }
 
 func (Cash) Request(_ context.Context, in Intent) (Outcome, error) {
 	return Outcome{State: StateConfirmed, ProviderReference: in.ID}, nil

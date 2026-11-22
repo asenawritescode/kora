@@ -1117,6 +1117,66 @@
       ],
       "type": "object"
     },
+    "ChannelChatRequestV2": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_key": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversation_key",
+        "message"
+      ],
+      "type": "object"
+    },
+    "ChannelChatResponseV2": {
+      "additionalProperties": false,
+      "properties": {
+        "awaiting_confirmation": {
+          "type": "boolean"
+        },
+        "choices": {
+          "$ref": "#/$defs/ChoiceQuestion",
+          "x-optional-pointer": true
+        },
+        "result": {
+          "type": "string"
+        },
+        "usage": {
+          "$ref": "#/$defs/ChannelChatUsageV2"
+        }
+      },
+      "required": [
+        "awaiting_confirmation",
+        "result",
+        "usage"
+      ],
+      "type": "object"
+    },
+    "ChannelChatUsageV2": {
+      "additionalProperties": false,
+      "properties": {
+        "cached_input_tokens": {
+          "type": "integer"
+        },
+        "input_tokens": {
+          "type": "integer"
+        },
+        "output_tokens": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cached_input_tokens",
+        "input_tokens",
+        "output_tokens"
+      ],
+      "type": "object"
+    },
     "ChannelSessionIssueRequestV2": {
       "additionalProperties": false,
       "properties": {
@@ -1139,6 +1199,12 @@
           "type": "string"
         },
         "sensitive_until": {
+          "type": "string"
+        },
+        "subject_email": {
+          "type": "string"
+        },
+        "subject_user": {
           "type": "string"
         },
         "trusted_until": {
@@ -1269,6 +1335,41 @@
         "kind",
         "status_field",
         "success_value"
+      ],
+      "type": "object"
+    },
+    "ChoiceOption": {
+      "additionalProperties": false,
+      "properties": {
+        "hint": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hint",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ChoiceQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "choices": {
+          "items": {
+            "$ref": "#/$defs/ChoiceOption"
+          },
+          "type": "array"
+        },
+        "question": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "choices",
+        "question"
       ],
       "type": "object"
     },
@@ -7316,6 +7417,66 @@
       ],
       "type": "object"
     },
+    "ChannelChatRequestV2": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_key": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversation_key",
+        "message"
+      ],
+      "type": "object"
+    },
+    "ChannelChatResponseV2": {
+      "additionalProperties": false,
+      "properties": {
+        "awaiting_confirmation": {
+          "type": "boolean"
+        },
+        "choices": {
+          "$ref": "#/$defs/ChoiceQuestion",
+          "x-optional-pointer": true
+        },
+        "result": {
+          "type": "string"
+        },
+        "usage": {
+          "$ref": "#/$defs/ChannelChatUsageV2"
+        }
+      },
+      "required": [
+        "awaiting_confirmation",
+        "result",
+        "usage"
+      ],
+      "type": "object"
+    },
+    "ChannelChatUsageV2": {
+      "additionalProperties": false,
+      "properties": {
+        "cached_input_tokens": {
+          "type": "integer"
+        },
+        "input_tokens": {
+          "type": "integer"
+        },
+        "output_tokens": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cached_input_tokens",
+        "input_tokens",
+        "output_tokens"
+      ],
+      "type": "object"
+    },
     "ChannelSessionIssueRequestV2": {
       "additionalProperties": false,
       "properties": {
@@ -7338,6 +7499,12 @@
           "type": "string"
         },
         "sensitive_until": {
+          "type": "string"
+        },
+        "subject_email": {
+          "type": "string"
+        },
+        "subject_user": {
           "type": "string"
         },
         "trusted_until": {

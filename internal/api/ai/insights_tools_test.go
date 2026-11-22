@@ -8,7 +8,7 @@ import (
 )
 
 func TestWithoutMetricsToolsDropsOnlyMetricsReads(t *testing.T) {
-	all := buildOpenAIToolsFromCatalog(BuildToolCatalog(doctype.NewRegistry()))
+	all := buildOpenAIToolsFromCatalog(BuildToolCatalog(doctype.NewRegistry(), CatalogOptions{}))
 	tests := []struct {
 		name        string
 		insights    bool

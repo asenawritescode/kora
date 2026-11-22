@@ -407,7 +407,10 @@ func (d *MySQLDialect) UpsertIncrementForTable(_ string, conflictCols []string, 
 	return "ON DUPLICATE KEY UPDATE " + strings.Join(parts, ", ")
 }
 
-func (d *MySQLDialect) InsertOrIgnorePrefix() string { return "INSERT IGNORE" }
+// InsertIgnoreSQL turns the leading INSERT into INSERT IGNORE.
+func (d *MySQLDialect) InsertIgnoreSQL(insert string) string {
+	return strings.Replace(insert, "INSERT", "INSERT IGNORE", 1)
+}
 
 // SharedRowLock is MySQL's locking read: FOR SHARE.
 func (d *MySQLDialect) SharedRowLock() string { return " FOR SHARE" }
@@ -545,7 +548,7 @@ func (d *MySQLDialect) numberBlockSQL() []string {
 }
 
 func (d *MySQLDialect) SystemTableSQL() []string {
-	return append(append(append(d.numberBlockSQL(), mysqlRoleSQL()...), []string{
+	return append(append(append(append(d.numberBlockSQL(), mysqlRoleSQL()...), d.aiPendingWriteSQL()...), []string{
 		// _kora_naming_series
 		"CREATE TABLE IF NOT EXISTS _kora_naming_series (\n\t\t\tdoctype VARCHAR(140) NOT NULL,\n\t\t\tprefix VARCHAR(32) NOT NULL,\n\t\t\tcurrent BIGINT NOT NULL DEFAULT 0,\n\t\t\tmodified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),\n\t\t\tPRIMARY KEY (doctype, prefix)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 

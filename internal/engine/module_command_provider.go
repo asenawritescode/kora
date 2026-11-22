@@ -179,12 +179,26 @@ func (h *kernelCommandProviderHandle) InvokeCapability(ctx context.Context, invo
 	if err := h.factory.validateSchema(command.OutputSchema, result.Data); err != nil {
 		return plugin.CapabilityInvocationResult{}, contract.NewError(contract.CodeValidationFailed, "owner command output failed its registered schema")
 	}
-	if err := tx.Commit(); err != nil {
-		return plugin.CapabilityInvocationResult{}, contract.NewError(contract.CodeOutcomeUnknown, "local capability transaction commit outcome is unknown")
+	done, commitErr := commitLocalCapability(ctx, tx, afterCommit)
+	if commitErr != nil {
+		return plugin.CapabilityInvocationResult{}, commitErr
 	}
-	committed = true
+	committed = done
+	return plugin.CapabilityInvocationResult{ExecutionID: contract.OperationID(result.OperationID), Output: append(json.RawMessage(nil), result.Data...)}, nil
+}
+
+// commitLocalCapability commits a local command's transaction and then runs its after-commit
+// completion. A preview is not committed: the caller's rollback discards its writes, and the
+// completion never runs. It reports whether the transaction was committed.
+func commitLocalCapability(ctx context.Context, tx *sql.Tx, afterCommit func()) (bool, error) {
+	if kernel.IsPreview(ctx) {
+		return false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, contract.NewError(contract.CodeOutcomeUnknown, "local capability transaction commit outcome is unknown")
+	}
 	if afterCommit != nil {
 		afterCommit()
 	}
-	return plugin.CapabilityInvocationResult{ExecutionID: contract.OperationID(result.OperationID), Output: append(json.RawMessage(nil), result.Data...)}, nil
+	return true, nil
 }

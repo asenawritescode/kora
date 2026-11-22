@@ -216,7 +216,8 @@ func (k *Kernel) checkValueGuard(run txRun, op Operation, cmd *CommandResource, 
 	case len(guard.Equal) > 0:
 		return checkEqualGuard(guard, at.env, at.index)
 	case guard.Payment != nil:
-		return k.consumePaymentGuard(run.Tx, paymentClaim{Site: op.Context.Site, OpID: run.OpID, Source: cmd.Input.Record}, guard.Payment, at.env, at.index)
+		preview := run.Mgr != nil && run.Mgr.Context != nil && IsPreview(run.Mgr.Context)
+		return k.consumePaymentGuard(run.Tx, paymentClaim{Site: op.Context.Site, OpID: run.OpID, Source: cmd.Input.Record, Preview: preview}, guard.Payment, at.env, at.index)
 	default:
 		return checkCountGuard(run, op, guard.Count, at.env, at.index)
 	}

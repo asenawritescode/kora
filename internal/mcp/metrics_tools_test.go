@@ -34,6 +34,9 @@ func connectServer(t *testing.T, server *Server) *sdkmcp.ClientSession {
 	return clientSession
 }
 
+// admitAll is the gate of an identity whose roles grant Insights.
+var admitAll InsightsGate = func(context.Context) (bool, error) { return true, nil }
+
 // recordingRunner answers each metrics route from its own body and records the routes it was asked for. A route
 // without an answer is refused.
 type recordingRunner struct {
@@ -56,7 +59,7 @@ func TestMetricsToolsArePublishedOnlyWithTheOption(t *testing.T) {
 		want bool
 	}{
 		{"without the option", nil, false},
-		{"with the option", []Option{WithMetrics(func(context.Context) (ai.MetricsRunner, error) { return nil, nil })}, true},
+		{"with the option", []Option{WithMetrics(func(context.Context) (ai.MetricsRunner, error) { return nil, nil }, admitAll)}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,9 +92,9 @@ func TestMetricsToolCallsRunThroughTheCallersRunner(t *testing.T) {
 	session := connectMetrics(t, WithMetrics(func(context.Context) (ai.MetricsRunner, error) {
 		factoryCalls++
 		return runner.run, nil
-	}))
+	}, admitAll))
 	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "query_metrics",
-		Arguments: map[string]any{"metrics": []any{"sales"}, "grain": "range"}})
+		Arguments: map[string]any{"metrics": []any{"sales"}, "grain": "range", "period": map[string]any{"preset": "last_7_days"}}})
 	if err != nil {
 		t.Fatal("call query_metrics:", err)
 	}
@@ -105,13 +108,13 @@ func TestMetricsToolCallsRunThroughTheCallersRunner(t *testing.T) {
 
 func TestMetricsToolRefusalIsTheChatsErrorText(t *testing.T) {
 	runner := &recordingRunner{answers: map[ai.MetricsRoute]ai.MetricsResponse{ai.MetricsRouteDrill: {Status: 403, Body: []byte(`{"error":{"code":"metrics.forbidden","message":"metrics are not available to field-assigned grants"}}`)}}}
-	session := connectMetrics(t, WithMetrics(func(context.Context) (ai.MetricsRunner, error) { return runner.run, nil }))
+	session := connectMetrics(t, WithMetrics(func(context.Context) (ai.MetricsRunner, error) { return runner.run, nil }, admitAll))
 	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "drill_metrics",
 		Arguments: map[string]any{"metric": "sales", "from": "2026-11-09", "to": "2026-11-15"}})
 	if err != nil {
 		t.Fatal("call drill_metrics:", err)
 	}
-	if text := resultText(t, result); text != "Error: metrics are not available to field-assigned grants" {
+	if text := resultText(t, result); text != `{"error":{"code":"permission_denied","message":"metrics are not available to field-assigned grants"}}` {
 		t.Fatalf("refusal = %q", text)
 	}
 }
@@ -119,7 +122,7 @@ func TestMetricsToolRefusalIsTheChatsErrorText(t *testing.T) {
 func TestMetricsToolFailsWhenTheCallerHasNoRunner(t *testing.T) {
 	session := connectMetrics(t, WithMetrics(func(context.Context) (ai.MetricsRunner, error) {
 		return nil, errors.New("no verified caller")
-	}))
+	}, admitAll))
 	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "list_metrics", Arguments: map[string]any{}})
 	if err == nil && (result == nil || !result.IsError) {
 		t.Fatal("list_metrics without a caller succeeded")
@@ -149,4 +152,77 @@ func slicesContainsRoute(routes []ai.MetricsRoute, want ai.MetricsRoute) bool {
 		}
 	}
 	return false
+}
+
+// TestMetricsToolsFollowTheInsightsGate: an identity Insights does not admit neither sees the metrics tools nor runs
+// them by name, and a gate that cannot establish the identity denies it the same way.
+func TestMetricsToolsFollowTheInsightsGate(t *testing.T) {
+	denyAll := func(context.Context) (bool, error) { return false, nil }
+	failGate := func(context.Context) (bool, error) { return false, errors.New("identity unknown") }
+	cases := []struct {
+		name       string
+		gate       InsightsGate
+		wantListed bool
+	}{
+		{"roles grant Insights", admitAll, true},
+		{"roles deny Insights", denyAll, false},
+		{"identity cannot be established", failGate, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &recordingRunner{answers: map[ai.MetricsRoute]ai.MetricsResponse{ai.MetricsRouteQuery: {Status: 200, Body: []byte(`{"data":{}}`)}}}
+			var factoryCalls int
+			session := connectMetrics(t, WithMetrics(func(context.Context) (ai.MetricsRunner, error) {
+				factoryCalls++
+				return runner.run, nil
+			}, tc.gate))
+			result, err := session.ListTools(context.Background(), nil)
+			if err != nil {
+				t.Fatal("list tools:", err)
+			}
+			listed := false
+			for _, tool := range result.Tools {
+				listed = listed || tool.Name == "query_metrics"
+			}
+			if listed != tc.wantListed {
+				t.Fatalf("query_metrics listed = %v, want %v", listed, tc.wantListed)
+			}
+			text, refused := callByName(t, session, "query_metrics", map[string]any{"metrics": []any{"sales"}, "grain": "range"})
+			if refused == tc.wantListed {
+				t.Fatalf("query_metrics refused = %v (text %q), want refused = %v", refused, text, !tc.wantListed)
+			}
+			if refused && (factoryCalls != 0 || len(runner.routes) != 0) {
+				t.Fatalf("denied call text %q, factory calls %d, routes %v; want no runner taken", text, factoryCalls, runner.routes)
+			}
+		})
+	}
+}
+
+// TestMetricsCallIsRefusedOnceInsightsIsRevoked: a client that listed the tools while the identity was admitted and
+// then calls one after its Insights grant is gone is refused, and the runner is not taken.
+func TestMetricsCallIsRefusedOnceInsightsIsRevoked(t *testing.T) {
+	checks := 0
+	revoked := func(context.Context) (bool, error) {
+		checks++
+		return checks == 1, nil // admitted when the tools are listed, refused on the call
+	}
+	var factoryCalls int
+	session := connectMetrics(t, WithMetrics(func(context.Context) (ai.MetricsRunner, error) {
+		factoryCalls++
+		return nil, nil
+	}, revoked))
+	text, refused := callByName(t, session, "list_metrics", map[string]any{})
+	if !refused || !strings.Contains(text, "Insights is not available") || factoryCalls != 0 {
+		t.Fatalf("revoked call = %q (refused %v), factory calls %d; want a refusal and no runner", text, refused, factoryCalls)
+	}
+}
+
+// callByName calls a tool by name and returns its text, with whether the call was refused.
+func callByName(t *testing.T, session *sdkmcp.ClientSession, name string, args map[string]any) (string, bool) {
+	t.Helper()
+	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: name, Arguments: args})
+	if err != nil {
+		return err.Error(), true
+	}
+	return resultText(t, result), result.IsError
 }

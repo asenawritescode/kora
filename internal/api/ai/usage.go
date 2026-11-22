@@ -235,3 +235,103 @@ WHERE id = ? AND status = 'reserved'`,
 	}
 	return nil
 }
+
+// Usage is the token count of one provider call, in one shape whatever the provider. Prompt counts every input token,
+// cached ones included; CachedInput and CacheWrite are the parts the provider read from or wrote to its prompt cache.
+// A zero Usage means the provider reported no usage.
+type Usage struct {
+	Prompt      int64
+	Completion  int64
+	Total       int64
+	CachedInput int64
+	CacheWrite  int64
+}
+
+// reported reports whether the provider sent any usage for the call.
+func (u Usage) reported() bool {
+	return u.Total > 0 || u.Prompt > 0 || u.Completion > 0
+}
+
+// add sums two calls' usage, the way a run adds its rounds.
+func (u Usage) add(o Usage) Usage {
+	return Usage{
+		Prompt:      u.Prompt + o.Prompt,
+		Completion:  u.Completion + o.Completion,
+		Total:       u.Total + o.Total,
+		CachedInput: u.CachedInput + o.CachedInput,
+		CacheWrite:  u.CacheWrite + o.CacheWrite,
+	}
+}
+
+// tokenClasses is the usage as the stored event's token classes. Classes with no tokens are left out.
+func (u Usage) tokenClasses() map[contract.UsageClass]int64 {
+	classes := map[contract.UsageClass]int64{}
+	for class, n := range map[contract.UsageClass]int64{
+		contract.UsageClassInput:       u.Prompt,
+		contract.UsageClassOutput:      u.Completion,
+		contract.UsageClassTotal:       u.Total,
+		contract.UsageClassCachedInput: u.CachedInput,
+		contract.UsageClassCacheWrite:  u.CacheWrite,
+	} {
+		if n > 0 {
+			classes[class] = n
+		}
+	}
+	return classes
+}
+
+// parseUsage reads the usage object of a chat completion. It takes the OpenAI shape (prompt_tokens, completion_tokens,
+// prompt_tokens_details.cached_tokens), the DeepSeek cache fields (prompt_cache_hit_tokens) and the Anthropic fields
+// (input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens). Anthropic's input_tokens leaves
+// out cached tokens, so its Prompt adds them back.
+func parseUsage(resp map[string]any) Usage {
+	raw := safeGetMap(resp, "usage")
+	if raw == nil {
+		return Usage{}
+	}
+	cacheRead := usageCount(raw, "cache_read_input_tokens")
+	cacheWrite := usageCount(raw, "cache_creation_input_tokens")
+	u := Usage{
+		Prompt:     usageCount(raw, "prompt_tokens"),
+		Completion: usageCount(raw, "completion_tokens"),
+		Total:      usageCount(raw, "total_tokens"),
+	}
+	if u.Prompt == 0 {
+		u.Prompt = usageCount(raw, "input_tokens") + cacheRead + cacheWrite
+	}
+	if u.Completion == 0 {
+		u.Completion = usageCount(raw, "output_tokens")
+	}
+	if u.Total == 0 {
+		u.Total = u.Prompt + u.Completion
+	}
+	u.CachedInput = usageCount(safeGetMap(raw, "prompt_tokens_details"), "cached_tokens")
+	if u.CachedInput == 0 {
+		u.CachedInput = usageCount(raw, "prompt_cache_hit_tokens")
+	}
+	if u.CachedInput == 0 {
+		u.CachedInput = cacheRead
+	}
+	u.CacheWrite = cacheWrite
+	return u
+}
+
+// usageCount reads one token count. Providers send JSON numbers, which decode as float64; a missing or non-numeric
+// field counts as zero.
+func usageCount(m map[string]any, key string) int64 {
+	n, ok := m[key].(float64)
+	if !ok || n < 0 {
+		return 0
+	}
+	return int64(n)
+}
+
+// usageAttribution is the attribution of one chat-loop model call. served_model is the model the provider says
+// answered; it can differ from the requested model (DeepSeek answers a deepseek-chat request as deepseek-flash).
+func usageAttribution(reported string) map[string]string {
+	attribution := map[string]string{"operation": "chat"}
+	if reported != "" {
+		attribution["served_model"] = reported
+	}
+	return attribution
+}

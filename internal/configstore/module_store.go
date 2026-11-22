@@ -1017,3 +1017,28 @@ func validateModuleSnapshot(snapshot contract.ModuleSnapshot) error {
 }
 
 var _ contract.ModuleStore = (*ModuleStore)(nil)
+
+// CheckCapabilityLease reports whether the stored lease matches expected and is active and
+// unexpired. A lease not issued yet passes when its declaration is valid, because the first
+// real run issues it. It only reads: no attempt is counted and no lifecycle row is locked.
+func (s *ModuleStore) CheckCapabilityLease(ctx context.Context, expected contract.CapabilityLease, now time.Time) error {
+	if ctx == nil || now.IsZero() {
+		return contract.NewError(contract.CodePermissionDenied, "capability lease is revoked, expired, or stale")
+	}
+	_, found, err := s.LoadCapabilityLease(ctx, expected.TenantID, expected.ID)
+	if err != nil {
+		return contract.NewError(contract.CodePermissionDenied, "capability lease is revoked, expired, or stale")
+	}
+	if !found {
+		// The first real run issues this lease from the same declaration (EnsureCapabilityLease), so
+		// a preview before that run checks the declaration it would issue.
+		if expected.Validate() == nil && expected.State == "active" && expected.AdmittedAttempts == 0 && expected.ExpiresAt.After(now.UTC()) {
+			return nil
+		}
+		return contract.NewError(contract.CodePermissionDenied, "capability lease is revoked, expired, or stale")
+	}
+	if err := s.ValidateCapabilityLease(ctx, expected, now); err != nil {
+		return contract.NewError(contract.CodePermissionDenied, "capability lease is revoked, expired, or stale")
+	}
+	return nil
+}

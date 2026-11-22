@@ -70,12 +70,17 @@ func (h *Handler) HandleChannelSessionIssue(c *gin.Context) {
 	if clientName == "" {
 		clientName = c.GetString("extension_name")
 	}
+	subjectUser, ok := h.resolveChannelSubject(c, siteNameStr, req.SubjectUser, req.SubjectEmail)
+	if !ok {
+		return
+	}
 	token, session, err := auth.CreateChannelSession(h.queryDB(c), h.siteDialect(c), auth.ChannelSessionCreateParams{
 		Site:            siteNameStr,
 		ClientName:      clientName,
 		ConversationKey: req.ConversationKey,
 		Provider:        req.Provider,
 		SenderAddress:   req.SenderAddress,
+		SubjectUser:     subjectUser,
 		Permissions:     channelPermissionGrants(req.Permissions),
 		TrustedUntil:    trustedUntil,
 		SensitiveUntil:  sensitiveUntil,
@@ -91,6 +96,99 @@ func (h *Handler) HandleChannelSessionIssue(c *gin.Context) {
 		SensitiveUntil:  optionalTime(session.SensitiveUntil),
 		ConversationKey: session.ConversationKey,
 	}})
+}
+
+// checkChannelSubject answers 403 and reports false when subject is not an enabled user of the site.
+// resolveChannelSubject returns the user a new channel session acts as: subject_user as given, or the user whose
+// email is subject_email. Neither means a delegated session (""). It writes the error and returns false on refusal.
+func (h *Handler) resolveChannelSubject(c *gin.Context, site, user, email string) (string, bool) {
+	user, email = strings.TrimSpace(user), strings.TrimSpace(email)
+	if user != "" && email != "" {
+		writeError(c, http.StatusBadRequest, "validation.invalid_field", "set subject_user or subject_email, not both", map[string]any{"field": "subject_email"})
+		return "", false
+	}
+	if email != "" {
+		name, err := auth.ChannelSubjectByEmail(c.Request.Context(), h.queryDB(c), h.siteDialect(c), site, email)
+		if errors.Is(err, auth.ErrSubjectUnavailable) {
+			writeError(c, http.StatusForbidden, "auth.subject_user_unavailable", "subject_email must belong to an enabled user of this site", nil)
+			return "", false
+		}
+		if err != nil {
+			internalError(c, "resolve channel subject by email", err)
+			return "", false
+		}
+		return name, true
+	}
+	if user == "" {
+		return "", true
+	}
+	return user, h.checkChannelSubject(c, site, user)
+}
+
+func (h *Handler) checkChannelSubject(c *gin.Context, site, subject string) bool {
+	_, err := auth.LoadChannelSubject(c.Request.Context(), h.queryDB(c), h.siteDialect(c), site, subject)
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, auth.ErrSubjectUnavailable) {
+		writeError(c, http.StatusForbidden, "auth.subject_user_unavailable", "subject_user must name an enabled user of this site", nil)
+		return false
+	}
+	internalError(c, "load channel subject user", err)
+	return false
+}
+
+// HandleChannelChat runs one turn of a managed channel through the workspace chat, as the session's subject user. The
+// turn's writes are owned by that user; the channel's tool allowlist and reply style apply, and the reply reports
+// whether a preview is waiting for the person's yes.
+func (h *Handler) HandleChannelChat(c *gin.Context) {
+	if c.GetString("auth_type") != "channel_session" || c.GetString("channel_subject_user") == "" {
+		writeError(c, http.StatusForbidden, "auth.subject_user_required", "channel chat needs a channel session issued with a subject user", nil)
+		return
+	}
+	var req contract.ChannelChatRequestV2
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Message) == "" || strings.TrimSpace(req.ConversationKey) == "" {
+		writeError(c, http.StatusBadRequest, "validation.required_field", "message and conversation_key are required", nil)
+		return
+	}
+	turn, ok := h.chatTurn(c)
+	if !ok {
+		return
+	}
+	turn.Channel = "whatsapp"
+	outcome := ai.HandleChat(c.Request.Context(), turn, ai.ChatRequest{
+		Message: req.Message,
+		Context: ai.ChatContext{ThreadID: channelThreadID(req.ConversationKey)},
+	})
+	if outcome.Failure != nil {
+		c.JSON(outcome.Status, outcome.Failure)
+		return
+	}
+	awaiting, err := ai.AwaitingConfirmation(c.Request.Context(), turn, outcome.ConversationID)
+	if err != nil {
+		internalError(c, "read open previews", err)
+		return
+	}
+	c.JSON(http.StatusOK, Response{Data: contract.ChannelChatResponseV2{
+		Result:               outcome.Reply.Reply,
+		Choices:              outcome.Reply.Choices,
+		AwaitingConfirmation: awaiting,
+		Usage: contract.ChannelChatUsageV2{
+			InputTokens:       outcome.Usage.Prompt,
+			CachedInputTokens: outcome.Usage.CachedInput,
+			OutputTokens:      outcome.Usage.Completion,
+		},
+	}})
+}
+
+// channelThreadID is the chat thread of a channel conversation key. A key over the 100-character thread limit is
+// hashed to a fixed length.
+func channelThreadID(key string) string {
+	if len(key) <= 100 {
+		return key
+	}
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])
 }
 
 func channelPermissionGrants(grants []contract.PermissionGrant) []doctype.Permission {
@@ -432,7 +530,7 @@ func (h *Handler) HandleChannelTools(c *gin.Context) {
 		return
 	}
 	channel := strings.TrimSpace(c.DefaultQuery("channel", "web"))
-	catalog := ai.BuildToolCatalog(h.siteRegistry(c))
+	catalog := ai.BuildToolCatalog(h.siteRegistry(c), ai.CatalogOptions{Operations: NewAIModuleOperations(h, c)})
 	configRevision := c.GetUint64("site_config_revision")
 	filtered := make([]ai.ToolDescriptor, 0, len(catalog.Tools))
 	for _, tool := range catalog.Tools {
@@ -470,7 +568,7 @@ func (h *Handler) handleChannelTool(c *gin.Context, readOnly bool) {
 		writeError(c, http.StatusBadRequest, "validation.required_field", "tool_name is required", map[string]any{"field": "tool_name"})
 		return
 	}
-	safety := ai.BuildToolCatalog(h.siteRegistry(c))
+	safety := ai.BuildToolCatalog(h.siteRegistry(c), ai.CatalogOptions{Operations: NewAIModuleOperations(h, c)})
 	var descriptor *ai.ToolDescriptor
 	for i := range safety.Tools {
 		if safety.Tools[i].Name == req.ToolName {
@@ -482,10 +580,8 @@ func (h *Handler) handleChannelTool(c *gin.Context, readOnly bool) {
 		writeError(c, http.StatusNotFound, "tool.not_found", "tool not found", nil)
 		return
 	}
-	if docType, operation, ok := permissionTargetForTool(h.siteRegistry(c), req.ToolName); ok {
-		if _, forbidden := checkPerm(c, h.siteRegistry(c), docType, operation); forbidden {
-			return
-		}
+	if !h.authorizeRecordTool(c, req.ToolName, req.Args) {
+		return
 	}
 	if !channelAllowed(descriptor.ChannelAllowlist, "whatsapp") {
 		writeError(c, http.StatusForbidden, "permission.denied", "tool is not allowed on this channel", nil)
@@ -512,6 +608,7 @@ func (h *Handler) handleChannelTool(c *gin.Context, readOnly bool) {
 	result := ai.ExecuteTool(h.siteTx(c), h.siteRegistry(c), ai.ToolRequest{
 		Name: req.ToolName, Args: req.Args, Owner: owner, Site: siteNameStr, Confirmed: true,
 		IdempotencyKey: strings.TrimSpace(c.GetHeader("Idempotency-Key")), Execution: execution,
+		Commands: h.kernelCommands(h.runtimeService(c, siteNameStr)), Operations: NewAIModuleOperations(h, c),
 	})
 	status := "success"
 	var errorMessage string
@@ -595,36 +692,20 @@ func ternary[T any](condition bool, yes, no T) T {
 	return no
 }
 
-func permissionTargetForTool(reg *doctype.Registry, name string) (string, string, bool) {
-	for _, item := range []struct {
-		suffix    string
-		operation string
-	}{
-		{suffix: "_find", operation: "read"},
-		{suffix: "_list", operation: "read"},
-		{suffix: "_get", operation: "read"},
-		{suffix: "_create", operation: "create"},
-		{suffix: "_update", operation: "write"},
-		{suffix: "_delete", operation: "delete"},
-	} {
-		if strings.HasSuffix(name, item.suffix) {
-			key := strings.TrimSpace(strings.TrimSuffix(name, item.suffix))
-			for _, dt := range reg.All() {
-				if sanitizeToolDoctypeName(dt.Name) == key {
-					return dt.Name, item.operation, true
-				}
-			}
-			return "", "", false
+// authorizeRecordTool checks a fixed record tool call against the role matrix for the record type its arguments
+// name. A record tool without a valid record type is refused. It writes the error and returns false when the call
+// may not run; other tools pass.
+func (h *Handler) authorizeRecordTool(c *gin.Context, name string, args map[string]any) bool {
+	docType, operation, ok := ai.RecordToolTarget(h.siteRegistry(c), name, args)
+	if !ok {
+		if ai.IsRecordTool(name) {
+			writeError(c, http.StatusBadRequest, "validation.invalid_field", "record_type must name a record type", map[string]any{"field": "record_type"})
+			return false
 		}
+		return true
 	}
-	return "", "", false
-}
-
-func sanitizeToolDoctypeName(name string) string {
-	value := strings.ToLower(strings.TrimSpace(name))
-	value = strings.ReplaceAll(value, " ", "_")
-	value = strings.ReplaceAll(value, "-", "_")
-	return value
+	_, forbidden := checkPerm(c, h.siteRegistry(c), docType, operation)
+	return !forbidden
 }
 
 func optionalTime(value sql.NullTime) *time.Time {

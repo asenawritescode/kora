@@ -371,11 +371,11 @@ func TestPostgres_UpsertIncrementForTableQualifiesCurrentValue(t *testing.T) {
 	}
 }
 
-func TestPostgres_InsertOrIgnorePrefix(t *testing.T) {
+func TestPostgres_InsertIgnoreSQL(t *testing.T) {
 	d := &PostgresDialect{}
-	got := d.InsertOrIgnorePrefix()
-	if got != "INSERT" {
-		t.Errorf("InsertOrIgnorePrefix = %q, want %q", got, "INSERT")
+	got := d.InsertIgnoreSQL("INSERT INTO t (a) VALUES (1)")
+	if want := "INSERT INTO t (a) VALUES (1) ON CONFLICT DO NOTHING"; got != want {
+		t.Errorf("InsertIgnoreSQL = %q, want %q", got, want)
 	}
 }
 

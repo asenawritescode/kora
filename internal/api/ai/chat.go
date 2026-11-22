@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,8 +22,8 @@ import (
 	kdb "github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/orm"
-	"github.com/asenawritescode/kora/internal/policy"
 	"github.com/asenawritescode/kora/internal/secret"
+	"github.com/asenawritescode/kora/internal/tenanttime"
 )
 
 // ChatRequest is the JSON body for POST /api/v1/ai/chat.
@@ -101,6 +102,20 @@ func siteCurrencyForChat(ctx context.Context, database *sql.DB, siteName string,
 }
 
 // pageContextBlurb describes the screen the person is on, for the model. It is empty without a page.
+// businessDayBlurb tells the model the tenant's business day, so "today" and "this week" resolve in the shop's own
+// zone and day cutoff. It sits in the turn context, so the standing prompt stays the same every day.
+func businessDayBlurb(ctx context.Context, database *sql.DB, dialect kdb.QueryDialect, site string, now time.Time) string {
+	clock := tenanttime.Default()
+	if database != nil && dialect != nil {
+		if loaded, err := tenanttime.Load(ctx, database, dialect, site); err == nil {
+			clock = loaded
+		}
+	}
+	day := clock.BusinessDate(now)
+	weekday := time.Date(day.Year, day.Month, day.Day, 12, 0, 0, 0, time.UTC).Weekday()
+	return fmt.Sprintf("Business day: %s, %s.", weekday, day)
+}
+
 func pageContextBlurb(page ChatContext) string {
 	if page.Pathname == "" && page.Doctype == "" && page.DocumentName == "" {
 		return ""
@@ -120,81 +135,103 @@ Use this context to stay grounded in the current screen and avoid asking the use
 	)
 }
 
-// chatSystemPrompt is the standing instruction set of the chat. The page and currency context are added per turn.
-const chatSystemPrompt = `You are a helpful AI assistant for a business application called Kigae. Help users manage their data — create, find, update, and analyze business records.
+// chatSystemPrompt is the standing instruction set of the chat. It is the same for every turn of a site and role:
+// the per-turn context (page, previews, follow-up) goes in its own message, see buildChatMessages.
+const chatSystemPrompt = `You are Zana, the AI assistant in this business's workspace. You help people find, create and update records and understand numbers.
 
-RULES (follow strictly):
-- Be CONCISE. One sentence when possible. No markdown tables unless showing actual data results.
-- Before creating a record, ALWAYS call _find first to check duplicates. If none found, call _create immediately.
-- ALL fields in function parameters ARE available. Never claim a field is "not exposed."
-- If create fails due to missing required fields, ask for ALL missing fields at ONCE in ONE sentence.
-- When user gives comma-separated data, map it to fields in order. The first value goes to the first required field. Just try it — don't ask permission.
-- NEVER mention internal details: database schemas, table names, SQL, tool/function names, error tracebacks.
-- Format booleans as ✅/❌. Use proper currency formatting.
+RULES
+- Keep replies to one or two short sentences unless asked for more. Lists: five entries or fewer.
+- Use the person's words. Never show tool names, codes, ids or error details.
+- Numbers come only from tool results in this turn. Never estimate, round or invent a figure. Give exact dates.
+- All fields in the tool schemas are available. Never say a field is not exposed.
+- Find before you create: call find_records to check for a match.
+- Before the first write of a record type, call describe_record_type.
+- Writes preview first: create_record, update_record and run_action only preview. Nothing is saved yet.
+- After a preview, show the saved values in two short lines and ask "Save this?". Call confirm_write with the write_id only after a later yes.
+- OPEN PREVIEWS are not saved yet; confirm one only when the person agrees.
+- Pack actions: list_actions finds them; run_action previews. Leave payment references empty; confirm sets them.
+- How many records exist: find_records gives the total. Metrics need a period.
+- On missing_fields, ask one short question naming only the missing fields.
+- On a tool error, say in one sentence what blocks it and how to fix it. Never guess values.
+- Comma-separated values map to fields in sequence. Try them first.
+- Ask before any delete or bulk change: name what will change and ask "Continue?".
+- Show yes and no as ✅ or ❌.
+- If the workspace cannot do something, say so in one sentence.
 
-DESTRUCTIVE ACTIONS (safety gate):
-- NEVER call _delete on multiple records without asking "Delete N [records]?" first. For single deletes, confirm: "Delete [name]?"
-- NEVER call _update to change workflow states, amounts, or linked documents without summarizing what will change and asking.
-- If the user says "delete all" or "clean up" or "remove old" — STOP. Ask: "How many records should I delete? Which ones specifically?"
-- These rules prevent accidental data loss. The user should always confirm destructive actions.
+RECORD TYPES AND SCRIPTS
+- Before drafting a record type, ask what it tracks, who uses it and what is required. Then ask "Create as draft?". Never show YAML.
+- You never activate a draft; an administrator does, in Workspace → Admin → Versions.
+- Write scripts only with script_validate and script_create. They are saved inactive; never say one is live. An administrator activates it in Workspace → Admin → Scripts.
+- Scripts never bypass approvals or write direct database access.
 
-DOCTYPE CREATION (special rules):
-- BEFORE writing any YAML, ask 2-3 clarifying questions about the business: what they do, what data they track, who the users are, what reports/metrics matter. Understand the workflow FIRST.
-- Ask about: key entities, relationships, required vs optional fields, validation rules (min/max, allowed options), who can do what (workflow steps), and what should be searchable.
-- THEN call validate_doctype_yaml, SUMMARIZE what you understood in 2-3 lines. Ask "Create this as draft?" Do NOT show the YAML.
-- WAIT for user confirmation before calling create_doctype_draft or update_doctype_draft.
-- If user says "yes" or "go ahead" or "create it": call create_doctype_draft immediately.
-- If user says "add X" or "change Y": adjust and validate again, then ask again.
-- The summary must be scannable. Example: "Invoice form: link to Customer, date fields, Draft→Paid status, line items table with auto-calculated totals, tax at 16%. Create as draft?"
-- CHILD TABLES: if a doctype has a Table field, create the child doctype FIRST (with is_child_table: true), then create the parent doctype.
-- Never show the YAML to the user unless they explicitly ask "show me the YAML."
+NUMBERS AND ACCESS
+- Business numbers come from the metrics tools. Explore and Insights show them too.
+- Answer one question with one figure. Ask which metric or period only when two or more genuinely fit.
+- If no metric covers a measure, say so in one sentence and give no number.
+- A follow-up keeps the last metric and filters; only the period changes.
+- Access is set in Workspace → Admin → Permissions.`
 
-SCRIPT AUTHORING (special rules):
-- Help nontechnical users describe the automation in plain language. Ask for the trigger and expected outcome if either is unclear.
-- Draft JavaScript only through script_validate and script_create. Explain what event or trigger will run it, then validate it before saving.
-- script_create saves an INACTIVE draft. Never claim a script is live or activate it; tell the user an Administrator can review and activate it in Workspace → Admin → Scripts.
-- Scripts must use authorized Kora APIs and the same domain operations as the workspace. Never generate direct database access or bypass business workflows or approvals.
+// turnContextMessage joins the parts of one turn's context into the message placed before the latest user message.
+// Empty parts are dropped, and no text at all means the turn adds no context message.
+func turnContextMessage(parts ...string) string {
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, "\n\n")
+}
 
-SYSTEM KNOWLEDGE (what Kigae can do — use this to guide users):
+// buildChatMessages lays out one provider request: the standing system text, the conversation so far, the turn's
+// context, then the latest user message. The turn context is a system message just before the user's message, so the
+// standing text (and the tools that follow it in the request) stay byte-identical from turn to turn for prompt caching.
+func buildChatMessages(standing string, history []ChatMessage, turnContext, message string) []map[string]any {
+	messages := make([]map[string]any, 0, len(history)+3)
+	messages = append(messages, map[string]any{"role": "system", "content": standing})
+	for _, h := range history {
+		messages = append(messages, map[string]any{"role": h.Role, "content": h.Content})
+	}
+	if turnContext != "" {
+		messages = append(messages, map[string]any{"role": "system", "content": turnContext})
+	}
+	return append(messages, map[string]any{"role": "user", "content": message})
+}
 
-METRICS: Every record type can be counted and summed in Explore: sums of Currency/Int/Float fields, breakdowns by Select/Link fields and by time. Pack dashboards are shown in Insights. Users do not configure metrics here. Direct users to Explore or Insights for numbers.
-
-VERSIONING & ACTIVATION: Doctype changes save as Draft config versions. Activation runs schema migration — database tables are created/updated. Three safety tiers: Safe (auto-apply), Warning (requires review), Blocked (requires fix). Users activate from /workspace/admin/versions. Draft changes don't affect the live database.
-
-AUTOMATIONS: Workflows use Engine v2 definitions. They can start when a record is created or updated, evaluate typed conditions, request approval, send notifications, and invoke registered actions. Status transitions are policy-checked by Engine. Suggest an automation when users describe a repeated task, notification, approval, or status change; do not describe workflow YAML or document-workflow configuration.
-
-PERMISSIONS: 10 operations per role × doctype: Read, Write, Create, Delete, Submit, Cancel, Amend, Export, Import, Report. 'if_owner' scopes to creator. Administrator bypasses all. Manage at /workspace/admin/permissions.
-
-COMPUTED FIELDS: Auto-calculated via expressions: arithmetic ('quantity * unit_price'), aggregation ('SUM(items.line_total)'), rounding ('ROUND(expr, 2)'). Recalculate automatically on dependency changes. Set read_only: true.
-
-LINKED FIELDS: Auto-populate from linked documents. Example: selecting a Product fills the price via linked_field: 'product.selling_price'.
-
-FIELD CONSTRAINTS: Per-field validation: min, max (numbers), min_length, max_length (text), regex (pattern), one_of/not_one_of (allowed values). Enforced at API level.
-
-MULTI-TENANT: Isolated sites with own database, users, doctypes. Created from /console or self-service /onboard. Access via /s/sitename/workspace or custom domain.
-
-REPORTING AND ANALYTICS (accuracy rules, never break them):
-- Every number in a reply comes from a query_metrics or drill_metrics result in this turn. Never invent, estimate or round a figure. Never write "about", "roughly" or "estimated" with a number.
-- Call list_metrics when the metric is not clear. Prefer metrics with verified true. Say when a number comes from an unchecked metric or a saved report.
-- "Last week" is the previous Monday to Sunday: use period.preset last_week. Never use the last 7 days for it.
-- A question about one measure asks one figure: put one metric in metrics, with no dimensions and no second metric the person did not ask for (for example "How much did we sell today?" is metrics ["sales"]).
-- Call ask_choice only when two or more metrics or periods genuinely fit the same question. Never ask about the period when the question is about something no metric measures.
-- When no metric or record type fits what was asked (an item the shop does not track, such as unicorns), call list_metrics if needed, then reply in one sentence that Zana cannot answer that from this shop's data. Give no number and no choices.
-- When the shop has a record type but no metric for a measure (such as profit, or tax collected), say that this shop has no such metric. Never say the data is not tracked or not recorded; say only what list_metrics shows. Give no number.
-- A follow-up ("and the week before that?") reuses the last question and moves its period; say which dates you used.
-- Name the exact dates of every period you report.
-AI CHAT: You have tools to list, find, get, create, update documents. You can create doctypes as Draft, validate YAML, and answer business numbers with the metrics tools. Everything scoped to the current site.`
-
-// chatFunctions is the tool list of one chat turn: the catalog, without the metrics reads when the person has no Insights.
-func chatFunctions(reg *doctype.Registry, insights, disabled bool) []map[string]any {
+// chatFunctions is the tool list of one chat turn: the catalog, without the metrics reads when the person has no
+// Insights, and on a channel only the tools that channel allows.
+func chatFunctions(turn ChatTurn, reg *doctype.Registry, disabled bool) []map[string]any {
 	if disabled {
 		return nil
 	}
-	functions := buildOpenAIToolsFromCatalog(BuildToolCatalog(reg))
-	if !insights {
+	catalog := BuildToolCatalog(reg, CatalogOptions{Execution: turn.Tx.Execution, BusinessScope: turn.Tx.BusinessScope, Operations: turn.Operations})
+	if turn.Channel != "" {
+		catalog.Tools = toolsOnChannel(catalog.Tools, turn.Channel)
+	}
+	functions := buildOpenAIToolsFromCatalog(catalog)
+	if !turn.Insights {
 		functions = withoutMetricsTools(functions)
 	}
 	return functions
+}
+
+func toolsOnChannel(tools []ToolDescriptor, channel string) []ToolDescriptor {
+	kept := make([]ToolDescriptor, 0, len(tools))
+	for _, tool := range tools {
+		if slices.Contains(tool.ChannelAllowlist, channel) {
+			kept = append(kept, tool)
+		}
+	}
+	return kept
+}
+
+// channelReplyStyle tells the model how a channel reads its replies. It is empty on the workspace chat, and it sits
+// in the turn context, so the standing prompt stays the same for every channel.
+func channelReplyStyle(channel string) string {
+	if channel != "whatsapp" {
+		return ""
+	}
+	return "REPLY STYLE: this reply goes to WhatsApp. Plain text only, no markdown. At most 300 characters. Offer choices as a numbered list."
 }
 
 // insightsNoteFor is what the model is told about Insights: nothing when the person has it.
@@ -267,15 +304,8 @@ func openConversation(ctx context.Context, tx *orm.TxManager, key conversationKe
 	}
 }
 
-// HandleChat processes a chat message, calls the AI provider with function definitions,
-// executes any tool calls via the ORM, and returns the AI's response.
-func HandleChat(c *gin.Context, turn ChatTurn) {
-	tx, reg, siteName, currentUser := turn.Tx, turn.Registry, turn.Site, turn.User
-	requestCtx := WithDialect(c.Request.Context(), tx.Dialect)
-	currency, currencyErr := siteCurrencyForChat(requestCtx, tx.DB, siteName, tx.Dialect)
-	if currencyErr != nil {
-		slog.Warn("AI chat could not read site currency", "site", siteName, "error", currencyErr)
-	}
+// ServeChat serves one workspace chat turn: it decodes the request, runs the turn and writes the reply.
+func ServeChat(c *gin.Context, turn ChatTurn) {
 	var req ChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -283,13 +313,48 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		})
 		return
 	}
-	if len(req.Context.ThreadID) > 100 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": "Invalid conversation identifier."}})
+	outcome := HandleChat(c.Request.Context(), turn, req)
+	if outcome.Failure != nil {
+		c.JSON(outcome.Status, outcome.Failure)
 		return
+	}
+	writeChatResponse(c, outcome.Reply)
+}
+
+// ChatOutcome is what one chat turn answered: the reply, or the status and error body of the refusal.
+type ChatOutcome struct {
+	Status  int
+	Reply   ChatResponse
+	Failure gin.H
+	// Usage is the provider usage of the turn, summed over its rounds.
+	Usage Usage
+	// ConversationID is the conversation the turn ran in; empty when the turn was refused before it opened one.
+	ConversationID string
+}
+
+func replyOutcome(reply ChatResponse) ChatOutcome {
+	return ChatOutcome{Status: http.StatusOK, Reply: reply}
+}
+
+func failOutcome(status int, body gin.H) ChatOutcome {
+	return ChatOutcome{Status: status, Failure: body}
+}
+
+// HandleChat runs one chat turn for a decoded request: it persists the message, runs the provider and tool loop, and
+// returns the outcome. The workspace chat and the channel chat both run it.
+func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOutcome) {
+	tx, reg, siteName, currentUser := turn.Tx, turn.Registry, turn.Site, turn.User
+	requestCtx := WithDialect(ctx, tx.Dialect)
+	currency, currencyErr := siteCurrencyForChat(requestCtx, tx.DB, siteName, tx.Dialect)
+	if currencyErr != nil {
+		slog.Warn("AI chat could not read site currency", "site", siteName, "error", currencyErr)
+	}
+	if len(req.Context.ThreadID) > 100 {
+		return failOutcome(http.StatusBadRequest, gin.H{"error": gin.H{"message": "Invalid conversation identifier."}})
 	}
 	runID := ulid.Make().String()
 	subjectKey := ConversationSubjectKey(currentUser, req.Context)
-	auditCtx := enrichAuditContext(requestCtx, currentUser, c.GetString("session_sid"), c.GetString("correlation_id"), c.GetString("idempotency_key"))
+	auditCtx := enrichAuditContext(requestCtx, currentUser, turn.SessionID, turn.CorrelationID, turn.IdempotencyKey)
 
 	// Read the configured AI provider key.
 	providerKey, apiKey, baseURL, model := resolveProvider(tx.DB, siteName, req.Model, tx.Dialect)
@@ -298,7 +363,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		if strings.TrimSpace(os.Getenv("KORA_CLOUD_AI_GATEWAY_URL")) != "" {
 			message = "Kigae Cloud's shared AI provider is unavailable. Ask your administrator to reconnect the Cloud provider."
 		}
-		c.JSON(http.StatusServiceUnavailable, gin.H{
+		out = failOutcome(http.StatusServiceUnavailable, gin.H{
 			"error": gin.H{
 				"code":    "ai.provider_not_configured",
 				"message": message,
@@ -316,23 +381,23 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		Model:          model,
 		HTTPTimeoutSec: cfg.HTTPTimeoutSec,
 	}); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
+		out = failOutcome(http.StatusBadRequest, gin.H{
 			"error": gin.H{"message": "Invalid AI provider configuration: " + err.Error()},
 		})
 		return
 	}
 	if err := EnsureAIRunTables(requestCtx, tx.DB, tx.Dialect); err != nil {
 		slog.Error("AI run storage initialization failed", "site", siteName, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to initialize AI run storage."}})
+		out = failOutcome(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to initialize AI run storage."}})
 		return
 	}
 	conv, convStatus, convMessage := openConversation(requestCtx, tx, conversationKey{Site: siteName, SubjectKey: subjectKey, RunID: runID, Message: req.Message})
 	if convStatus != http.StatusOK {
-		c.JSON(convStatus, gin.H{"error": gin.H{"message": convMessage}})
+		out = failOutcome(convStatus, gin.H{"error": gin.H{"message": convMessage}})
 		return
 	}
 	conversationID, transcript := conv.ID, conv.Transcript
-	contextBlurb := pageContextBlurb(req.Context) + followUpBlurb(conv.LastQuestion)
+	turnContext := turnContextMessage(businessDayBlurb(requestCtx, tx.DB, tx.Dialect, siteName, time.Now()), pageContextBlurb(req.Context), followUpBlurb(conv.LastQuestion), turnPreviewsContext(requestCtx, turn, conversationID), channelReplyStyle(turn.Channel))
 	if err := UpsertRun(requestCtx, tx.DB, RunRecord{
 		ID:             runID,
 		Site:           siteName,
@@ -343,29 +408,22 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		Model:          model,
 		Provider:       providerKey,
 	}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to persist AI run."}})
+		out = failOutcome(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to persist AI run."}})
 		return
 	}
 	if err := AppendConversationMessage(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID, Role: "user", Content: req.Message, Kind: "message"}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to save your message."}})
+		out = failOutcome(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to save your message."}})
 		return
 	}
 
 	// Build function definitions from the canonical tool catalog projection.
-	functions := chatFunctions(reg, turn.Insights, req.DisableTools)
+	functions := chatFunctions(turn, reg, req.DisableTools)
 
 	// Durable server history is the source of truth for the conversation.
 	sanitizedHistory := sanitizeHistory(transcript, cfg.HistoryLimit)
 
-	// Build messages array with system instructions.
-	messages := []map[string]any{{
-		"role":    "system",
-		"content": chatSystemPrompt + financialDisplayContext(currency) + contextBlurb + insightsNoteFor(turn.Insights),
-	}}
-	for _, h := range sanitizedHistory {
-		messages = append(messages, map[string]any{"role": h.Role, "content": h.Content})
-	}
-	messages = append(messages, map[string]any{"role": "user", "content": req.Message})
+	standing := chatSystemPrompt + financialDisplayContext(currency) + insightsNoteFor(turn.Insights)
+	messages := buildChatMessages(standing, sanitizedHistory, turnContext, req.Message)
 
 	// Build the initial AI request body. Tools and tool_choice persist across all rounds.
 	aiBody := map[string]any{
@@ -380,14 +438,14 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 	}
 
 	if estimatePromptTokens(messages, functions) > cfg.TokenBudget {
-		c.JSON(http.StatusBadRequest, gin.H{
+		out = failOutcome(http.StatusBadRequest, gin.H{
 			"error": gin.H{"message": "AI request exceeds the configured token budget."},
 		})
 		return
 	}
 	reservation, err := ReserveBudget(requestCtx, tx.DB, BudgetRequest{Site: siteName, Model: model, RequestedTokens: estimatePromptTokens(messages, functions) + cfg.MaxTokensPerCall, Budget: cfg.TokenBudget, Note: "chat request"})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
+		out = failOutcome(http.StatusBadRequest, gin.H{
 			"error": gin.H{"message": err.Error()},
 		})
 		return
@@ -396,15 +454,21 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		_ = ReleaseBudget(requestCtx, tx.DB, reservation)
 	}()
 
-	answers := newAnswerTurn(c, turn, currency)
+	answers := newAnswerTurn(turn, currency)
 
 	// --- Multi-Round Tool Execution Loop ---
 	var (
-		totalTokens int      // approximate running token count
-		stallCount  int      // consecutive identical tool calls
-		toolErrors  int      // cumulative tool errors for circuit breaker
-		lastSigs    []string // tool call signatures from previous round
+		runUsage   Usage    // the provider usage of this run so far, summed over its rounds
+		stepsDone  int      // tool calls in this run that succeeded
+		stallCount int      // consecutive identical tool calls
+		toolErrors int      // cumulative tool errors for circuit breaker
+		lastSigs   []string // tool call signatures from previous round
 	)
+
+	defer func() {
+		out.Usage = runUsage
+		out.ConversationID = conversationID
+	}()
 
 	for round := 0; round < cfg.MaxRounds; round++ {
 		stepID := ulid.Make().String()
@@ -431,25 +495,30 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			CurrentStepID:  stepID,
 			InputMessage:   req.Message,
 		})
-		aiResp, err := callAIWithRetry(baseURL, apiKey, aiBody, cfg, func(attempt int, status string, latency time.Duration, attemptErr error) {
-			tokens := map[contract.UsageClass]int64{}
-			if status == "failed" {
-				tokens[contract.UsageClassPartial] = 0
-			}
-			_ = RecordUsage(auditCtx, tx.DB, contract.UsageEvent{
-				RunID:      runID,
-				Site:       siteName,
-				Model:      model,
-				Provider:   providerKey,
-				Attempt:    attempt,
-				Status:     status,
-				Tokens:     tokens,
-				LatencyMs:  latency.Milliseconds(),
-				OccurredAt: time.Now().UTC(),
-				Attribution: map[string]string{
-					"operation": "chat",
-				},
-			})
+		aiResp, err := callAIWithRetry(providerCall{
+			BaseURL: baseURL,
+			APIKey:  apiKey,
+			Body:    aiBody,
+			Config:  cfg,
+			Headers: gatewayHeadersFor(providerKey, siteName, turn.Channel, runID),
+			Record: func(attempt int, status string, latency time.Duration, reply providerReply, attemptErr error) {
+				tokens := reply.Usage.tokenClasses()
+				if status == "failed" {
+					tokens[contract.UsageClassPartial] = 0
+				}
+				_ = RecordUsage(auditCtx, tx.DB, contract.UsageEvent{
+					RunID:       runID,
+					Site:        siteName,
+					Model:       model,
+					Provider:    providerKey,
+					Attempt:     attempt,
+					Status:      status,
+					Tokens:      tokens,
+					LatencyMs:   latency.Milliseconds(),
+					OccurredAt:  time.Now().UTC(),
+					Attribution: usageAttribution(reply.Model),
+				})
+			},
 		})
 		if err != nil {
 			slog.Error("AI provider call failed", "error", err, "round", round)
@@ -483,7 +552,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			// On first-round failure, return an error.
 			// On later rounds, return whatever tool results we've accumulated.
 			if round == 0 {
-				c.JSON(http.StatusInternalServerError, gin.H{
+				out = failOutcome(http.StatusInternalServerError, gin.H{
 					"error": gin.H{"message": "AI provider error: " + err.Error()},
 				})
 				return
@@ -508,7 +577,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 				Model:          model,
 				Provider:       providerKey,
 			})
-			writeChatResponse(c, ChatResponse{Reply: fallbackReply, Action: "partial", RunID: runID})
+			out = replyOutcome(ChatResponse{Reply: fallbackReply, Action: "partial", RunID: runID})
 			return
 		}
 
@@ -530,7 +599,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 				},
 			})
 			slog.Error("AI provider returned malformed response", "error", respErr, "response", aiResp)
-			c.JSON(http.StatusInternalServerError, gin.H{
+			out = failOutcome(http.StatusInternalServerError, gin.H{
 				"error": gin.H{"message": respErr.Error()},
 			})
 			return
@@ -539,25 +608,13 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		finishReason := safeGetString(choice, "finish_reason")
 		content := safeGetString(msg, "content")
 
-		// Track token usage if available.
-		tokens := map[contract.UsageClass]int64{}
-		if usage := safeGetMap(aiResp, "usage"); usage != nil {
-			if tt, ok := usage["total_tokens"].(float64); ok {
-				totalTokens += int(tt)
-				tokens[contract.UsageClassTotal] = int64(tt)
-			}
-			if tt, ok := usage["prompt_tokens"].(float64); ok {
-				tokens[contract.UsageClassInput] = int64(tt)
-			}
-			if tt, ok := usage["completion_tokens"].(float64); ok {
-				tokens[contract.UsageClassOutput] = int64(tt)
-			}
+		// Sum the round's usage into the run. Without provider usage, estimate from the content: 4 chars ≈ 1 token.
+		if usage := parseUsage(aiResp); usage.reported() {
+			runUsage = runUsage.add(usage)
 		} else {
-			// Rough estimate: 4 chars ≈ 1 token.
-			estimated := len(content) / 4
-			totalTokens += estimated
-			tokens[contract.UsageClassPartial] = int64(estimated)
+			runUsage.Total += int64(len(content) / 4)
 		}
+		totalTokens := int(runUsage.Total)
 		_ = RecordAudit(auditCtx, tx.DB, AuditEvent{
 			Site:           siteName,
 			RunID:          runID,
@@ -613,7 +670,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			}
 			content = answers.finalReply(content, req.Message)
 			completeAnswer(requestCtx, tx, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, SubjectKey: subjectKey, Model: model, Provider: providerKey, Content: content, Messages: messages, Cards: answers.cards(), Question: answers.lastQuestion()})
-			writeChatResponse(c, ChatResponse{Reply: content, RunID: runID, Cards: answers.cards()})
+			out = replyOutcome(ChatResponse{Reply: content, RunID: runID, Cards: answers.cards()})
 			return
 
 		case "tool_calls":
@@ -621,7 +678,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			if len(toolCalls) == 0 {
 				// finish_reason says tool_calls but none present — treat as stop.
 				if content != "" {
-					writeChatResponse(c, ChatResponse{Reply: answers.finalReply(content, req.Message), RunID: runID, Cards: answers.cards()})
+					out = replyOutcome(ChatResponse{Reply: answers.finalReply(content, req.Message), RunID: runID, Cards: answers.cards()})
 					return
 				}
 				continue
@@ -638,7 +695,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 						lastToolName = safeGetToolName(toolCalls[0])
 					}
 					nudge := fmt.Sprintf(
-						"You've called %s with the same arguments %d times without making progress. If the record doesn't exist, use the _create operation. If you have enough information to answer the user, please do so now without calling more tools.",
+						"You've called %s with the same arguments %d times without making progress. If the record doesn't exist, use the create_record tool. If you have enough information to answer the user, please do so now without calling more tools.",
 						lastToolName, stallCount,
 					)
 					messages = append(messages, map[string]any{
@@ -661,17 +718,15 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 					slog.Info("AI tool call", "name", safeGetString(fn, "name"), "args", safeGetString(fn, "arguments"))
 				}
 			}
-			var execution policy.Execution
-			if verified, ok := c.Get("policy_execution"); ok {
-				execution, _ = verified.(policy.Execution)
-			}
-			toolResults := executeToolCallsForAI(auditCtx, tx, reg, toolCallBatch{Calls: toolCalls, Owner: currentUser, Site: siteName, RunID: runID, StepID: stepID, ConversationID: conversationID, Execution: execution, Turn: answers})
+			toolResults := RunToolTurn(auditCtx, tx, reg, toolCallBatch{Calls: toolCalls, Owner: currentUser, Site: siteName, RunID: runID, StepID: stepID, ConversationID: conversationID, Execution: turn.Execution, Turn: answers, Commands: turn.Commands, Operations: turn.Operations})
 			for i, tr := range toolResults {
 				raw := tr["content"].(string)
 				slog.Info("Tool result", "content", raw[:min(len(raw), 200)])
 				if isToolError(raw) {
 					toolErrors++
 					tr["is_error"] = true
+				} else {
+					stepsDone++
 				}
 				// Cap result size.
 				toolResults[i]["content"] = capResultSize(raw, cfg.MaxToolResultChars)
@@ -680,7 +735,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 			// --- Clarifying question: the turn ends here, with the choices shown to the person. The question is
 			// only known once its tool has run, so the check follows the execution, before the model is asked again. ---
 			if answers.choice != nil {
-				writeChatResponse(c, endWithChoice(requestCtx, tx, answers.choice, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, Model: model, Provider: providerKey}))
+				out = replyOutcome(endWithChoice(requestCtx, tx, answers.choice, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, Model: model, Provider: providerKey}))
 				return
 			}
 
@@ -747,11 +802,11 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 				Model:          model,
 				Provider:       providerKey,
 			})
-			writeChatResponse(c, ChatResponse{Reply: content, Action: "truncated", RunID: runID, Cards: answers.cards()})
+			out = replyOutcome(ChatResponse{Reply: content, Action: "truncated", RunID: runID, Cards: answers.cards()})
 			return
 
 		case "content_filter":
-			writeChatResponse(c, ChatResponse{
+			out = replyOutcome(ChatResponse{
 				Reply: "I can't respond to that request due to content policies.",
 				RunID: runID,
 			})
@@ -791,7 +846,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 					Provider:       providerKey,
 				})
 				_ = SummarizeRun(requestCtx, tx.DB, runID)
-				writeChatResponse(c, ChatResponse{Reply: content, RunID: runID, Cards: answers.cards()})
+				out = replyOutcome(ChatResponse{Reply: content, RunID: runID, Cards: answers.cards()})
 				return
 			}
 			// Otherwise continue the loop.
@@ -802,8 +857,8 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 
 	// --- SAFETY NET: Max rounds exhausted ---
 	slog.Warn("Max rounds exhausted in chat loop", "max_rounds", cfg.MaxRounds)
-	writeChatResponse(c, ChatResponse{
-		Reply:  "I've taken several actions but wasn't able to complete the task. Could you break this into smaller steps?",
+	out = replyOutcome(ChatResponse{
+		Reply:  storedMaxRoundsReply(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID}, stepsDone, req.Message),
 		Action: "max_rounds_reached",
 		RunID:  runID,
 	})
@@ -819,6 +874,22 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		Provider:       providerKey,
 	})
 	_ = SummarizeRun(requestCtx, tx.DB, runID)
+	return
+}
+
+// storedMaxRoundsReply builds the round-cap reply and saves it to the conversation like any other reply, so the next
+// turn's history shows what was said. base carries the site, conversation and run.
+func storedMaxRoundsReply(ctx context.Context, database *sql.DB, base MessageRecord, stepsDone int, request string) string {
+	reply := maxRoundsReply(stepsDone, request)
+	base.Role, base.Content, base.Kind = "assistant", reply, "summary"
+	_ = AppendConversationMessage(ctx, database, base)
+	return reply
+}
+
+// maxRoundsReply is the reply when the round cap ends a run: one sentence on what got done and what is left.
+func maxRoundsReply(stepsDone int, request string) string {
+	return fmt.Sprintf("I finished %d step(s) for %q and ran out of rounds. Reply continue to pick up the rest.",
+		stepsDone, truncateScript(request, 120))
 }
 
 func estimatePromptTokens(messages []map[string]any, functions []map[string]any) int {

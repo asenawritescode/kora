@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
@@ -96,6 +97,14 @@ func DefaultAIConfig() AIConfig {
 	}
 }
 
+// deepseekFlashConfig is the tuned config of deepseek-flash, the model DeepSeek serves for deepseek-chat too.
+var deepseekFlashConfig = AIConfig{
+	MaxRounds: 6, TokenBudget: 60000, CompactionThreshold: 0.80,
+	MaxToolResultChars: 3000, StallThreshold: 3, MaxToolErrors: 5,
+	MaxTokensPerCall: 1024, HTTPTimeoutSec: 90, MaxRetries: 2,
+	RetryBackoffMs: 1000, HistoryLimit: 12,
+}
+
 // modelDefaults maps model names (as resolved by resolveProvider) to
 // model-specific overrides. The map is keyed by the exact model string
 // (e.g., "gpt-4o", "claude-sonnet-4-6").
@@ -136,6 +145,9 @@ var modelConfigs = map[string]AIConfig{
 		MaxTokensPerCall: 4096, HTTPTimeoutSec: 60, MaxRetries: 2,
 		RetryBackoffMs: 500, HistoryLimit: 20,
 	},
+	"deepseek-flash": deepseekFlashConfig,
+	// deepseek-chat is the former name of deepseek-flash. Sites that set it keep the same tuned values.
+	"deepseek-chat": deepseekFlashConfig,
 	"deepseek-v4-pro": {
 		MaxRounds: 15, TokenBudget: 120000, CompactionThreshold: 0.80,
 		MaxToolResultChars: 4000, StallThreshold: 3, MaxToolErrors: 5,
@@ -196,6 +208,14 @@ func applyFloat(store *secret.Store, site, key string, dst *float64) {
 // Provider resolution
 // ---------------------------------------------------------------------------
 
+// directProviders are the providers a site can key directly, in the order they are tried, with the default model of
+// each.
+var directProviders = []struct{ key, base, defaultModel string }{
+	{"openai_api_key", "https://api.openai.com/v1", "gpt-4o"},
+	{"deepseek_api_key", "https://api.deepseek.com", "deepseek-flash"},
+	{"anthropic_api_key", "https://api.anthropic.com/v1", "claude-sonnet-4-6"},
+}
+
 func resolveProvider(db *sql.DB, siteName, modelOverride string, dialect ...kdb.Dialect) (providerKey, apiKey, baseURL, model string) {
 	// When Cloud is configured as the shared provider, keep the external
 	// credential there. The Engine sends its completion request to Cloud using
@@ -218,12 +238,7 @@ func resolveProvider(db *sql.DB, siteName, modelOverride string, dialect ...kdb.
 
 	store := secret.NewStore(db, dialect...)
 
-	providers := []struct{ key, base, defaultModel string }{
-		{"openai_api_key", "https://api.openai.com/v1", "gpt-4o"},
-		{"deepseek_api_key", "https://api.deepseek.com", "deepseek-chat"},
-		{"anthropic_api_key", "https://api.anthropic.com/v1", "claude-sonnet-4-6"},
-	}
-	for _, p := range providers {
+	for _, p := range directProviders {
 		if k, err := store.Get(siteName, p.key); err == nil && k != "" {
 			m := p.defaultModel
 			if modelOverride != "" {
@@ -240,11 +255,64 @@ func resolveProvider(db *sql.DB, siteName, modelOverride string, dialect ...kdb.
 // AI provider HTTP call with retry
 // ---------------------------------------------------------------------------
 
-func callAI(client *http.Client, baseURL, apiKey string, body map[string]any) (map[string]any, error) {
-	jsonBody, _ := json.Marshal(body)
+// Gateway attribution header names. Cloud reads them to record each model call against its site, channel, run and
+// purpose.
+const (
+	headerKoraSite    = "X-Kora-Site"
+	headerKoraChannel = "X-Kora-Channel"
+	headerKoraRun     = "X-Kora-Run"
+	headerKoraPurpose = "X-Kora-Purpose"
+)
+
+// gatewayPurposeChat is the purpose of a chat-loop model call.
+const gatewayPurposeChat = "chat"
+
+// gatewayHeadersFor returns the attribution headers for a model call. Only the Cloud gateway takes them, so a direct
+// provider gets nil. An empty channel is the workspace, "web".
+func gatewayHeadersFor(providerKey, site, channel, run string) map[string]string {
+	if providerKey != "kora_cloud" {
+		return nil
+	}
+	if channel == "" {
+		channel = "web"
+	}
+	return map[string]string{
+		headerKoraSite:    site,
+		headerKoraChannel: channel,
+		headerKoraRun:     run,
+		headerKoraPurpose: gatewayPurposeChat,
+	}
+}
+
+// isDeepSeekRequest reports whether a request goes to DeepSeek: to its API, or for a deepseek-* model (the Cloud
+// gateway relays those to DeepSeek).
+func isDeepSeekRequest(baseURL, model string) bool {
+	return strings.Contains(baseURL, "deepseek.com") || strings.HasPrefix(model, "deepseek-")
+}
+
+// requestBody returns the body to send. A DeepSeek request has thinking disabled unless the body already sets it:
+// deepseek-flash thinks by default, which adds reasoning tokens and latency. The caller's map is not changed.
+func requestBody(body map[string]any, baseURL string) map[string]any {
+	model, _ := body["model"].(string)
+	if !isDeepSeekRequest(baseURL, model) {
+		return body
+	}
+	if _, set := body["thinking"]; set {
+		return body
+	}
+	out := maps.Clone(body)
+	out["thinking"] = map[string]any{"type": "disabled"}
+	return out
+}
+
+func callAI(client *http.Client, baseURL, apiKey string, body map[string]any, headers map[string]string) (map[string]any, error) {
+	jsonBody, _ := json.Marshal(requestBody(body, baseURL))
 	req, _ := http.NewRequest("POST", baseURL+"/chat/completions", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -270,30 +338,50 @@ func newAIHTTPClient(timeoutSec int) *http.Client {
 	}
 }
 
-type providerAttemptRecorder func(attempt int, status string, latency time.Duration, err error)
+// providerReply is what a completed provider attempt reported: its usage and the model that answered. Model is
+// empty when the provider did not name one.
+type providerReply struct {
+	Usage Usage
+	Model string
+}
+
+// providerAttemptRecorder hears each provider attempt. The reply is the attempt's on a completed attempt and zero
+// otherwise.
+type providerAttemptRecorder func(attempt int, status string, latency time.Duration, reply providerReply, err error)
+
+// providerCall is one provider request with its retry policy.
+type providerCall struct {
+	BaseURL string
+	APIKey  string
+	Body    map[string]any
+	Config  AIConfig
+	// Headers are extra request headers, the gateway attribution on a Cloud call. Nil for a direct provider.
+	Headers map[string]string
+	Record  providerAttemptRecorder
+}
 
 // callAIWithRetry calls the AI provider with exponential backoff on transient errors.
-func callAIWithRetry(baseURL, apiKey string, body map[string]any, cfg AIConfig, record providerAttemptRecorder) (map[string]any, error) {
+func callAIWithRetry(call providerCall) (map[string]any, error) {
 	var lastErr error
-	client := newAIHTTPClient(cfg.HTTPTimeoutSec)
-	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
+	client := newAIHTTPClient(call.Config.HTTPTimeoutSec)
+	for attempt := 0; attempt <= call.Config.MaxRetries; attempt++ {
 		if attempt > 0 {
-			backoff := time.Duration(cfg.RetryBackoffMs) * time.Millisecond * time.Duration(math.Pow(2, float64(attempt-1)))
+			backoff := time.Duration(call.Config.RetryBackoffMs) * time.Millisecond * time.Duration(math.Pow(2, float64(attempt-1)))
 			slog.Info("Retrying AI call", "attempt", attempt, "backoff_ms", backoff.Milliseconds())
 			time.Sleep(backoff)
 		}
 
 		start := time.Now()
-		result, err := callAI(client, baseURL, apiKey, body)
+		result, err := callAI(client, call.BaseURL, call.APIKey, call.Body, call.Headers)
 		if err == nil {
-			if record != nil {
-				record(attempt+1, "completed", time.Since(start), nil)
+			if call.Record != nil {
+				call.Record(attempt+1, "completed", time.Since(start), providerReply{Usage: parseUsage(result), Model: safeGetString(result, "model")}, nil)
 			}
 			return result, nil
 		}
 
-		if record != nil {
-			record(attempt+1, "failed", time.Since(start), err)
+		if call.Record != nil {
+			call.Record(attempt+1, "failed", time.Since(start), providerReply{}, err)
 		}
 		lastErr = err
 
@@ -302,7 +390,7 @@ func callAIWithRetry(baseURL, apiKey string, body map[string]any, cfg AIConfig, 
 			return nil, err
 		}
 	}
-	return nil, fmt.Errorf("AI provider call failed after %d retries: %w", cfg.MaxRetries, lastErr)
+	return nil, fmt.Errorf("AI provider call failed after %d retries: %w", call.Config.MaxRetries, lastErr)
 }
 
 func isTransientError(err error) bool {

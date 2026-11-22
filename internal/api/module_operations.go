@@ -310,38 +310,12 @@ func (h *Handler) HandleExecutePublishedOperation(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation.invalid_operation_request", "Invalid published operation request", nil)
 		return
 	}
-	services := h.runtimeService(c, c.GetString("site_name"))
-	snapshot, operation, ok := publishedOperationByRef(services, operationRef)
-	if !ok {
-		writeError(c, http.StatusNotFound, "module.operation_not_found", "Published operation not found", nil)
-		return
-	}
-	if request.InputSchema != operation.spec.Input {
-		writeError(c, http.StatusBadRequest, "validation.invalid_operation_schema", "Input schema reference does not match the published operation", nil)
-		return
-	}
-	if contract.ValidateResourceBusinessScope(scope, operation.published.ScopePolicy) != nil {
-		writeError(c, http.StatusForbidden, "permission.denied", "Published operation scope is not permitted", nil)
-		return
-	}
-	if _, authErr := authorizePublishedOperation(execution, h.siteRegistry(c), operation.owner, operation.published, scope); authErr != nil {
-		writeError(c, http.StatusForbidden, "permission.denied", "Published operation access is not granted", nil)
-		return
-	}
-	if services.ExecutePublishedOperation == nil {
-		writeError(c, http.StatusServiceUnavailable, "module.operation_unavailable", "Published operation executor is unavailable", nil)
-		return
-	}
-	receipt, err := services.ExecutePublishedOperation(c.Request.Context(), execution, scope, operation.owner, operation.published, request.InputSchema, request.Meta, request.Input)
+	receipt, err := runPublishedOperation(c.Request.Context(), publishedOperationRun{
+		Services: h.runtimeService(c, c.GetString("site_name")), Roles: h.siteRegistry(c), Execution: execution,
+		Scope: scope, Ref: operationRef, Request: request,
+	})
 	if err != nil {
 		operationErrorResponse(c, err)
-		return
-	}
-	if receipt.Revision == "" {
-		receipt.Revision = strconv.FormatUint(snapshot.Revision, 10)
-	}
-	if err := validatePublishedOperationReceipt(receipt, operation, scope); err != nil {
-		writeError(c, http.StatusInternalServerError, "module.invalid_operation_receipt", "Published operation returned an invalid receipt", nil)
 		return
 	}
 	if writeReceiptValidationError(c, receipt) {
@@ -549,37 +523,6 @@ func authorizePublishedOperation(execution policy.Execution, roles policy.RolePo
 }
 
 func operationErrorResponse(c *gin.Context, err error) {
-	var typed *contract.Error
-	if !errors.As(err, &typed) || typed == nil {
-		writeError(c, http.StatusServiceUnavailable, "module.operation_failed", "Published operation could not be completed", nil)
-		return
-	}
-	status := http.StatusInternalServerError
-	switch typed.Type {
-	case contract.CodeUnauthenticated:
-		status = http.StatusUnauthorized
-	case contract.CodePermissionDenied:
-		status = http.StatusForbidden
-	case contract.CodeValidationFailed:
-		status = http.StatusBadRequest
-	case contract.CodeNotFound:
-		status = http.StatusNotFound
-	case contract.CodeConflict, contract.CodeIdempotencyKeyReused, contract.CodeLeaseLost, contract.CodeStaleSubject, contract.CodeOutcomeUnknown:
-		status = http.StatusConflict
-	case contract.CodeDependencyUnavailable:
-		status = http.StatusServiceUnavailable
-	case contract.CodeResourceExhausted:
-		status = http.StatusTooManyRequests
-	}
-	var details map[string]any
-	if len(typed.Details) > 0 {
-		_ = json.Unmarshal(typed.Details, &details)
-	}
-	if typed.Field != "" {
-		if details == nil {
-			details = map[string]any{}
-		}
-		details["field"] = typed.Field
-	}
-	writeError(c, status, string(typed.Type), typed.Message, details)
+	failure := operationFailureFrom(err)
+	writeError(c, failure.Status, failure.Code, failure.Message, failure.Details)
 }

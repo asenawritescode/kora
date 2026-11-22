@@ -100,6 +100,10 @@ const (
 	UsageClassReasoning UsageClass = "reasoning"
 	UsageClassTotal     UsageClass = "total"
 	UsageClassPartial   UsageClass = "partial"
+	// UsageClassCachedInput counts input tokens the provider served from its prompt cache.
+	UsageClassCachedInput UsageClass = "cached_input"
+	// UsageClassCacheWrite counts input tokens the provider wrote to its prompt cache.
+	UsageClassCacheWrite UsageClass = "cache_write"
 )
 
 // UsageEvent is an immutable record of one provider attempt (RFC §10.4.4 /

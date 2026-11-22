@@ -64,7 +64,10 @@ type NumberBlockRow struct {
 type QueryDialect interface {
 	UpsertClause(conflictCols []string, updateCols []string) string
 	UpsertIncrement(conflictCols []string, incrementCols []string) string
-	InsertOrIgnorePrefix() string
+	// InsertIgnoreSQL returns insert, an INSERT ... VALUES statement, in the dialect's form
+	// that skips a row whose key already exists. Callers pass the whole statement, so a
+	// dialect whose clause goes after VALUES is still correct.
+	InsertIgnoreSQL(insert string) string
 	// SharedRowLock is the suffix that makes a read take a shared row lock held
 	// to the end of the transaction: writers may share it, UPDATE waits for it.
 	// It is "" where the engine has no row locks (LibSQL); callers then take a

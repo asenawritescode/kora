@@ -11,7 +11,6 @@ internal/api::isScriptSystemField
 internal/api::isTerminalPaymentStatus
 internal/api::normalizeDocTypeName
 internal/api::sanitizeFilename
-internal/api::sanitizeToolDoctypeName
 internal/auth::isLoopbackHost
 internal/cli::validateConfigExportPath
 internal/configstore::isPageManifestJSON
@@ -36,7 +35,6 @@ internal/ingress::normalizeAlias
 internal/ingress::normalizeCellID
 internal/ingress::normalizeHost
 internal/mcp::isReadOperation
-internal/mcp::sanitizeName
 internal/natsprovider::validateSubjectToken
 internal/net::normalizeSiteHost
 internal/policy::isReadOperation

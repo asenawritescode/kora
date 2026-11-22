@@ -34,8 +34,8 @@ func TestVerifyAccessToken(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store, mock := newMockStore(t)
-			mock.ExpectQuery(`SELECT name, api_permissions FROM _kora_extension WHERE site = \? AND access_token_hash = \? AND is_active = 1`).
-				WithArgs("acme", "hash").WillReturnRows(tt.rows)
+			mock.ExpectQuery(`SELECT name, api_permissions FROM _kora_extension WHERE site = \? AND access_token_hash = \? AND is_active = \?`).
+				WithArgs("acme", "hash", true).WillReturnRows(tt.rows)
 			got, err := store.VerifyAccessToken(context.Background(), "acme", "hash")
 			if !errors.Is(err, tt.wantErr) || got != tt.want {
 				t.Fatalf("VerifyAccessToken() = %+v, %v; want %+v, %v", got, err, tt.want, tt.wantErr)

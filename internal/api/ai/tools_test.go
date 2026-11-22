@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -27,28 +28,28 @@ func TestBuildToolCatalogAllowsWhatsAppWithGuards(t *testing.T) {
 		},
 	})
 
-	catalog := BuildToolCatalog(reg)
-	create := findTool(t, catalog.Tools, "customer_create")
+	catalog := BuildToolCatalog(reg, CatalogOptions{})
+	create := findTool(t, catalog.Tools, "create_record")
 	if !allowsChannel(create.ChannelAllowlist, "whatsapp") {
-		t.Fatalf("customer_create should be allowed on whatsapp: %#v", create.ChannelAllowlist)
+		t.Fatalf("create_record should be allowed on whatsapp: %#v", create.ChannelAllowlist)
 	}
 	if create.RequiresConfirmation || create.RequiresRecentAuth {
-		t.Fatalf("customer_create should use the user's explicit request and ordinary role policy: %#v", create)
+		t.Fatalf("create_record should use the user's explicit request and ordinary role policy: %#v", create)
 	}
-	update := findTool(t, catalog.Tools, "customer_update")
+	update := findTool(t, catalog.Tools, "update_record")
 	if !allowsChannel(update.ChannelAllowlist, "whatsapp") {
-		t.Fatalf("customer_update should be allowed on whatsapp: %#v", update.ChannelAllowlist)
+		t.Fatalf("update_record should be allowed on whatsapp: %#v", update.ChannelAllowlist)
 	}
-	if update.RequiresConfirmation || update.RequiresRecentAuth || update.Operation != "update" || update.Doctype != "Customer" {
-		t.Fatalf("customer_update should use explicit user intent with kernel authorization: %#v", update)
-	}
-	props := update.InputSchema["properties"].(map[string]any)
-	if _, ok := props["name"]; !ok {
-		t.Fatalf("customer_update should require stable document name: %#v", update.InputSchema)
+	if update.RequiresConfirmation || update.RequiresRecentAuth || update.Operation != "update" {
+		t.Fatalf("update_record should use explicit user intent with kernel authorization: %#v", update)
 	}
 	required := update.InputSchema["required"].([]string)
-	if len(required) != 1 || required[0] != "name" {
-		t.Fatalf("customer_update should only require name: %#v", update.InputSchema)
+	if strings.Join(required, ",") != "record_type,name,data" {
+		t.Fatalf("update_record required = %v, want record_type, name, data", required)
+	}
+	enum := update.InputSchema["properties"].(map[string]any)["record_type"].(map[string]any)["enum"].([]string)
+	if !slices.Contains(enum, "Customer") {
+		t.Fatalf("update_record record_type enum = %v, want Customer", enum)
 	}
 
 	system := findTool(t, catalog.Tools, "script_create")
@@ -63,10 +64,12 @@ func TestBuildToolCatalogAllowsWhatsAppWithGuards(t *testing.T) {
 func TestPrivateModuleRecordsAreNotExposedThroughAITools(t *testing.T) {
 	reg := doctype.NewRegistry()
 	reg.Register(&doctype.DocType{Name: "Private Invoice", ModuleOwnerID: "billing.ar", ModuleAccess: contract.ModulePrivate, Fields: []doctype.Field{{Fieldname: "amount", Fieldtype: "Currency"}}})
-	catalog := BuildToolCatalog(reg)
+	catalog := BuildToolCatalog(reg, CatalogOptions{Execution: testAIExecution(t, "tenant-a", "owner", []string{"Administrator"})})
 	for _, descriptor := range catalog.Tools {
-		if descriptor.Doctype == "Private Invoice" {
-			t.Fatalf("private module record was exposed as an AI tool: %#v", descriptor)
+		props, _ := descriptor.InputSchema["properties"].(map[string]any)
+		recordType, _ := props["record_type"].(map[string]any)
+		if enum, ok := recordType["enum"].([]string); ok && slices.Contains(enum, "Private Invoice") {
+			t.Fatalf("private module record was offered in the record_type enum: %#v", descriptor)
 		}
 	}
 	database, _, err := sqlmock.New()
@@ -75,8 +78,8 @@ func TestPrivateModuleRecordsAreNotExposedThroughAITools(t *testing.T) {
 	}
 	defer database.Close()
 	tx := &orm.TxManager{DB: database, Dialect: db.Resolve("mysql"), Context: context.Background()}
-	got := executeSingleTool(tx, reg, toolInvocation{Name: "private_invoice_get", Args: map[string]any{"name": "INV-1"}, Owner: "owner", Site: "tenant-a", RunID: "run", StepID: "step", IdempotencyKey: aiToolMutationIdempotencyKey("tenant-a", "run", "step", "call"), Execution: testAIExecution(t, "tenant-a", "owner", []string{"Administrator"})})
-	if !strings.Contains(got, "published query contract") {
+	got := executeSingleTool(tx, reg, toolInvocation{Name: "get_record", Args: map[string]any{"record_type": "Private Invoice", "name": "INV-1"}, Owner: "owner", Site: "tenant-a", RunID: "run", StepID: "step", IdempotencyKey: aiToolMutationIdempotencyKey("tenant-a", "run", "step", "call"), Execution: testAIExecution(t, "tenant-a", "owner", []string{"Administrator"})})
+	if !strings.Contains(got, `"code":"permission_denied"`) {
 		t.Fatalf("private module record bypass was not denied: %q", got)
 	}
 }
@@ -100,7 +103,7 @@ func TestMutationBundleToolRequiresConfirmationAndRevisionedUpdates(t *testing.T
 		{Fieldname: "unit_price", Fieldtype: "Currency", Reqd: true},
 		{Fieldname: "line_total", Fieldtype: "Currency", Computed: "quantity * unit_price", ReadOnly: true},
 	}})
-	catalog := BuildToolCatalog(reg)
+	catalog := BuildToolCatalog(reg, CatalogOptions{})
 	tool := findTool(t, catalog.Tools, "mutate_records")
 	if !tool.RequiresConfirmation || tool.RequiresRecentAuth || tool.Operation != "system" || allowsChannel(tool.ChannelAllowlist, "whatsapp") {
 		t.Fatalf("mutate_records must be a confirmed generic operation: %#v", tool)
@@ -210,25 +213,9 @@ func TestAIReadAndToolProjectionsExcludeHiddenAndPasswordFields(t *testing.T) {
 	}}, 1); strings.Contains(summary, "secret") {
 		t.Fatalf("AI summary exposed a hidden or password value: %q", summary)
 	}
-	tools := buildDoctypeToolDescriptors(dt)
-	for _, tool := range tools {
-		if strings.Contains(tool.Description, "private_note") || strings.Contains(tool.Description, "credential") {
-			t.Fatalf("tool %s description exposed a hidden field: %q", tool.Name, tool.Description)
-		}
-		for _, hint := range tool.FieldHints {
-			if hint.Name == "private_note" || hint.Name == "credential" {
-				t.Fatalf("tool %s field hints exposed %q", tool.Name, hint.Name)
-			}
-		}
-		if tool.InputSchema != nil {
-			if properties, ok := tool.InputSchema["properties"].(map[string]any); ok {
-				if _, found := properties["private_note"]; found {
-					t.Fatalf("tool %s schema exposed hidden field", tool.Name)
-				}
-				if _, found := properties["credential"]; found {
-					t.Fatalf("tool %s schema exposed password field", tool.Name)
-				}
-			}
+	for _, field := range describeFields(doctype.NewRegistry(), dt) {
+		if field.Name == "private_note" || field.Name == "credential" {
+			t.Fatalf("describe_record_type exposed hidden field %q", field.Name)
 		}
 	}
 	if unknown := unknownFields(map[string]any{"private_note": "try"}, dt); len(unknown) != 1 {
@@ -255,7 +242,7 @@ func TestExecuteSingleToolDeniesDocTypeOperationWithoutRolePermission(t *testing
 	reg := doctype.NewRegistry()
 	reg.Register(&doctype.DocType{Name: "PurchaseRequest"})
 	tx := &orm.TxManager{Context: context.Background()}
-	result := executeSingleTool(tx, reg, toolInvocation{Name: "purchaserequest_list", Args: map[string]any{}, Owner: "agent", Site: "site", RunID: "run", StepID: "step", Execution: tx.Execution})
+	result := executeSingleTool(tx, reg, toolInvocation{Name: toolFindRecords, Args: map[string]any{"record_type": "PurchaseRequest"}, Owner: "agent", Site: "site", RunID: "run", StepID: "step", Execution: tx.Execution})
 	if !strings.Contains(result, "Permission denied") {
 		t.Fatalf("expected permission denial, got %q", result)
 	}
@@ -287,7 +274,7 @@ func TestAIAssigneeReadsUseVerifiedUserScope(t *testing.T) {
 		WithArgs("TASK-1", "alice").
 		WillReturnRows(sqlmock.NewRows([]string{"title", "assigned_to", "name", "owner", "creation", "modified", "modified_by", "doc_status", "revision"}).
 			AddRow("Call customer", "alice", "TASK-1", "creator", nil, nil, nil, 0, 1))
-	got := executeSingleTool(tx, registry, toolInvocation{Name: "task_get", Args: map[string]any{"name": "TASK-1"}, Owner: "forged-user", Site: "tenant-a", RunID: "run-1", StepID: "step-1", IdempotencyKey: aiToolMutationIdempotencyKey("tenant-a", "run-1", "step-1", "call-1"), Execution: alice})
+	got := executeSingleTool(tx, registry, toolInvocation{Name: "get_record", Args: map[string]any{"record_type": "Task", "name": "TASK-1"}, Owner: "forged-user", Site: "tenant-a", RunID: "run-1", StepID: "step-1", IdempotencyKey: aiToolMutationIdempotencyKey("tenant-a", "run-1", "step-1", "call-1"), Execution: alice})
 	if strings.Contains(got, "Permission denied") || !strings.Contains(got, "Call customer") {
 		t.Fatalf("assigned AI get = %q, want the currently assigned Task", got)
 	}
@@ -295,10 +282,10 @@ func TestAIAssigneeReadsUseVerifiedUserScope(t *testing.T) {
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM .* WHERE 1=1 AND \\(`assigned_to` = \\?\\)").
 		WithArgs("alice").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery("SELECT .* FROM .* WHERE 1=1 AND \\(`assigned_to` = \\?\\) ORDER BY .*modified.* DESC LIMIT \\? OFFSET \\?").
-		WithArgs("alice", 20, 0).
+		WithArgs("alice", 5, 0).
 		WillReturnRows(sqlmock.NewRows([]string{"title", "assigned_to", "name", "owner", "creation", "modified", "modified_by", "doc_status"}).
 			AddRow("Call customer", "alice", "TASK-1", "creator", nil, nil, nil, 0))
-	got = executeSingleTool(tx, registry, toolInvocation{Name: "task_list", Args: map[string]any{}, Owner: "forged-user", Site: "tenant-a", RunID: "run-1", StepID: "step-2", IdempotencyKey: aiToolMutationIdempotencyKey("tenant-a", "run-1", "step-2", "call-2"), Execution: alice})
+	got = executeSingleTool(tx, registry, toolInvocation{Name: "find_records", Args: map[string]any{"record_type": "Task"}, Owner: "forged-user", Site: "tenant-a", RunID: "run-1", StepID: "step-2", IdempotencyKey: aiToolMutationIdempotencyKey("tenant-a", "run-1", "step-2", "call-2"), Execution: alice})
 	if strings.Contains(got, "Permission denied") || !strings.Contains(got, "TASK-1") {
 		t.Fatalf("assigned AI list = %q, want the assigned Task only", got)
 	}
@@ -371,10 +358,10 @@ func TestExecuteUpdateToolRejectsInvalidArgumentsBeforeMutation(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		{name: "missing record name", args: map[string]any{"title": "Updated"}, want: "name is required"},
-		{name: "unknown field", args: map[string]any{"name": "TASK-1", "missing": "value"}, want: "unknown fields: missing"},
-		{name: "read-only field", args: map[string]any{"name": "TASK-1", "calculated": "forged"}, want: "field calculated is not writable"},
-		{name: "empty change set", args: map[string]any{"name": "TASK-1"}, want: "provide at least one writable field"},
+		{name: "missing record name", args: map[string]any{"title": "Updated"}, want: `"code":"missing_fields"`},
+		{name: "unknown field", args: map[string]any{"name": "TASK-1", "missing": "value"}, want: "Unknown fields: missing"},
+		{name: "read-only field", args: map[string]any{"name": "TASK-1", "calculated": "forged"}, want: "Field calculated is not writable"},
+		{name: "empty change set", args: map[string]any{"name": "TASK-1"}, want: "at least one writable field"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -427,9 +414,9 @@ func TestBuildToolCatalogEmitsV2FindSchemaAndMetadata(t *testing.T) {
 		},
 	})
 
-	catalog := BuildToolCatalog(reg)
-	find := findTool(t, catalog.Tools, "task_find")
-	if find.ArgumentContractVersion != "v2" || find.Operation != "find" || find.Doctype != "Task" {
+	catalog := BuildToolCatalog(reg, CatalogOptions{})
+	find := findTool(t, catalog.Tools, "find_records")
+	if find.ArgumentContractVersion != "v2" || find.Operation != "find" {
 		t.Fatalf("expected v2 find metadata, got %#v", find)
 	}
 	props := find.InputSchema["properties"].(map[string]any)
@@ -439,8 +426,8 @@ func TestBuildToolCatalogEmitsV2FindSchemaAndMetadata(t *testing.T) {
 	if _, ok := props["due_date"]; ok {
 		t.Fatalf("find schema should not expose flat field args: %#v", props)
 	}
-	if len(find.FieldHints) != 3 || len(find.SystemFields) == 0 {
-		t.Fatalf("expected field and system hints, got %#v", find)
+	if enum := props["record_type"].(map[string]any)["enum"].([]string); !slices.Contains(enum, "Task") {
+		t.Fatalf("record_type enum = %v, want Task", enum)
 	}
 }
 
@@ -564,22 +551,6 @@ func TestBuildValidatedReadArgumentsBoundEveryQueryDimension(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if _, _, _, _, err := buildValidatedFindArgs(dt, tt.args); err == nil {
 				t.Fatal("expected query argument to be rejected")
-			}
-		})
-	}
-
-	for _, tt := range []struct {
-		name string
-		args map[string]any
-	}{
-		{name: "fractional list limit", args: map[string]any{"limit": 1.5}},
-		{name: "oversized list limit", args: map[string]any{"limit": float64(101)}},
-		{name: "unbounded list offset", args: map[string]any{"offset": float64(10001)}},
-		{name: "unexpected list argument", args: map[string]any{"order_by": "title"}},
-	} {
-		t.Run("list/"+tt.name, func(t *testing.T) {
-			if _, _, err := buildValidatedListArgs(tt.args); err == nil {
-				t.Fatal("expected list argument to be rejected")
 			}
 		})
 	}
@@ -811,7 +782,7 @@ func TestExecuteToolCallsForAIRecordsAuditRows(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	tx := &orm.TxManager{DB: db, SiteName: "site-a", Execution: testAIExecution(t, "site-a", "alice", nil)}
-	results := executeToolCallsForAI(ctx, tx, doctype.NewRegistry(), toolCallBatch{Owner: "alice", Site: "site-a", RunID: "run-1", StepID: "step-1", ConversationID: "conv-1", Calls: []any{
+	results := RunToolTurn(ctx, tx, doctype.NewRegistry(), toolCallBatch{Owner: "alice", Site: "site-a", RunID: "run-1", StepID: "step-1", ConversationID: "conv-1", Calls: []any{
 		map[string]any{
 			"id": "tool-call-1",
 			"function": map[string]any{
@@ -868,7 +839,7 @@ func TestExecuteToolCallsForAIGuardedToolUsesSharedExecutor(t *testing.T) {
 
 	tx := &orm.TxManager{DB: db, SiteName: "site-a", Execution: testAIExecution(t, "site-a", "alice", nil)}
 	tx.Context = auth.ContextWithSessionCreatedAt(context.Background(), time.Now())
-	results := executeToolCallsForAI(ctx, tx, doctype.NewRegistry(), toolCallBatch{Owner: "alice", Site: "site-a", RunID: "run-1", StepID: "step-1", ConversationID: "conv-1", Calls: []any{
+	results := RunToolTurn(ctx, tx, doctype.NewRegistry(), toolCallBatch{Owner: "alice", Site: "site-a", RunID: "run-1", StepID: "step-1", ConversationID: "conv-1", Calls: []any{
 		map[string]any{
 			"id": "tool-call-guarded-1",
 			"function": map[string]any{
