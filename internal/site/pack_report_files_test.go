@@ -1,26 +1,35 @@
 package site
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
-// A release published before the reports/ removal still ships report files.
-// They must install without error and must not block the metric and dashboard files.
-func TestParseConfigPackIgnoresRetiredReportFiles(t *testing.T) {
+// A release published before the reports/ removal still ships report files next to its real files.
+// Those report files must not fail the install, and the pack's metrics must still load.
+func TestPackPartIgnoresRetiredReportFiles(t *testing.T) {
+	base := readPackFiles(t, filepath.Join("..", "..", "config", "pos"), "")
 	cases := []struct {
-		name  string
-		files []PackFile
+		name    string
+		reports []PackFile
 	}{
-		{"report only", []PackFile{
+		{"one report", []PackFile{
 			{Path: "reports/profit.yaml", ContentType: "report", Content: "name: profit\n"},
 		}},
-		{"report with another report", []PackFile{
+		{"two reports", []PackFile{
 			{Path: "reports/profit.yaml", ContentType: "report", Content: "name: profit\n"},
 			{Path: "reports/stock.yml", ContentType: "report", Content: "name: stock\n"},
 		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, _, err := parseConfigPack("retail", tc.files); err != nil {
-				t.Fatalf("parseConfigPack with retired report files: %v", err)
+			files := append(append([]PackFile{}, base...), tc.reports...)
+			snap, _, err := parsePackPart("pos", files)
+			if err != nil {
+				t.Fatalf("parsePackPart with retired report files: %v", err)
+			}
+			if len(snap.Metrics) != posMetricCount {
+				t.Fatalf("metrics %d; want %d", len(snap.Metrics), posMetricCount)
 			}
 		})
 	}
