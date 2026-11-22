@@ -1,9 +1,13 @@
 package titles
 
 import (
+	"context"
+	"errors"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/doctype"
 )
 
@@ -30,5 +34,33 @@ func TestReadable(t *testing.T) {
 				t.Fatalf("Readable = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestResolveKeepsRawValuesWhenALinkedTypeCannotBeRead(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	register := &doctype.DocType{Name: "Register", TitleField: "register_name", Fields: []doctype.Field{{Fieldname: "register_name", Fieldtype: "Data"}}}
+	sale := &doctype.DocType{Name: "Sale", TitleField: "register", Fields: []doctype.Field{{Fieldname: "register", Fieldtype: "Link", Options: "Register"}}}
+	mock.ExpectQuery("FROM `tabSale`").WillReturnRows(sqlmock.NewRows([]string{"name", "register"}).AddRow("SAL-1", "REGI-0001"))
+	mock.ExpectQuery("FROM `tabRegister`").WillReturnError(errors.New("Error 1146: Table 'tabRegister' doesn't exist"))
+	o := Options{DB: database, Dialect: db.Resolve("mysql"), Link: func(name string) *doctype.DocType {
+		if name == "Register" {
+			return register
+		}
+		return nil
+	}}
+	got, err := Resolve(context.Background(), o, sale, []string{"SAL-1"})
+	if err != nil {
+		t.Fatalf("a linked type that cannot be read must not fail the titles: %v", err)
+	}
+	if got["SAL-1"] != "REGI-0001" {
+		t.Fatalf("title = %q, want the raw link value", got["SAL-1"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("the linked type was not read: %v", err)
 	}
 }

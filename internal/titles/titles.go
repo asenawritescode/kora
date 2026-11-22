@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"maps"
 	"strings"
 
@@ -79,7 +80,10 @@ func resolve(ctx context.Context, o Options, dt *doctype.DocType, names []string
 	}
 	linked, err := resolve(ctx, o, target, codes, hops+1)
 	if err != nil {
-		return nil, err
+		// A title is for display: a linked type that cannot be read (for example its table is not there yet)
+		// leaves the raw value, and never fails the read that asked for titles.
+		slog.WarnContext(ctx, "titles: linked titles unavailable; showing raw values", "doctype", dt.Name, "link", target.Name, "error", err)
+		return out, nil
 	}
 	for name, code := range out {
 		if title := linked[code]; title != "" {
