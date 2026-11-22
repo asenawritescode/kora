@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -237,6 +238,17 @@ func executionOwner(exec policy.Execution) string {
 		return actor.SubjectUserID
 	}
 	return actor.PrincipalID
+}
+
+// turnPreviewsContext is the open-previews block of a chat turn. A read failure is logged and
+// leaves the turn without the block; the person can still ask again.
+func turnPreviewsContext(ctx context.Context, turn ChatTurn, c *gin.Context, conversationID string) string {
+	caller := pendingCaller{Site: turn.Site, ConversationID: conversationID, ActorID: previewOwner(c, turn.Tx, turn.User)}
+	block, err := openPreviewsBlurb(ctx, turn.Tx.DB, caller)
+	if err != nil {
+		slog.Warn("AI open previews unavailable", "site", turn.Site, "error", err)
+	}
+	return block
 }
 
 // previewOwner is the actor a chat turn's previews are stored under. It resolves the way the

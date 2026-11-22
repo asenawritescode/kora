@@ -247,9 +247,9 @@ func TestPackActionsChatAcrossDialects(t *testing.T) {
 			}
 			ops := api.NewAIModuleOperations(handler, opsCtx)
 			scope := contract.BusinessScope{TenantID: contract.TenantID(siteName), Kind: contract.ScopeKindTenant}
-			catalog, err := ops.Catalog(execution, scope)
-			if err != nil {
-				t.Fatalf("catalog: %v", err)
+			catalog, catalogErr := ops.Catalog(execution, scope)
+			if catalogErr != nil {
+				t.Fatalf("catalog: %v", catalogErr)
 			}
 			for _, ref := range []string{packChatOpenTill, packChatRecordSale} {
 				for _, o := range catalog.PublishedOperations {

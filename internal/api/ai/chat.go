@@ -335,12 +335,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		return
 	}
 	conversationID, transcript := conv.ID, conv.Transcript
-	contextBlurb := pageContextBlurb(req.Context) + followUpBlurb(conv.LastQuestion)
-	previews, previewErr := openPreviewsBlurb(requestCtx, tx.DB, pendingCaller{Site: siteName, ConversationID: conversationID, ActorID: previewOwner(c, tx, currentUser)})
-	if previewErr != nil {
-		slog.Warn("AI open previews unavailable", "site", siteName, "error", previewErr)
-	}
-	contextBlurb += previews
+	contextBlurb := pageContextBlurb(req.Context) + followUpBlurb(conv.LastQuestion) + turnPreviewsContext(requestCtx, turn, c, conversationID)
 	if err := UpsertRun(requestCtx, tx.DB, RunRecord{
 		ID:             runID,
 		Site:           siteName,
