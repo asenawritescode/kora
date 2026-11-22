@@ -180,7 +180,7 @@ func executePublishedOperation(ctx context.Context, rt publishedOperationRuntime
 			return contract.OperationReceipt{}, contract.NewError(contract.CodeDependencyUnavailable, "published operation lease is unavailable")
 		}
 		if !leaseFound {
-			lease = contract.CapabilityLease{ID: leaseID, TenantID: target.scope.TenantID, Scope: target.scope, CallerModuleID: caller, ProviderModuleID: selected.OwnerModuleID, ProviderID: selected.ProviderID, Operation: target.published.Operation, BindingRevision: selected.Revision, GrantEpoch: 1, ExpiresAt: time.Now().UTC().AddDate(20, 0, 0), State: "active"}
+			lease = publicOperationLeaseDeclaration(leaseID, target, caller, selected)
 			ownerAdmission, ok := plan.LeaseAdmission.(plugin.CapabilityLeaseOwnerAdmission)
 			if !ok {
 				return contract.OperationReceipt{}, contract.NewError(contract.CodeDependencyUnavailable, "published operation lease issuer is unavailable")
@@ -474,4 +474,10 @@ func containsPublishedOperation(operations []contract.PublishedOperation, target
 		}
 	}
 	return false
+}
+
+// publicOperationLeaseDeclaration is the lease the first run of a published operation issues for
+// this caller and binding. A preview checks the same declaration without issuing it.
+func publicOperationLeaseDeclaration(leaseID string, target publishedOperationTarget, caller contract.ModuleID, selected plugin.ResolvedBinding) contract.CapabilityLease {
+	return contract.CapabilityLease{ID: leaseID, TenantID: target.scope.TenantID, Scope: target.scope, CallerModuleID: caller, ProviderModuleID: selected.OwnerModuleID, ProviderID: selected.ProviderID, Operation: target.published.Operation, BindingRevision: selected.Revision, GrantEpoch: 1, ExpiresAt: time.Now().UTC().AddDate(20, 0, 0), State: "active"}
 }

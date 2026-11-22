@@ -114,23 +114,6 @@ func TestPOSChatSaleIsPreviewedThenConfirmedAcrossDialects(t *testing.T) {
 				return ""
 			}
 			openRef, saleRef := refFor("open_session"), refFor("record_sale")
-			schemaOf := func(ref string) contract.SchemaRef {
-				for _, o := range catalog.PublishedOperations {
-					if o.OperationRef == ref {
-						return o.InputSchema
-					}
-				}
-				t.Fatalf("catalog lacks %s", ref)
-				return contract.SchemaRef{}
-			}
-			// A preview reads the operation's lease and never issues one. The first run of each
-			// operation issues its lease, so warm each one with a call the kernel refuses for its
-			// empty input. That refused run writes no business row.
-			for _, ref := range []string{openRef, saleRef} {
-				_, _ = ops.Run(context.Background(), execution("Manager"), scope, ref, contract.ExecutePublishedOperation{
-					Meta: contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("warm-" + ref)}, InputSchema: schemaOf(ref), Input: []byte("{}"),
-				})
-			}
 
 			tbl := func(n string) string { return dialect.QuoteIdent(loaded.Registry.Get(n).RawTableName()) }
 			one := func(q string, args ...any) string {

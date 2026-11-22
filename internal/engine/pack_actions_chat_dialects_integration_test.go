@@ -234,33 +234,6 @@ func TestPackActionsChatAcrossDialects(t *testing.T) {
 			router.POST("/api/v1/ai/chat", handler.HandleChat)
 			router.POST("/op/:operation", handler.HandleExecutePublishedOperation)
 
-			// A preview reads an operation's capability lease and never issues one; the first run of an operation
-			// issues it. Warm the till and sale operations with a call the kernel refuses for its empty input, which
-			// writes no business row, as the POS preview test does.
-			opsCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
-			opsCtx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/ai/chat", nil)
-			for key, value := range map[string]any{
-				"site_name": siteName, "site_db": database, "site_db_type": tc.driver, "site_registry": loaded.Registry,
-				"site_runtime_services": services, "policy_execution": execution,
-			} {
-				opsCtx.Set(key, value)
-			}
-			ops := api.NewAIModuleOperations(handler, opsCtx)
-			scope := contract.BusinessScope{TenantID: contract.TenantID(siteName), Kind: contract.ScopeKindTenant}
-			catalog, catalogErr := ops.Catalog(execution, scope)
-			if catalogErr != nil {
-				t.Fatalf("catalog: %v", catalogErr)
-			}
-			for _, ref := range []string{packChatOpenTill, packChatRecordSale} {
-				for _, o := range catalog.PublishedOperations {
-					if o.OperationRef == ref {
-						_, _ = ops.Run(context.Background(), execution, scope, ref, contract.ExecutePublishedOperation{
-							Meta: contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("warm-" + ref)}, InputSchema: o.InputSchema, Input: []byte("{}"),
-						})
-					}
-				}
-			}
-
 			thread := "pack-chat-" + tc.driver
 			chat := func(message string, steps []packChatStep) []byte {
 				t.Helper()

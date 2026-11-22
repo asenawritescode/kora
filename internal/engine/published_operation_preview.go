@@ -56,14 +56,15 @@ func previewPublishedOperation(ctx context.Context, rt publishedOperationRuntime
 	if installedModuleState(req.snapshot, target.owner) != contract.ModuleActive {
 		return contract.OperationReceipt{}, contract.NewError(contract.CodePermissionDenied, "published operation owner is not accepting new work")
 	}
-	// The stored lease is read, not issued: a preview may not create one.
+	// The stored lease is read, not issued: a preview may not create one. Before the first run
+	// there is none yet, so the preview checks the declaration that run would issue.
 	leaseID := publicOperationLeaseID(target.scope, caller, selected, target.published.Operation)
 	lease, found, err := rt.store.LoadCapabilityLease(ctx, target.scope.TenantID, leaseID)
 	if err != nil {
 		return contract.OperationReceipt{}, contract.NewError(contract.CodeDependencyUnavailable, "published operation lease is unavailable")
 	}
 	if !found {
-		return contract.OperationReceipt{}, contract.NewError(contract.CodePermissionDenied, "capability lease is revoked, expired, or stale")
+		lease = publicOperationLeaseDeclaration(leaseID, target, caller, selected)
 	}
 	result, err := plan.InvokeCapability(kernel.WithPreview(ctx), target.execution, plugin.CapabilityCall{Lease: lease, Scope: target.scope, Caller: caller, Capability: target.published.Capability, Operation: target.published.Operation, Meta: req.call.meta, Payload: req.call.input, Preview: true})
 	if err != nil {
