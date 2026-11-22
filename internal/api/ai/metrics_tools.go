@@ -429,15 +429,16 @@ func metricsToolDefs() []map[string]any {
 			"type": "function",
 			"function": map[string]any{
 				"name":        toolDrillMetrics,
-				"description": "List the records behind one number from query_metrics: the same metric (or measure) and the same business days, with its group if any. Returns the total the records add up to.",
+				"description": "List the records behind one number from query_metrics: the same metric, or the same measure (measure), and the same business days, with its group if any. Use measure for a line sum by a line dimension, such as one product's sales value: record_type Sale, agg sum, field line_total, group {\"items.product\": code}. A header measure cannot be split by a line dimension. Returns the total the records add up to.",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"metric": map[string]any{"type": "string"},
-						"from":   map[string]any{"type": "string"},
-						"to":     map[string]any{"type": "string"},
-						"group":  map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
-						"cursor": map[string]any{"type": "string"},
+						"metric":  map[string]any{"type": "string"},
+						"measure": map[string]any{"type": "object", "description": "An unsaved measure of a record type, as in query_metrics", "properties": map[string]any{"record_type": map[string]any{"type": "string"}, "agg": map[string]any{"type": "string", "enum": []string{"count", "sum", "count_distinct"}}, "field": map[string]any{"type": "string"}}, "required": []string{"record_type", "agg"}},
+						"from":    map[string]any{"type": "string"},
+						"to":      map[string]any{"type": "string"},
+						"group":   map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+						"cursor":  map[string]any{"type": "string"},
 					},
 					"required": []string{"from", "to"},
 				},

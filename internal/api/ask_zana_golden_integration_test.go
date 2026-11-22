@@ -461,6 +461,9 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 	clarify := `{"question":"Which sales do you mean?","choices":[{"label":"Number of sales","hint":"How many sales were made"},{"label":"Sales total","hint":"The base total of the sales"}]}`
 	productQuery := `{"metrics":["items_sold"],"dimensions":["items.product"],"top":5,"period":{"preset":"last_week"},"grain":"range"}`
 	drill := fmt.Sprintf(`{"metric":"sales","from":%q,"to":%q}`, d.lastMon.Format(time.DateOnly), d.lastMon.AddDate(0, 0, 6).Format(time.DateOnly))
+	lineByProduct := `{"measures":[{"record_type":"Sale","agg":"sum","field":"line_total"}],"dimensions":["items.product"],"period":{"preset":"last_week"},"grain":"range"}`
+	sodaDrill := fmt.Sprintf(`{"measure":{"record_type":"Sale","agg":"sum","field":"line_total"},"from":%q,"to":%q,"group":{"items.product":"PROD-1"}}`,
+		d.lastMon.Format(time.DateOnly), d.lastMon.AddDate(0, 0, 6).Format(time.DateOnly))
 	const wrongOnce = "Sales last week were KES 1,821."
 	const wrongAgain = "Sales last week were KES 1,822."
 	const rightReply = "Sales last week were KES 1,820."
@@ -754,6 +757,21 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 					t.Fatalf("tool results = %q; want the query and a drill with total 1820", results)
 				}
 				requireCards(t, got, 1)
+			},
+		}}},
+		{name: "one product's sales drill to its lines", user: goldenAdminUser, roles: doctype.AdminRole, turns: []goldenTurn{{
+			message: "Show me the sales of Soda last week.",
+			steps: []modelStep{
+				{tool: "query_metrics", args: lineByProduct},
+				{tool: "drill_metrics", args: sodaDrill},
+				{content: "Soda sold KES 300 last week, and its sale lines add up to the same KES 300."},
+			},
+			check: func(t *testing.T, got ai.ChatResponse, requests []string) {
+				total := regexp.MustCompile(`"total":"300(\.0+)?"`)
+				results := toolResults(t, requests[2])
+				if len(results) != 2 || !total.MatchString(results[1]) {
+					t.Fatalf("tool results = %q; want the line sums and a drill of Soda with total 300", results)
+				}
 			},
 		}}},
 	}
