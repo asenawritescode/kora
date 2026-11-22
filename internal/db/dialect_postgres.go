@@ -328,7 +328,7 @@ func (d *PostgresDialect) TableSuffix() string {
 
 func (d *PostgresDialect) ColumnType(f *doctype.Field) string {
 	switch f.Fieldtype {
-	case "Data", "Select", "Link", "Dynamic Link":
+	case "Data", "Select", "Link", "Dynamic Link", "User":
 		return "VARCHAR(140)"
 	case "Text", "Text Editor":
 		return "TEXT"

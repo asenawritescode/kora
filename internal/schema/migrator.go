@@ -638,7 +638,7 @@ func AnalyzeImpact(database *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype
 		if !exists {
 			continue
 		}
-		if oldF.Fieldtype != newF.Fieldtype {
+		if oldF.Fieldtype != newF.Fieldtype && !relabelsLoginText(oldF, newF, dialect) {
 			change := TieredChange{
 				Tier:    "blocked",
 				DocType: oldDT.Name,
@@ -668,6 +668,20 @@ func AnalyzeImpact(database *sql.DB, oldDT, newDT *doctype.DocType, reg *doctype
 	}
 
 	return preview
+}
+
+// relabelsLoginText reports whether a Data field and a User field are relabelled into one another without
+// converting data. A User field stores a login, which is the text a Data field already holds, and both
+// share one column type, so no row changes and the change is not a blocked type conversion.
+func relabelsLoginText(oldF, newF *doctype.Field, dialect db.Dialect) bool {
+	if !isLoginText(oldF.Fieldtype) || !isLoginText(newF.Fieldtype) {
+		return false
+	}
+	return dialect.ColumnType(oldF) == dialect.ColumnType(newF)
+}
+
+func isLoginText(fieldtype string) bool {
+	return fieldtype == "Data" || fieldtype == "User"
 }
 
 // requirednessChange classifies a field whose required flag changed. Making a

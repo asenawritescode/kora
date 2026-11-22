@@ -308,7 +308,7 @@ func (d *MySQLDialect) TableSuffix() string {
 
 func (d *MySQLDialect) ColumnType(f *doctype.Field) string {
 	switch f.Fieldtype {
-	case "Data", "Select", "Link", "Dynamic Link":
+	case "Data", "Select", "Link", "Dynamic Link", "User":
 		return "VARCHAR(140)"
 	case "Text":
 		return "TEXT"
