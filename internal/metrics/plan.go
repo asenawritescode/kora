@@ -368,7 +368,6 @@ func (p plan) metricNames() []string {
 	return names
 }
 
-// groupsByStatus reports whether a dimension of the plan is the status field's value.
 // groupsByOwner reports whether a dimension is the record owner, which only the fact tables carry.
 func (p plan) groupsByOwner() bool {
 	for _, d := range p.dims {
@@ -379,6 +378,7 @@ func (p plan) groupsByOwner() bool {
 	return false
 }
 
+// groupsByStatus reports whether a dimension of the plan is the status field's value.
 func (p plan) groupsByStatus() bool {
 	for _, d := range p.dims {
 		if p.model.Facts.GroupsByStatus(d.name) {
