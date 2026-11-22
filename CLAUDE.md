@@ -12,6 +12,7 @@ Standing rules for every agent ticket (source: the M1 tracker, #123). They overr
 - Stay inside the ticket. Out-of-scope bugs or ideas become a new issue (labels `m1-next,blocked`, plus a "Depends on" list), never a side fix.
 - Spec gap or unclear ticket: comment the question on the ticket, label it `blocked`, stop. Never invent design.
 - No hard-coding: verticals (POS, inventory) are config packages on generic core features. No vertical names in Engine or client code.
+- Internal users are referenced only through a User field (link to the person), never as text.
 
 **Code and verification**
 - All SQL goes through the dialect (`internal/db/`). Changes must pass Integration (MySQL) and Integration (Postgres).
