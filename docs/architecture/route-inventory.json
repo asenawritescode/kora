@@ -105,6 +105,11 @@
     },
     {
       "method": "POST",
+      "path": "/api/internal/channel/chat",
+      "handler": "github.com/asenawritescode/kora/internal/api.(*Handler).HandleChannelChat-fm"
+    },
+    {
+      "method": "POST",
       "path": "/api/internal/channel/managed-client/revoke",
       "handler": "github.com/asenawritescode/kora/internal/api.(*Handler).HandleManagedChannelClientRevoke-fm"
     },
@@ -832,6 +837,11 @@
       "method": "POST",
       "path": "/api/v1/import",
       "handler": "github.com/asenawritescode/kora/internal/api.(*Handler).HandleImport-fm"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/internal/channel/chat",
+      "handler": "github.com/asenawritescode/kora/internal/api.(*Handler).HandleChannelChat-fm"
     },
     {
       "method": "POST",

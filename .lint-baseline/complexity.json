@@ -151,9 +151,9 @@
    "lines": 185
   },
   "internal/api/ai::HandleChat": {
-   "cognitive": 107,
-   "cyclomatic": 48,
-   "statements": 213
+   "cognitive": 103,
+   "cyclomatic": 46,
+   "statements": 209
   },
   "internal/api/ai::ValidateProviderProfile": {
    "cyclomatic": 16
@@ -523,7 +523,7 @@
    "statements": 78
   },
   "internal/api::RegisterRoutesOnGroup": {
-   "statements": 72
+   "statements": 65
   },
   "internal/api::RegisterSystemRoutes": {
    "statements": 41
@@ -1005,7 +1005,7 @@
    "lines": 259
   },
   "internal/db::ExtensibilityTablesMySQL": {
-   "lines": 136
+   "lines": 115
   },
   "internal/db::LoadSchema": {
    "statements": 41

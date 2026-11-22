@@ -70,12 +70,17 @@ func (h *Handler) HandleChannelSessionIssue(c *gin.Context) {
 	if clientName == "" {
 		clientName = c.GetString("extension_name")
 	}
+	subjectUser := strings.TrimSpace(req.SubjectUser)
+	if subjectUser != "" && !h.checkChannelSubject(c, siteNameStr, subjectUser) {
+		return
+	}
 	token, session, err := auth.CreateChannelSession(h.queryDB(c), h.siteDialect(c), auth.ChannelSessionCreateParams{
 		Site:            siteNameStr,
 		ClientName:      clientName,
 		ConversationKey: req.ConversationKey,
 		Provider:        req.Provider,
 		SenderAddress:   req.SenderAddress,
+		SubjectUser:     subjectUser,
 		Permissions:     channelPermissionGrants(req.Permissions),
 		TrustedUntil:    trustedUntil,
 		SensitiveUntil:  sensitiveUntil,
@@ -91,6 +96,73 @@ func (h *Handler) HandleChannelSessionIssue(c *gin.Context) {
 		SensitiveUntil:  optionalTime(session.SensitiveUntil),
 		ConversationKey: session.ConversationKey,
 	}})
+}
+
+// checkChannelSubject answers 403 and reports false when subject is not an enabled user of the site.
+func (h *Handler) checkChannelSubject(c *gin.Context, site, subject string) bool {
+	_, err := auth.LoadChannelSubject(c.Request.Context(), h.queryDB(c), h.siteDialect(c), site, subject)
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, auth.ErrSubjectUnavailable) {
+		writeError(c, http.StatusForbidden, "auth.subject_user_unavailable", "subject_user must name an enabled user of this site", nil)
+		return false
+	}
+	internalError(c, "load channel subject user", err)
+	return false
+}
+
+// HandleChannelChat runs one turn of a managed channel through the workspace chat, as the session's subject user. The
+// turn's writes are owned by that user; the channel's tool allowlist and reply style apply, and the reply reports
+// whether a preview is waiting for the person's yes.
+func (h *Handler) HandleChannelChat(c *gin.Context) {
+	if c.GetString("auth_type") != "channel_session" || c.GetString("channel_subject_user") == "" {
+		writeError(c, http.StatusForbidden, "auth.subject_user_required", "channel chat needs a channel session issued with a subject user", nil)
+		return
+	}
+	var req contract.ChannelChatRequestV2
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Message) == "" || strings.TrimSpace(req.ConversationKey) == "" {
+		writeError(c, http.StatusBadRequest, "validation.required_field", "message and conversation_key are required", nil)
+		return
+	}
+	turn, ok := h.chatTurn(c)
+	if !ok {
+		return
+	}
+	turn.Channel = "whatsapp"
+	outcome := ai.HandleChat(c.Request.Context(), turn, ai.ChatRequest{
+		Message: req.Message,
+		Context: ai.ChatContext{ThreadID: channelThreadID(req.ConversationKey)},
+	})
+	if outcome.Failure != nil {
+		c.JSON(outcome.Status, outcome.Failure)
+		return
+	}
+	awaiting, err := ai.AwaitingConfirmation(c.Request.Context(), turn, outcome.ConversationID)
+	if err != nil {
+		internalError(c, "read open previews", err)
+		return
+	}
+	c.JSON(http.StatusOK, Response{Data: contract.ChannelChatResponseV2{
+		Result:               outcome.Reply.Reply,
+		Choices:              outcome.Reply.Choices,
+		AwaitingConfirmation: awaiting,
+		Usage: contract.ChannelChatUsageV2{
+			InputTokens:       outcome.Usage.Prompt,
+			CachedInputTokens: outcome.Usage.CachedInput,
+			OutputTokens:      outcome.Usage.Completion,
+		},
+	}})
+}
+
+// channelThreadID is the chat thread of a channel conversation key. A key over the 100-character thread limit is
+// hashed to a fixed length.
+func channelThreadID(key string) string {
+	if len(key) <= 100 {
+		return key
+	}
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])
 }
 
 func channelPermissionGrants(grants []contract.PermissionGrant) []doctype.Permission {
