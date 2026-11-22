@@ -495,8 +495,9 @@ func writeSExprRole(b *strings.Builder, r *Role, indent string) {
 	if r.WorkspaceAccess {
 		props = append(props, sExprProp{"workspace", "true"})
 	}
-	if r.InsightsAccess != nil {
-		props = append(props, sExprProp{"insights", strconv.FormatBool(*r.InsightsAccess)})
+	// Insights is on unless a role denies it, so an unset flag and an explicit true share one canonical form.
+	if !r.InsightsAllowed() {
+		props = append(props, sExprProp{"insights", "false"})
 	}
 	if r.Description != "" {
 		props = append(props, sExprProp{"description", quoteSExprString(r.Description)})
