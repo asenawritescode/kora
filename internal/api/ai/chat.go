@@ -23,6 +23,7 @@ import (
 	"github.com/asenawritescode/kora/internal/orm"
 	"github.com/asenawritescode/kora/internal/policy"
 	"github.com/asenawritescode/kora/internal/secret"
+	"github.com/asenawritescode/kora/internal/tenanttime"
 )
 
 // ChatRequest is the JSON body for POST /api/v1/ai/chat.
@@ -101,6 +102,20 @@ func siteCurrencyForChat(ctx context.Context, database *sql.DB, siteName string,
 }
 
 // pageContextBlurb describes the screen the person is on, for the model. It is empty without a page.
+// businessDayBlurb tells the model the tenant's business day, so "today" and "this week" resolve in the shop's own
+// zone and day cutoff. It sits in the turn context, so the standing prompt stays the same every day.
+func businessDayBlurb(ctx context.Context, database *sql.DB, dialect kdb.QueryDialect, site string, now time.Time) string {
+	clock := tenanttime.Default()
+	if database != nil && dialect != nil {
+		if loaded, err := tenanttime.Load(ctx, database, dialect, site); err == nil {
+			clock = loaded
+		}
+	}
+	day := clock.BusinessDate(now)
+	weekday := time.Date(day.Year, day.Month, day.Day, 12, 0, 0, 0, time.UTC).Weekday()
+	return fmt.Sprintf("Business day: %s, %s.", weekday, day)
+}
+
 func pageContextBlurb(page ChatContext) string {
 	if page.Pathname == "" && page.Doctype == "" && page.DocumentName == "" {
 		return ""
@@ -329,7 +344,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		return
 	}
 	conversationID, transcript := conv.ID, conv.Transcript
-	turnContext := turnContextMessage(pageContextBlurb(req.Context), followUpBlurb(conv.LastQuestion), turnPreviewsContext(requestCtx, turn, c, conversationID))
+	turnContext := turnContextMessage(businessDayBlurb(requestCtx, tx.DB, tx.Dialect, siteName, time.Now()), pageContextBlurb(req.Context), followUpBlurb(conv.LastQuestion), turnPreviewsContext(requestCtx, turn, c, conversationID))
 	if err := UpsertRun(requestCtx, tx.DB, RunRecord{
 		ID:             runID,
 		Site:           siteName,
@@ -784,7 +799,7 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 	// --- SAFETY NET: Max rounds exhausted ---
 	slog.Warn("Max rounds exhausted in chat loop", "max_rounds", cfg.MaxRounds)
 	writeChatResponse(c, ChatResponse{
-		Reply:  maxRoundsReply(stepsDone, req.Message),
+		Reply:  storedMaxRoundsReply(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID}, stepsDone, req.Message),
 		Action: "max_rounds_reached",
 		RunID:  runID,
 	})
@@ -800,6 +815,15 @@ func HandleChat(c *gin.Context, turn ChatTurn) {
 		Provider:       providerKey,
 	})
 	_ = SummarizeRun(requestCtx, tx.DB, runID)
+}
+
+// storedMaxRoundsReply builds the round-cap reply and saves it to the conversation like any other reply, so the next
+// turn's history shows what was said. base carries the site, conversation and run.
+func storedMaxRoundsReply(ctx context.Context, database *sql.DB, base MessageRecord, stepsDone int, request string) string {
+	reply := maxRoundsReply(stepsDone, request)
+	base.Role, base.Content, base.Kind = "assistant", reply, "summary"
+	_ = AppendConversationMessage(ctx, database, base)
+	return reply
 }
 
 // maxRoundsReply is the reply when the round cap ends a run: one sentence on what got done and what is left.

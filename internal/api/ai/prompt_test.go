@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/policy"
@@ -181,5 +182,13 @@ func TestMaxRoundsReplySaysWhatIsLeft(t *testing.T) {
 				t.Errorf("maxRoundsReply() = %q, want one plain sentence", got)
 			}
 		})
+	}
+}
+
+func TestBusinessDayBlurbNamesTheTenantDay(t *testing.T) {
+	// No database: the default zone applies. 2026-11-22 21:30 UTC is a Monday in Nairobi (UTC+3).
+	got := businessDayBlurb(context.Background(), nil, nil, "x", time.Date(2026, 11, 22, 21, 30, 0, 0, time.UTC))
+	if got != "Business day: Monday, 2026-11-23." {
+		t.Fatalf("blurb = %q", got)
 	}
 }
