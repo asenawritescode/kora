@@ -97,13 +97,14 @@ func TestRecordToolsReachPackTypesAcrossDialects(t *testing.T) {
 				t.Fatalf("commit Sale on %s: %v", tc.name, err)
 			}
 
-			run := func(step string, calls ...map[string]any) []string {
+			// runInTurn runs one chat turn: its run ID is the turn, so a preview cannot confirm itself.
+			runInTurn := func(runID, step string, calls ...map[string]any) []string {
 				anyCalls := make([]any, 0, len(calls))
 				for _, call := range calls {
 					anyCalls = append(anyCalls, call)
 				}
 				results := executeToolCallsForAI(tx.Context, tx, registry, toolCallBatch{
-					Calls: anyCalls, Owner: "alice@example.test", Site: site, RunID: "run-" + suffix, StepID: step,
+					Calls: anyCalls, Owner: "alice@example.test", Site: site, RunID: runID, StepID: step,
 					ConversationID: "conversation-" + suffix, Execution: execution, Commands: commands,
 				})
 				contents := make([]string, 0, len(results))
@@ -113,6 +114,9 @@ func TestRecordToolsReachPackTypesAcrossDialects(t *testing.T) {
 				}
 				return contents
 			}
+			run := func(step string, calls ...map[string]any) []string {
+				return runInTurn("run-"+suffix, step, calls...)
+			}
 			toolCall := func(id, name, args string) map[string]any {
 				return map[string]any{"id": id, "type": "function", "function": map[string]any{"name": name, "arguments": args}}
 			}
@@ -121,9 +125,14 @@ func TestRecordToolsReachPackTypesAcrossDialects(t *testing.T) {
 			if !strings.Contains(described, `"item_name"`) {
 				t.Fatalf("describe Item on %s = %q, want item_name field", tc.name, described)
 			}
-			created := run("step-create", toolCall("call-create", toolCreateRecord, `{"record_type":"Item","data":{"item_name":"Sugar 2kg","uom":"Each","price":250}}`))[0]
+			preview := run("step-create", toolCall("call-create", toolCreateRecord, `{"record_type":"Item","data":{"item_name":"Sugar 2kg","uom":"Each","price":250}}`))[0]
+			if !strings.HasPrefix(preview, `{"preview"`) {
+				t.Fatalf("create Item on %s = %q, want a preview", tc.name, preview)
+			}
+			token := tokenOf(t, preview)
+			created := runInTurn("run-"+suffix+"-confirm", "step-confirm", toolCall("call-confirm", toolConfirmWrite, `{"confirm_token":"`+token+`"}`))[0]
 			if !strings.HasPrefix(created, "Created Item") {
-				t.Fatalf("create Item on %s = %q, want Created Item", tc.name, created)
+				t.Fatalf("confirm Item on %s = %q, want Created Item", tc.name, created)
 			}
 			found := run("step-find-item", toolCall("call-find-item", toolFindRecords, `{"record_type":"Item","search":"Sugar"}`))[0]
 			if !strings.Contains(found, "Found 1 Item") {

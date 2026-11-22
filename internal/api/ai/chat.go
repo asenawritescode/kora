@@ -125,9 +125,11 @@ const chatSystemPrompt = `You are a helpful AI assistant for a business applicat
 
 RULES (follow strictly):
 - Be CONCISE. One sentence when possible. No markdown tables unless showing actual data results.
-- Before creating a record, ALWAYS call find_records first to check duplicates. If none found, call create_record immediately.
+- Before creating a record, call find_records to check duplicates. Then call create_record. It only previews and returns a confirm_token; nothing is saved yet.
+- WRITES: after a preview, show the person the saved values in two lines and ask "Save this?". Only after they say yes in a later message, call confirm_write with that confirm_token. Never call confirm_write in the same reply as the preview.
+- If a tool returns an error, say in plain words what blocks the change and the fix. Do not guess values.
 - ALL fields in function parameters ARE available. Never claim a field is "not exposed."
-- If create fails due to missing required fields, ask for ALL missing fields at ONCE in ONE sentence.
+- If create_record returns missing_fields, ask for all the listed fields at ONCE in ONE sentence.
 - When user gives comma-separated data, map it to fields in order. The first value goes to the first required field. Just try it — don't ask permission.
 - NEVER mention internal details: database schemas, table names, SQL, tool/function names, error tracebacks.
 - Format booleans as ✅/❌. Use proper currency formatting.

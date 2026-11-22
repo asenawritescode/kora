@@ -79,7 +79,7 @@ func TestPrivateModuleRecordsAreNotExposedThroughAITools(t *testing.T) {
 	defer database.Close()
 	tx := &orm.TxManager{DB: database, Dialect: db.Resolve("mysql"), Context: context.Background()}
 	got := executeSingleTool(tx, reg, toolInvocation{Name: "get_record", Args: map[string]any{"record_type": "Private Invoice", "name": "INV-1"}, Owner: "owner", Site: "tenant-a", RunID: "run", StepID: "step", IdempotencyKey: aiToolMutationIdempotencyKey("tenant-a", "run", "step", "call"), Execution: testAIExecution(t, "tenant-a", "owner", []string{"Administrator"})})
-	if !strings.Contains(got, "Permission denied") {
+	if !strings.Contains(got, `"code":"permission_denied"`) {
 		t.Fatalf("private module record bypass was not denied: %q", got)
 	}
 }
@@ -358,10 +358,10 @@ func TestExecuteUpdateToolRejectsInvalidArgumentsBeforeMutation(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		{name: "missing record name", args: map[string]any{"title": "Updated"}, want: "name is required"},
-		{name: "unknown field", args: map[string]any{"name": "TASK-1", "missing": "value"}, want: "unknown fields: missing"},
-		{name: "read-only field", args: map[string]any{"name": "TASK-1", "calculated": "forged"}, want: "field calculated is not writable"},
-		{name: "empty change set", args: map[string]any{"name": "TASK-1"}, want: "provide at least one writable field"},
+		{name: "missing record name", args: map[string]any{"title": "Updated"}, want: `"code":"missing_fields"`},
+		{name: "unknown field", args: map[string]any{"name": "TASK-1", "missing": "value"}, want: "Unknown fields: missing"},
+		{name: "read-only field", args: map[string]any{"name": "TASK-1", "calculated": "forged"}, want: "Field calculated is not writable"},
+		{name: "empty change set", args: map[string]any{"name": "TASK-1"}, want: "at least one writable field"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

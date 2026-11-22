@@ -87,6 +87,7 @@ func recordToolDescriptors(types []string) []ToolDescriptor {
 		"limit":       map[string]any{"type": "integer", "minimum": 1, "maximum": maxFindRecords, "description": "Max rows (default 5)."},
 	}
 	return []ToolDescriptor{
+		recordTool(toolConfirmWrite, "Run a write that a preview returned. Call it only in a later message, after the person says yes, with the confirm_token from that preview.", objectSchema(map[string]any{"confirm_token": map[string]any{"type": "string", "description": "confirm_token from the latest preview."}}, "confirm_token"), "confirm"),
 		recordTool(toolFindRecords, "Find or list records of one type, recent first. Returns names, titles and summary fields.", objectSchema(findProps, "record_type"), recordToolOperation[toolFindRecords]),
 		recordTool(toolGetRecord, "Get one record by name.", objectSchema(map[string]any{"record_type": typeProp, "name": nameProp}, "record_type", "name"), recordToolOperation[toolGetRecord]),
 		recordTool(toolDescribeRecord, "Describe a record type: fields with type, required, default, options, link target, read-only and computed flags, child tables and pack commands. Call before a write.", objectSchema(map[string]any{"record_type": typeProp}, "record_type"), recordToolOperation[toolDescribeRecord]),
@@ -145,7 +146,7 @@ func executeRecordTool(tx *orm.TxManager, reg *doctype.Registry, inv toolInvocat
 	recordType, _ := inv.Args["record_type"].(string)
 	dt := recordTypeNamed(reg, recordType)
 	if dt == nil {
-		return fmt.Sprintf("Error: unknown record type %q. Use a record_type from the enum.", recordType)
+		return (&aiToolError{Code: errNotFound, Message: fmt.Sprintf("Unknown record type %q.", recordType), Field: "record_type", Fix: "Use a record_type from the enum."}).text()
 	}
 	rowScope, denied := authorizeRecordOperation(tx, reg, dt, recordToolPermission[operation], inv.Execution)
 	if denied != "" {
@@ -159,35 +160,54 @@ func executeRecordTool(tx *orm.TxManager, reg *doctype.Registry, inv toolInvocat
 	case "describe":
 		return describeRecordType(reg, dt, inv.Commands)
 	case "create":
-		if refusal := moduleCommandRefusal(dt, inv.Commands); refusal != "" {
-			return refusal
-		}
-		fields, msg := recordDataArg(inv.Args)
-		if msg != "" {
-			return msg
-		}
-		if unknown := unknownFields(fields, dt); len(unknown) > 0 {
-			return fmt.Sprintf("Error: unknown fields: %s. Valid fields: %s", strings.Join(unknown, ", "), availableFieldNames(dt))
-		}
-		result, err := executeAIRecordMutation(tx, reg, recordMutation{Command: kernel.CommandRecordCreate, Doctype: dt.Name, Fields: fields, IdempotencyKey: inv.IdempotencyKey, Execution: inv.Execution})
-		if err != nil {
-			return fmt.Sprintf("Error creating %s: %v", dt.Name, err)
-		}
-		return fmt.Sprintf("Created %s %q.", dt.Name, result.Name)
+		return executeRecordCreate(tx, reg, inv, dt, rowScope)
 	case "update":
-		if refusal := moduleCommandRefusal(dt, inv.Commands); refusal != "" {
-			return refusal
-		}
-		fields, msg := recordDataArg(inv.Args)
-		if msg != "" {
-			return msg
-		}
-		name, _ := inv.Args["name"].(string)
-		fields["name"] = name
-		inv.Args = fields
-		return executeUpdateTool(tx, reg, dt, inv)
+		return executeRecordUpdate(tx, reg, inv, dt, rowScope)
 	}
-	return fmt.Sprintf("Unknown operation: %s", operation)
+	return (&aiToolError{Code: errInvalidValue, Message: "Unknown operation " + operation + "."}).text()
+}
+
+// executeRecordCreate creates one record, or previews it in chat.
+func executeRecordCreate(tx *orm.TxManager, reg *doctype.Registry, inv toolInvocation, dt *doctype.DocType, rowScope policy.RowScope) string {
+	if refusal := moduleCommandRefusal(dt, inv.Commands); refusal != "" {
+		return refusal
+	}
+	fields, refusal := recordDataArg(inv.Args)
+	if refusal != "" {
+		return refusal
+	}
+	if unknown := unknownFields(fields, dt); len(unknown) > 0 {
+		return unknownFieldError(dt, unknown).text()
+	}
+	w := recordWrite{Command: kernel.CommandRecordCreate, Doctype: dt.Name, Fields: fields}
+	if inv.PreviewWrites {
+		return previewRecordWrite(tx, reg, inv, w, rowScope)
+	}
+	result, err := executeAIRecordMutation(tx, reg, recordMutation{Command: w.Command, Doctype: w.Doctype, Fields: fields, IdempotencyKey: inv.IdempotencyKey, Execution: inv.Execution})
+	if err != nil {
+		return recordWriteErrorText(err)
+	}
+	return fmt.Sprintf("Created %s %q.", dt.Name, result.Name)
+}
+
+// executeRecordUpdate updates one record, or previews the change in chat.
+func executeRecordUpdate(tx *orm.TxManager, reg *doctype.Registry, inv toolInvocation, dt *doctype.DocType, rowScope policy.RowScope) string {
+	if refusal := moduleCommandRefusal(dt, inv.Commands); refusal != "" {
+		return refusal
+	}
+	fields, refusal := recordDataArg(inv.Args)
+	if refusal != "" {
+		return refusal
+	}
+	fields["name"] = inv.Args["name"]
+	name, changes, uerr := updateChanges(dt, fields)
+	if uerr != nil {
+		return uerr.text()
+	}
+	if inv.PreviewWrites {
+		return previewRecordWrite(tx, reg, inv, recordWrite{Command: kernel.CommandRecordUpdate, Doctype: dt.Name, Name: name, Fields: changes}, rowScope)
+	}
+	return executeUpdateTool(tx, reg, dt, toolInvocation{Args: fields, IdempotencyKey: inv.IdempotencyKey, Execution: inv.Execution})
 }
 
 // authorizeRecordOperation applies the role matrix to one record type. It returns the row
@@ -195,7 +215,7 @@ func executeRecordTool(tx *orm.TxManager, reg *doctype.Registry, inv toolInvocat
 func authorizeRecordOperation(tx *orm.TxManager, reg *doctype.Registry, dt *doctype.DocType, permissionOperation string, execution policy.Execution) (policy.RowScope, string) {
 	decision, decisionErr := policy.DecideForBusinessScope(execution, reg, dt.Name, permissionOperation, tx.BusinessScope, dt.BusinessScopePolicy == contract.ScopeEntityOwned)
 	if decisionErr != nil {
-		return policy.RowScope{}, fmt.Sprintf("Permission denied: cannot %s on %s", permissionOperation, dt.Name)
+		return policy.RowScope{}, (&aiToolError{Code: errPermissionDenied, Message: fmt.Sprintf("You may not %s %s.", permissionOperation, dt.Name), Fix: "Ask a person with access to make this change."}).text()
 	}
 	rowScope := policy.RowScope{Owner: decision.OwnerOnly, AssignedFields: append([]string(nil), decision.AssignedFields...), Business: tx.BusinessScope}
 	if decision.OwnerOnly || len(decision.AssignedFields) > 0 {
@@ -205,7 +225,7 @@ func authorizeRecordOperation(tx *orm.TxManager, reg *doctype.Registry, dt *doct
 			rowScope.UserID = actor.PrincipalID
 		}
 		if rowScope.UserID == "" {
-			return policy.RowScope{}, "Permission denied: row-scoped access requires an actor subject"
+			return policy.RowScope{}, (&aiToolError{Code: errPermissionDenied, Message: "Row-scoped access needs a signed-in subject."}).text()
 		}
 	}
 	return rowScope, ""
@@ -215,7 +235,7 @@ func authorizeRecordOperation(tx *orm.TxManager, reg *doctype.Registry, dt *doct
 func recordDataArg(args map[string]any) (map[string]any, string) {
 	data, ok := args["data"].(map[string]any)
 	if !ok || len(data) == 0 {
-		return nil, "Error: data must be an object with at least one field value."
+		return nil, (&aiToolError{Code: errMissingFields, Message: "data must be an object with at least one field value.", Field: "data", Fix: "Call describe_record_type, then pass the fields in data."}).text()
 	}
 	fields := make(map[string]any, len(data))
 	for key, value := range data {
@@ -265,7 +285,7 @@ func getRecord(tx *orm.TxManager, dt *doctype.DocType, args map[string]any, rowS
 	name, _ := args["name"].(string)
 	doc, err := tx.GetDocWithScope(dt, name, rowScope)
 	if err != nil {
-		return fmt.Sprintf("%s %q not found.", dt.Name, name)
+		return (&aiToolError{Code: errNotFound, Message: fmt.Sprintf("%s %q was not found.", dt.Name, name), Field: "name", Fix: "Find the record with find_records and use its name."}).text()
 	}
 	result, marshalErr := json.Marshal(map[string]any{
 		"doctype":  dt.Name,
@@ -385,16 +405,13 @@ func moduleCommandRefusal(dt *doctype.DocType, commands *kernel.CommandRegistry)
 	if dt.ModuleOwnershipMode != string(contract.MutationCommands) {
 		return ""
 	}
-	payload, err := json.Marshal(map[string]any{
-		"error":       "module_command_required",
-		"record_type": dt.Name,
-		"commands":    domainCommandNames(commands, dt.Name),
-		"message":     dt.Name + " is changed only by its pack commands. Use one of the listed commands.",
-	})
-	if err != nil {
-		return fmt.Sprintf("Error: %s requires its pack command.", dt.Name)
-	}
-	return "Error: " + string(payload)
+	return (&aiToolError{
+		Code:        errModuleCommandRequired,
+		Message:     dt.Name + " is changed only by its pack commands.",
+		Field:       "record_type",
+		Fix:         "Use one of the listed pack commands.",
+		ValidValues: limitValues(domainCommandNames(commands, dt.Name)),
+	}).text()
 }
 
 // findFiltersSchema is the typed filter list of find_records.

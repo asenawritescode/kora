@@ -726,7 +726,7 @@ func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.
 			continue
 		}
 
-		result := executeSingleTool(tx, reg, toolInvocation{Name: name, Args: args, Owner: batch.Owner, Site: batch.Site, RunID: batch.RunID, StepID: batch.StepID, IdempotencyKey: aiToolMutationIdempotencyKey(batch.Site, batch.RunID, batch.StepID, id), Execution: batch.Execution, Turn: batch.Turn, Commands: batch.Commands, Operations: batch.Operations}) //nolint:contextcheck // the context travels in tx.Context
+		result := executeSingleTool(tx, reg, toolInvocation{Name: name, Args: args, Owner: batch.Owner, Site: batch.Site, RunID: batch.RunID, StepID: batch.StepID, ConversationID: batch.ConversationID, PreviewWrites: true, IdempotencyKey: aiToolMutationIdempotencyKey(batch.Site, batch.RunID, batch.StepID, id), Execution: batch.Execution, Turn: batch.Turn, Commands: batch.Commands, Operations: batch.Operations}) //nolint:contextcheck // the context travels in tx.Context
 		status := "completed"
 		if isToolError(result) {
 			status = "failed"
@@ -766,6 +766,10 @@ type toolInvocation struct {
 	IdempotencyKey string
 	Execution      policy.Execution
 	Turn           *answerTurn
+	// ConversationID and PreviewWrites are set by the chat loop. A chat write is previewed,
+	// then runs only through confirm_write. Other callers keep the direct write path.
+	ConversationID string
+	PreviewWrites  bool
 	// Commands resolves the pack commands a module-owned write must use. Nil names none.
 	Commands *kernel.CommandRegistry
 	// Operations runs the pack-action tools. Nil refuses them.
@@ -907,14 +911,27 @@ func toolDescriptorForName(toolName string) *ToolDescriptor {
 
 // executeUpdateTool updates the record named by inv.Args from the remaining writable fields.
 func executeUpdateTool(tx *orm.TxManager, reg *doctype.Registry, dt *doctype.DocType, inv toolInvocation) string {
-	args := inv.Args
+	name, changes, refusal := updateChanges(dt, inv.Args)
+	if refusal != nil {
+		return refusal.text()
+	}
+	result, err := executeAIRecordMutation(tx, reg, recordMutation{Command: kernel.CommandRecordUpdate, Doctype: dt.Name, Name: name, Fields: changes, IdempotencyKey: inv.IdempotencyKey, Execution: inv.Execution})
+	if err != nil {
+		return recordWriteErrorText(err)
+	}
+	return fmt.Sprintf("Updated %s %q.", dt.Name, result.Name)
+}
+
+// updateChanges returns the record name and the writable fields of an update call, or the
+// structured refusal when the name or a field is not writable.
+func updateChanges(dt *doctype.DocType, args map[string]any) (string, map[string]any, *aiToolError) {
 	name, _ := args["name"].(string)
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return fmt.Sprintf("Error updating %s: name is required.", dt.Name)
+		return "", nil, &aiToolError{Code: errMissingFields, Message: dt.Name + " update needs the record name.", Field: "name", Fix: "Find the record with find_records, then pass its name."}
 	}
 	if unknown := unknownFieldsExcept(args, dt, map[string]bool{"name": true}); len(unknown) > 0 {
-		return fmt.Sprintf("Error updating %s: unknown fields: %s. Valid fields: %s", dt.Name, strings.Join(unknown, ", "), availableFieldNames(dt))
+		return "", nil, unknownFieldError(dt, unknown)
 	}
 	changes := map[string]any{}
 	for key, value := range args {
@@ -926,18 +943,25 @@ func executeUpdateTool(tx *orm.TxManager, reg *doctype.Registry, dt *doctype.Doc
 			continue
 		}
 		if field.Fieldtype == "Table" || field.ReadOnly || field.Computed != "" {
-			return fmt.Sprintf("Error updating %s: field %s is not writable.", dt.Name, key)
+			return "", nil, &aiToolError{Code: errInvalidValue, Message: "Field " + key + " is not writable.", Field: key, Fix: "Remove " + key + " from data."}
 		}
 		changes[key] = value
 	}
 	if len(changes) == 0 {
-		return fmt.Sprintf("Error updating %s: provide at least one writable field.", dt.Name)
+		return "", nil, &aiToolError{Code: errInvalidValue, Message: "Provide at least one writable field in data.", Field: "data"}
 	}
-	result, err := executeAIRecordMutation(tx, reg, recordMutation{Command: kernel.CommandRecordUpdate, Doctype: dt.Name, Name: name, Fields: changes, IdempotencyKey: inv.IdempotencyKey, Execution: inv.Execution})
-	if err != nil {
-		return fmt.Sprintf("Error updating %s: %v", dt.Name, err)
+	return name, changes, nil
+}
+
+// unknownFieldError names the fields the record type does not have, with the closest valid ones.
+func unknownFieldError(dt *doctype.DocType, unknown []string) *aiToolError {
+	return &aiToolError{
+		Code:        errInvalidValue,
+		Message:     "Unknown fields: " + strings.Join(unknown, ", ") + ".",
+		Field:       unknown[0],
+		Fix:         "Use only the field names listed for " + dt.Name + ".",
+		ValidValues: limitValues(strings.Split(availableFieldNames(dt), ", ")),
 	}
-	return fmt.Sprintf("Updated %s %q.", dt.Name, result.Name)
 }
 
 // recordMutation is one kernel record command issued on behalf of an AI tool.
@@ -949,6 +973,8 @@ type recordMutation struct {
 	Fields         map[string]any
 	IdempotencyKey string
 	Execution      policy.Execution
+	// Preview validates and names the record without keeping any write.
+	Preview bool
 }
 
 func executeAIRecordMutation(tx *orm.TxManager, reg *doctype.Registry, m recordMutation) (*kernel.ResultData, error) {
@@ -989,10 +1015,17 @@ func executeAIRecordMutation(tx *orm.TxManager, reg *doctype.Registry, m recordM
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	result, cerr := engine.Execute(ctx, tx.DB, reg, kernel.Operation{
+	op := kernel.Operation{
 		Context: kernel.OperationContext{Site: site, TenantID: execution.Tenant(), Execution: execution, BusinessScope: tx.BusinessScope, BusinessReferenceValidator: tx.BusinessReferenceValidator, Actor: actor, User: user, UserRole: role, Roles: actorRoles, Source: kernel.SourceAI, IdempotencyKey: idempotencyKey},
 		Command: command, Payload: raw,
-	})
+	}
+	var result contract.CommandResult
+	var cerr *contract.Error
+	if m.Preview {
+		result, cerr = engine.Preview(ctx, tx.DB, reg, op)
+	} else {
+		result, cerr = engine.Execute(ctx, tx.DB, reg, op)
+	}
 	if cerr != nil {
 		return nil, cerr
 	}
@@ -1398,6 +1431,9 @@ func validOrderByFields(dt *doctype.DocType, orderBy string) bool {
 
 // executeFixedTool runs the fixed record tools and the pack-action tools. It reports false for any other name.
 func executeFixedTool(tx *orm.TxManager, reg *doctype.Registry, inv toolInvocation) (string, bool) {
+	if inv.Name == toolConfirmWrite {
+		return executeConfirmWrite(tx, reg, inv), true
+	}
 	if inv.Name == toolListActions || inv.Name == toolRunAction {
 		return executePackAction(tx, inv), true
 	}

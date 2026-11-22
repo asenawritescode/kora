@@ -61,7 +61,8 @@ func capResultSize(content string, maxChars int) string {
 
 func isToolError(content string) bool {
 	return strings.HasPrefix(content, "Error") || strings.HasPrefix(content, "Unknown") ||
-		strings.HasPrefix(content, "Permission denied") || strings.HasPrefix(content, "recent authentication required")
+		strings.HasPrefix(content, "Permission denied") || strings.HasPrefix(content, "recent authentication required") ||
+		strings.HasPrefix(content, `{"error":`)
 }
 
 // ---------------------------------------------------------------------------

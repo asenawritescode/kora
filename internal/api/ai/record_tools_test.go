@@ -96,8 +96,8 @@ func TestRecordToolCatalogIsFixedAndStable(t *testing.T) {
 			t.Fatalf("per-type tool %s is still in the catalog", tool.Name)
 		}
 	}
-	if got := BuildToolCatalog(doctype.NewRegistry(), CatalogOptions{}); len(got.Tools) != len(first.Tools)-5 {
-		t.Fatalf("empty registry should drop the five record tools, got %d tools", len(got.Tools))
+	if got := BuildToolCatalog(doctype.NewRegistry(), CatalogOptions{}); len(got.Tools) != len(first.Tools)-6 {
+		t.Fatalf("empty registry should drop the five record tools and confirm_write, got %d tools", len(got.Tools))
 	}
 }
 
@@ -152,7 +152,7 @@ func TestModuleCommandRefusalNamesPackCommandsForCommandsOnlyTypes(t *testing.T)
 				}
 				return
 			}
-			if !strings.HasPrefix(refusal, "Error: {") || !strings.Contains(refusal, `"module_command_required"`) {
+			if !strings.HasPrefix(refusal, `{"error":`) || !strings.Contains(refusal, `"code":"module_command_required"`) {
 				t.Fatalf("refusal = %q, want structured module_command_required", refusal)
 			}
 			if tc.wantNamed != "" && !strings.Contains(refusal, tc.wantNamed) {
@@ -207,9 +207,9 @@ func TestRecordToolExecutionRefusesChildAndUnknownTypes(t *testing.T) {
 		tool string
 		want string
 	}{
-		{name: "child table", tool: toolFindRecords, args: map[string]any{"record_type": "Task Line"}, want: "unknown record type"},
-		{name: "unknown type", tool: toolGetRecord, args: map[string]any{"record_type": "Nope", "name": "X"}, want: "unknown record type"},
-		{name: "role without create", tool: toolCreateRecord, args: map[string]any{"record_type": "Sale", "data": map[string]any{"total": 1}}, want: "Permission denied"},
+		{name: "child table", tool: toolFindRecords, args: map[string]any{"record_type": "Task Line"}, want: "Unknown record type"},
+		{name: "unknown type", tool: toolGetRecord, args: map[string]any{"record_type": "Nope", "name": "X"}, want: "Unknown record type"},
+		{name: "role without create", tool: toolCreateRecord, args: map[string]any{"record_type": "Sale", "data": map[string]any{"total": 1}}, want: `"code":"permission_denied"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			database, _, err := sqlmock.New()
