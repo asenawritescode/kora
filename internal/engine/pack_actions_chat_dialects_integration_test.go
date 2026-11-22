@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -34,9 +35,10 @@ import (
 )
 
 // Pack actions through the chat, on the real POS pack. A scripted model reads the till actions with list_actions,
-// asks the person to confirm, and runs them with run_action after the person's yes. The chat opens a till and
-// records a cash sale; the POS writes one till session and one sale. Then the same operation is sent again with the
-// same idempotency key, and the POS writes nothing new.
+// previews them with run_action, and asks the person to confirm. After the person's yes, the next turn's request
+// lists the open preview's write_id, and the model runs confirm_write with it. The chat opens a till and records a
+// cash sale; the POS writes one till session and one sale. Then the same operation is sent again with the same
+// idempotency key, and the POS writes nothing new.
 const (
 	packChatOpenTill   = "pos.core~pos.drawer~open_session"
 	packChatRecordSale = "pos.core~pos.checkout~record_sale"
@@ -57,6 +59,17 @@ type packChatModel struct {
 	mu     sync.Mutex
 	steps  []packChatStep
 	bodies []string
+}
+
+// packWriteIDPattern matches the open-previews line of a request, "- write_id pw_...".
+var packWriteIDPattern = regexp.MustCompile(`write_id (pw_[0-9A-Za-z]+)`)
+
+// writeIDIn returns the first write_id listed in a request body, or "" when none is listed.
+func writeIDIn(body string) string {
+	if m := packWriteIDPattern.FindStringSubmatch(body); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 func startPackChatModel(t *testing.T) *packChatModel {
@@ -221,6 +234,33 @@ func TestPackActionsChatAcrossDialects(t *testing.T) {
 			router.POST("/api/v1/ai/chat", handler.HandleChat)
 			router.POST("/op/:operation", handler.HandleExecutePublishedOperation)
 
+			// A preview reads an operation's capability lease and never issues one; the first run of an operation
+			// issues it. Warm the till and sale operations with a call the kernel refuses for its empty input, which
+			// writes no business row, as the POS preview test does.
+			opsCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			opsCtx.Request = httptest.NewRequest(http.MethodPost, "/api/v1/ai/chat", nil)
+			for key, value := range map[string]any{
+				"site_name": siteName, "site_db": database, "site_db_type": tc.driver, "site_registry": loaded.Registry,
+				"site_runtime_services": services, "policy_execution": execution,
+			} {
+				opsCtx.Set(key, value)
+			}
+			ops := api.NewAIModuleOperations(handler, opsCtx)
+			scope := contract.BusinessScope{TenantID: contract.TenantID(siteName), Kind: contract.ScopeKindTenant}
+			catalog, err := ops.Catalog(execution, scope)
+			if err != nil {
+				t.Fatalf("catalog: %v", err)
+			}
+			for _, ref := range []string{packChatOpenTill, packChatRecordSale} {
+				for _, o := range catalog.PublishedOperations {
+					if o.OperationRef == ref {
+						_, _ = ops.Run(context.Background(), execution, scope, ref, contract.ExecutePublishedOperation{
+							Meta: contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey("warm-" + ref)}, InputSchema: o.InputSchema, Input: []byte("{}"),
+						})
+					}
+				}
+			}
+
 			thread := "pack-chat-" + tc.driver
 			chat := func(message string, steps []packChatStep) []byte {
 				t.Helper()
@@ -238,44 +278,64 @@ func TestPackActionsChatAcrossDialects(t *testing.T) {
 				return rec.Body.Bytes()
 			}
 
-			// Turn 1: the model lists the till actions and asks for confirmation.
+			// Turn 1: the model lists the till actions, previews the opening with run_action, and asks.
 			chat("Open my till with 500 float at Front.", []packChatStep{
 				{tool: "list_actions", args: func() string { return `{"record_type":"Till Session"}` }},
+				{tool: "run_action", args: func() string {
+					return fmt.Sprintf(`{"action":%q,"input":{"register":"REG-1","location":"LOC-1","opening_float":500}}`, packChatOpenTill)
+				}},
 				{content: "Open a till on REG-1 with a 500 float? Reply yes to confirm."},
 			})
 			if n := count("Till Session"); n != "0" {
 				t.Fatalf("till sessions before confirmation = %s, want 0", n)
 			}
-			// Turn 2: after yes, the model runs the action, and the till opens.
+			// Turn 2: after yes, the model confirms the open preview by its write_id, and the till opens.
+			// The write_id is read from this turn's request body, where the open previews are listed.
+			var tillWriteID string
 			chat("yes", []packChatStep{
-				{tool: "run_action", args: func() string {
-					return fmt.Sprintf(`{"action":%q,"input":{"register":"REG-1","location":"LOC-1","opening_float":500}}`, packChatOpenTill)
+				{tool: "confirm_write", args: func() string {
+					tillWriteID = writeIDIn(model.bodies[len(model.bodies)-1]) // serve holds the lock while it calls args
+					return fmt.Sprintf(`{"write_id":%q}`, tillWriteID)
 				}},
 				{content: "Your till is open."},
 			})
+			if tillWriteID == "" {
+				t.Fatal("the turn-2 request did not list the till preview's write_id")
+			}
 			if n := count("Till Session"); n != "1" {
-				t.Fatalf("till sessions after run_action = %s, want 1", n)
+				t.Fatalf("till sessions after confirm_write = %s, want 1", n)
 			}
 
-			// Turn 3: the model describes the sale action before it asks for confirmation.
-			chat("Sell one Maize, paid in cash.", []packChatStep{
-				{tool: "list_actions", args: func() string { return fmt.Sprintf(`{"action":%q}`, packChatRecordSale) }},
-				{content: "Sell 1 Maize for 180 KES in cash? Reply yes to confirm."},
-			})
-			// Turn 4: after yes, the model records the sale through run_action.
+			// Turn 3: the model previews the sale with run_action and asks before it writes.
 			saleInput := func() string {
 				till := one("SELECT name FROM " + tbl("Till Session"))
 				return fmt.Sprintf(`{"action":%q,"input":{"register":"REG-1","location":"LOC-1","till_session":%q,"currency":"KES","items":[{"item":"ITM-1","quantity":1,"unit_price":180,"amount":180}],"payments":[{"method":"Cash","amount":180,"currency":"KES","reference":%q}]}}`, packChatRecordSale, till, saleIntent)
 			}
-			chat("yes", []packChatStep{
+			chat("Sell one Maize, paid in cash.", []packChatStep{
+				{tool: "list_actions", args: func() string { return fmt.Sprintf(`{"action":%q}`, packChatRecordSale) }},
 				{tool: "run_action", args: saleInput},
+				{content: "Sell 1 Maize for 180 KES in cash? Reply yes to confirm."},
+			})
+			if n := count("Sale"); n != "0" {
+				t.Fatalf("sales before confirmation = %s, want 0", n)
+			}
+			// Turn 4: after yes, the model confirms the sale preview by its write_id.
+			var saleWriteID string
+			chat("yes", []packChatStep{
+				{tool: "confirm_write", args: func() string {
+					saleWriteID = writeIDIn(model.bodies[len(model.bodies)-1])
+					return fmt.Sprintf(`{"write_id":%q}`, saleWriteID)
+				}},
 				{content: "Sale recorded."},
 			})
+			if saleWriteID == "" || saleWriteID == tillWriteID {
+				t.Fatalf("the turn-4 request listed write_id %q, want the sale preview's own id", saleWriteID)
+			}
 			if n := count("Sale"); n != "1" {
-				t.Fatalf("sales after run_action = %s, want 1", n)
+				t.Fatalf("sales after confirm_write = %s, want 1", n)
 			}
 			// The provider was offered the two pack-action tools and the run answered "completed".
-			if first := model.bodies[0]; !strings.Contains(first, `"name":"run_action"`) || !strings.Contains(first, `"name":"list_actions"`) {
+			if first := model.bodies[0]; !strings.Contains(first, `"name":"run_action"`) || !strings.Contains(first, `"name":"list_actions"`) || !strings.Contains(first, `"name":"confirm_write"`) {
 				t.Fatalf("pack-action tools were not offered: %.300s", first)
 			}
 			if last := model.bodies[len(model.bodies)-1]; !strings.Contains(last, `\"status\":\"completed\"`) {
