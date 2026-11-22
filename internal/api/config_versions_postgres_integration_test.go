@@ -277,7 +277,7 @@ func TestLivePostgresConfigVersionRoutes(t *testing.T) {
 	}
 
 	_, err = database.Exec(`CREATE TABLE _kora_user (roles TEXT NOT NULL);
-		CREATE TABLE _kora_role (name TEXT PRIMARY KEY, workspace_access SMALLINT NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '', site TEXT NOT NULL DEFAULT '');
+		CREATE TABLE _kora_role (name TEXT PRIMARY KEY, workspace_access SMALLINT NOT NULL DEFAULT 0, insights_access SMALLINT NOT NULL DEFAULT 1, description TEXT NOT NULL DEFAULT '', site TEXT NOT NULL DEFAULT '');
 		CREATE TABLE _kora_permission (role TEXT NOT NULL);
 		INSERT INTO _kora_user (roles) VALUES ('Store Manager,Manager'), ('Assistant Store Manager');
 		INSERT INTO _kora_role (name) VALUES ('Store Manager');
