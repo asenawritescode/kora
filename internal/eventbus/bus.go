@@ -33,11 +33,13 @@ type channelBus struct {
 	queueAdmissionConfigured bool
 }
 
-const (
-	DefaultMaxEventBytes   = 1 << 20
-	MaxChannelCapacity     = 10_000
-	defaultChannelCapacity = 1000
-)
+// DefaultMaxEventBytes bounds one encoded change event unless configured otherwise.
+const DefaultMaxEventBytes = 1 << 20
+
+// MaxChannelCapacity caps the source queue's buffer size.
+const MaxChannelCapacity = 10_000
+
+const defaultChannelCapacity = 1000
 
 var ErrEventTooLarge = errors.New("analytics: event exceeds configured byte limit")
 
