@@ -187,24 +187,13 @@ func trimSchema(node map[string]any) map[string]any {
 // the first receipt instead of writing again.
 func runPackAction(tx *orm.TxManager, catalog contract.ApplicationCatalog, inv toolInvocation) string {
 	ref, _ := inv.Args["action"].(string)
-	ref = strings.TrimSpace(ref)
-	action, ok := findPackAction(runnablePackActions(catalog, inv.Commands), ref)
+	action, ok := findPackAction(runnablePackActions(catalog, inv.Commands), strings.TrimSpace(ref))
 	if !ok {
-		return actionRefusal("unknown_action", "No available action has id "+ref+". Call list_actions to see the actions.", "")
+		return actionRefusal("unknown_action", "No available action has id "+strings.TrimSpace(ref)+". Call list_actions to see the actions.", "")
 	}
-	input := map[string]any{}
-	if raw, present := inv.Args["input"]; present && raw != nil {
-		object, isObject := raw.(map[string]any)
-		if !isObject {
-			return actionRefusal("validation.invalid_input", "Input must be an object of field values.", "")
-		}
-		input = object
-	}
-	var schemaRef contract.SchemaRef
-	for _, op := range catalog.PublishedOperations {
-		if op.OperationRef == action.Action {
-			schemaRef = op.InputSchema
-		}
+	input, refusal := packActionInput(inv.Args)
+	if refusal != "" {
+		return refusal
 	}
 	encoded, err := json.Marshal(input)
 	if err != nil {
@@ -216,17 +205,53 @@ func runPackAction(tx *orm.TxManager, catalog contract.ApplicationCatalog, inv t
 	}
 	receipt, err := inv.Operations.Run(ctx, inv.Execution, tx.BusinessScope, action.Action, contract.ExecutePublishedOperation{
 		Meta:        contract.CommandMeta{IdempotencyKey: contract.IdempotencyKey(inv.IdempotencyKey)},
-		InputSchema: schemaRef,
+		InputSchema: inputSchemaOf(catalog, action.Action),
 		Input:       encoded,
 	})
 	if err != nil {
-		var refusal OperationError
-		if errors.As(err, &refusal) {
-			return actionRefusal(refusal.Code, refusal.Message, refusal.Field)
-		}
-		return actionRefusal("module.operation_failed", "Pack action could not be completed.", "")
+		return operationErrorText(err)
 	}
-	result := map[string]any{"action": action.Action, "status": receipt.Status, "execution_id": receipt.ExecutionID}
+	return receiptText(action.Action, receipt)
+}
+
+// packActionInput returns the input object of run_action. Absent input is an empty object; any
+// other non-object value is refused.
+func packActionInput(args map[string]any) (map[string]any, string) {
+	raw, present := args["input"]
+	if !present || raw == nil {
+		return map[string]any{}, ""
+	}
+	object, isObject := raw.(map[string]any)
+	if !isObject {
+		return nil, actionRefusal("validation.invalid_input", "Input must be an object of field values.", "")
+	}
+	return object, ""
+}
+
+// inputSchemaOf returns the input schema reference of one published operation of the catalog.
+func inputSchemaOf(catalog contract.ApplicationCatalog, ref string) contract.SchemaRef {
+	var schemaRef contract.SchemaRef
+	for _, op := range catalog.PublishedOperations {
+		if op.OperationRef == ref {
+			schemaRef = op.InputSchema
+		}
+	}
+	return schemaRef
+}
+
+// operationErrorText returns the model-facing error of a refused run: the structured OperationError
+// when the module gave one, a generic refusal otherwise.
+func operationErrorText(err error) string {
+	var refusal OperationError
+	if errors.As(err, &refusal) {
+		return actionRefusal(refusal.Code, refusal.Message, refusal.Field)
+	}
+	return actionRefusal("module.operation_failed", "Pack action could not be completed.", "")
+}
+
+// receiptText returns the model-facing result of a run. A receipt with an error is prefixed "Error:".
+func receiptText(ref string, receipt contract.OperationReceipt) string {
+	result := map[string]any{"action": ref, "status": receipt.Status, "execution_id": receipt.ExecutionID}
 	if len(receipt.Output) > 0 {
 		result["output"] = receipt.Output
 	}

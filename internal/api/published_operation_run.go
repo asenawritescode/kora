@@ -82,8 +82,23 @@ func operationFailureFrom(err error) *operationFailure {
 	if !errors.As(err, &typed) || typed == nil {
 		return refuseOperation(http.StatusServiceUnavailable, "module.operation_failed", "Published operation could not be completed")
 	}
+	var details map[string]any
+	if len(typed.Details) > 0 {
+		_ = json.Unmarshal(typed.Details, &details)
+	}
+	if typed.Field != "" {
+		if details == nil {
+			details = map[string]any{}
+		}
+		details["field"] = typed.Field
+	}
+	return &operationFailure{Status: statusForCode(typed.Type), Code: string(typed.Type), Message: typed.Message, Details: details}
+}
+
+// statusForCode maps a contract error code to its HTTP status.
+func statusForCode(code contract.Code) int {
 	status := http.StatusInternalServerError
-	switch typed.Type {
+	switch code {
 	case contract.CodeUnauthenticated:
 		status = http.StatusUnauthorized
 	case contract.CodePermissionDenied:
@@ -98,16 +113,8 @@ func operationFailureFrom(err error) *operationFailure {
 		status = http.StatusServiceUnavailable
 	case contract.CodeResourceExhausted:
 		status = http.StatusTooManyRequests
+	case contract.CodeDeadlineExceeded, contract.CodeUnsupportedVersion, contract.CodeInternal:
+		status = http.StatusInternalServerError
 	}
-	var details map[string]any
-	if len(typed.Details) > 0 {
-		_ = json.Unmarshal(typed.Details, &details)
-	}
-	if typed.Field != "" {
-		if details == nil {
-			details = map[string]any{}
-		}
-		details["field"] = typed.Field
-	}
-	return &operationFailure{Status: status, Code: string(typed.Type), Message: typed.Message, Details: details}
+	return status
 }

@@ -443,9 +443,6 @@
   "internal/api::HandleDeleteSite": {
    "statements": 93
   },
-  "internal/api::HandleExecutePublishedOperation": {
-   "statements": 47
-  },
   "internal/api::HandleImport": {
    "statements": 134
   },

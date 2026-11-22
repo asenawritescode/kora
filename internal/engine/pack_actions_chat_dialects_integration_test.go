@@ -152,7 +152,7 @@ func TestPackActionsChatAcrossDialects(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := install(info, loaded); err != nil {
+			if err = install(info, loaded); err != nil {
 				t.Fatal(err)
 			}
 			services := *loaded.RuntimeServices

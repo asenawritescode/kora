@@ -857,13 +857,9 @@ func executeSingleTool(tx *orm.TxManager, reg *doctype.Registry, inv toolInvocat
 		return result
 	}
 
-	if toolName == toolListActions || toolName == toolRunAction {
-		inv.Execution = execution
-		return executePackAction(tx, inv)
-	}
-	if operation, ok := recordToolOperation[toolName]; ok {
-		inv.Execution = execution
-		return executeRecordTool(tx, reg, inv, operation)
+	inv.Execution = execution
+	if result, ok := executeFixedTool(tx, reg, inv); ok {
+		return result
 	}
 	return fmt.Sprintf("Unknown tool: %s", toolName)
 }
@@ -1398,4 +1394,16 @@ func validOrderByFields(dt *doctype.DocType, orderBy string) bool {
 		return dir == "ASC" || dir == "DESC"
 	}
 	return true
+}
+
+// executeFixedTool runs the fixed record tools and the pack-action tools. It reports false for any other name.
+func executeFixedTool(tx *orm.TxManager, reg *doctype.Registry, inv toolInvocation) (string, bool) {
+	if inv.Name == toolListActions || inv.Name == toolRunAction {
+		return executePackAction(tx, inv), true
+	}
+	operation, ok := recordToolOperation[inv.Name]
+	if !ok {
+		return "", false
+	}
+	return executeRecordTool(tx, reg, inv, operation), true
 }
