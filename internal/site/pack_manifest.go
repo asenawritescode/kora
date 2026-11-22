@@ -104,6 +104,7 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 	userFields := map[string]map[string]bool{}
 	docTypes := map[string]*doctype.DocType{}
 	docTypePaths := map[string]string{}
+	var commands []packCommand
 	type assignmentRule struct{ path, doctype, role, field string }
 	var assignmentRules []assignmentRule
 	total := 0
@@ -138,6 +139,11 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 						userFields[definition.Name][field.Fieldname] = true
 					}
 				}
+			}
+		}
+		if file.ContentType == "command" {
+			if definition, err := kernel.ParseCommandResource([]byte(file.Content)); err == nil {
+				commands = append(commands, packCommand{path: clean, def: definition})
 			}
 		}
 		if file.ContentType == "permissions" {
@@ -185,6 +191,7 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 			}
 		}
 	}
+	checkActorWrites(commands, docTypes, add)
 	for _, rule := range assignmentRules {
 		if !userFields[rule.doctype][rule.field] {
 			add("assignment_scope_field", rule.path, fmt.Sprintf("if_assigned field %q for %s/%s must name a User field declared in the package", rule.field, rule.role, rule.doctype))
