@@ -75,3 +75,40 @@ func TestValidateRules(t *testing.T) {
 		})
 	}
 }
+
+// A parsed record type with no declared facts is checked against the model the server generates for it.
+func TestValidateChecksAgainstGeneratedFacts(t *testing.T) {
+	dts := []*doctype.DocType{{Name: "Payment", Fields: []doctype.Field{
+		{Fieldname: "status", Fieldtype: "Select"},
+		{Fieldname: "amount", Fieldtype: "Currency"},
+		{Fieldname: "base_amount", Fieldtype: "Currency"},
+		{Fieldname: "register", Fieldtype: "Data"},
+	}}}
+	received := func(name string, measure Measure) Metric {
+		return Metric{Name: name, Label: name, Type: KindSimple, Model: "Payment", Measure: &measure,
+			Filters: []Filter{{Field: "status", Op: "=", Value: "Received"}}}
+	}
+	tests := []struct {
+		name    string
+		defs    []Metric
+		wantErr string
+	}{
+		{"generated measure validates", []Metric{received("base", Measure{Agg: "sum", Field: "base_amount"})}, ""},
+		{"field the generated model does not carry", []Metric{received("reg", Measure{Agg: "sum", Field: "register"})}, "not a facts measure"},
+		{"data field is not a dimension", []Metric{received("regs", Measure{Agg: "count_distinct", Field: "register"})}, "not a facts dimension"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Validate(tt.defs, dts)
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("Validate() = %v; want nil", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("Validate() = %v; want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+	if dts[0].Facts != nil {
+		t.Fatal("validation changed the parsed record type; want it left as parsed")
+	}
+}

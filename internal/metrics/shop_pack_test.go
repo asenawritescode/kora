@@ -28,8 +28,8 @@ func TestErpsellPackMetricsAndDashboardsValidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(raw) != 10 || len(dashRaw) != 2 {
-		t.Fatalf("selling pack carries %d metrics and %d dashboards; want 10 and 2", len(raw), len(dashRaw))
+	if len(raw) != 14 || len(dashRaw) != 2 {
+		t.Fatalf("selling pack carries %d metrics and %d dashboards; want 14 and 2", len(raw), len(dashRaw))
 	}
 	dashboards, err := ParseDashboardDirectory(erpsellPackDir + "/dashboards")
 	if err != nil {

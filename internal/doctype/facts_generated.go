@@ -35,6 +35,15 @@ func (dt *DocType) refreshGeneratedFacts() {
 	dt.Facts = generatedFacts(dt)
 }
 
+// WithGeneratedFacts returns a copy of dt with the fact model the registry gives it on Register: the
+// generated model when the pack declares none, the declared one otherwise. dt itself is not changed,
+// so validating parsed record types never alters a registered one.
+func (dt *DocType) WithGeneratedFacts() *DocType {
+	cp := *dt
+	cp.refreshGeneratedFacts()
+	return &cp
+}
+
 // declaredFacts is the fact model the pack wrote: nil when the model is generated, so it is never saved.
 func (dt *DocType) declaredFacts() *FactModel {
 	if dt.Facts != nil && dt.Facts.Generated {
