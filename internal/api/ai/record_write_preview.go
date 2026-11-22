@@ -17,6 +17,9 @@ import (
 // toolConfirmWrite is the tool that runs a previewed record write.
 const toolConfirmWrite = "confirm_write"
 
+// PaymentMethodField is the input field of a payment line that names its method.
+const PaymentMethodField = "method"
+
 // recordWrite is one kernel record command, as it is stored between preview and confirm.
 type recordWrite struct {
 	Command string         `json:"command"`
@@ -99,7 +102,36 @@ func previewPackAction(tx *orm.TxManager, catalog contract.ApplicationCatalog, i
 		return operationErrorText(err)
 	}
 	preview := map[string]any{"action": action.Action, "title": action.Title, "input": input}
+	if settles := paymentSummary(catalog, action.Action, input); len(settles) > 0 {
+		preview["payments_to_settle"] = settles
+	}
 	return storePreview(tx, inv, packActionWrite{Action: action.Action, Input: input}, preview)
+}
+
+// paymentSummary names each payment line of the input that names no reference, as "<method> payment of
+// <amount> <currency>". Confirm requests a payment for each of them and nothing else is written.
+func paymentSummary(catalog contract.ApplicationCatalog, ref string, input map[string]any) []string {
+	var binding *contract.PaymentOperationContract
+	for _, op := range catalog.PublishedOperations {
+		if op.OperationRef == ref {
+			binding = op.Payment
+		}
+	}
+	if binding == nil {
+		return nil
+	}
+	currency, _ := input[binding.CurrencyField].(string)
+	lines, _ := input[binding.LinesField].([]any)
+	var out []string
+	for _, raw := range lines {
+		line, _ := raw.(map[string]any)
+		if reference, _ := line[binding.ReferenceField].(string); line == nil || reference != "" {
+			continue
+		}
+		method, _ := line[PaymentMethodField].(string)
+		out = append(out, fmt.Sprintf("%s payment of %v %s", method, line[binding.AmountField], currency))
+	}
+	return out
 }
 
 // executeConfirmPackAction runs a previewed run_action once, through the operation core.
