@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/asenawritescode/kora/internal/query"
@@ -709,6 +711,9 @@ func parsePackPart(packName string, files []PackFile) (*doctype.ConfigSnapshot, 
 	return snapshot, scripts, nil
 }
 
+// reportFilesIgnored logs once per process that a release still ships retired reports/ files.
+var reportFilesIgnored sync.Once
+
 func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot, map[string]string, error) {
 	if len(files) == 0 {
 		return nil, nil, fmt.Errorf("pack has no files")
@@ -734,6 +739,13 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 		f.ContentType = strings.TrimSpace(f.ContentType)
 		if isPackManifestPath(f.Path) {
 			continue // manifest, consumed by ParseConfigPack
+		}
+		if f.ContentType == "report" {
+			// Retired: analytics comes from metrics/ and dashboards/. Releases published with reports/ still install.
+			reportFilesIgnored.Do(func() {
+				slog.Info("pack reports/ files ignored; analytics comes from metrics/ and dashboards/", "pack", packName)
+			})
+			continue
 		}
 
 		// ── Path security ──────────────────────────────────────────
