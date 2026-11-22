@@ -107,3 +107,24 @@ func TestRecordWriteErrorMapping(t *testing.T) {
 		})
 	}
 }
+
+// TestPendingSummaryNamesTheWrite checks the one-line description each open preview gives the next turn.
+func TestPendingSummaryNamesTheWrite(t *testing.T) {
+	tests := []struct {
+		name string
+		row  pendingWrite
+		want string
+	}{
+		{name: "create", row: pendingWrite{ToolName: toolCreateRecord, PreviewJSON: `{"action":"create","record_type":"Item","fields":{"item_name":"Tea","price":50,"notes":null}}`}, want: `create Item (item_name Tea, price 50)`},
+		{name: "update shows old and new", row: pendingWrite{ToolName: toolUpdateRecord, PreviewJSON: `{"action":"update","record_type":"Item","name":"ITM-1","changes":{"price":{"old":180,"new":200}}}`}, want: `update Item ITM-1 (price 180 -> 200)`},
+		{name: "pack action uses its title", row: pendingWrite{ToolName: toolRunAction, PreviewJSON: `{"action":"pos.core~pos.drawer~open_session","title":"Open till session","input":{"register":"REG-1","opening_float":500}}`}, want: `Open till session (opening_float 500, register REG-1)`},
+		{name: "unreadable preview", row: pendingWrite{PreviewJSON: `not json`}, want: `a previewed write`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.row.summary(); got != tc.want {
+				t.Fatalf("summary() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

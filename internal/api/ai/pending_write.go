@@ -5,11 +5,17 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/oklog/ulid/v2"
+
+	"github.com/asenawritescode/kora/internal/orm"
+	"github.com/asenawritescode/kora/internal/policy"
 )
 
 // A chat write is previewed first and runs only when the person confirms it. The preview
@@ -68,6 +74,7 @@ type pendingWrite struct {
 	ToolName       string
 	ArgsHash       string
 	ArgsJSON       string
+	PreviewJSON    string
 	State          string
 	Attempts       int
 	Outcome        string
@@ -218,6 +225,133 @@ func errorIf(cond bool, message string) string {
 
 func invalidConfirm(message string) *aiToolError {
 	return &aiToolError{Code: errConfirmInvalid, Message: message, Fix: "Ask the person to confirm the write, then call confirm_write with the write_id from the latest preview."}
+}
+
+// pendingContextLimit is how many open previews one turn lists in its context.
+const pendingContextLimit = 3
+
+// executionOwner is the identity a write belongs to: the subject user, else the principal.
+func executionOwner(exec policy.Execution) string {
+	actor := exec.Actor()
+	if actor.SubjectUserID != "" {
+		return actor.SubjectUserID
+	}
+	return actor.PrincipalID
+}
+
+// previewOwner is the actor a chat turn's previews are stored under. It resolves the way the
+// tool path does: the verified execution, then the transaction's, else the current user.
+func previewOwner(c *gin.Context, tx *orm.TxManager, currentUser string) string {
+	var exec policy.Execution
+	if verified, ok := c.Get("policy_execution"); ok {
+		exec, _ = verified.(policy.Execution)
+	}
+	if !exec.Valid() {
+		exec = tx.Execution
+	}
+	if exec.Valid() {
+		return executionOwner(exec)
+	}
+	return currentUser
+}
+
+// listOpenPreviews returns the caller's previews of this conversation that can still be
+// confirmed, newest first. The expiry is judged by the database clock.
+func listOpenPreviews(ctx context.Context, database *sql.DB, caller pendingCaller) ([]pendingWrite, error) {
+	rows, err := (aiSQL{database}).QueryContext(ctx, fmt.Sprintf(`
+SELECT id, tool_name, preview_json FROM _kora_ai_pending_write
+WHERE site = ? AND actor_id = ? AND conversation_id = ? AND state = ? AND created_at > %s
+ORDER BY created_at DESC, id DESC
+LIMIT %d`, dialectFromContext(ctx).NowMinusSeconds(), pendingContextLimit),
+		caller.Site, caller.ActorID, caller.ConversationID, pendingPreviewed, pendingTTLSeconds)
+	if err != nil {
+		return nil, fmt.Errorf("list open previews: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var open []pendingWrite
+	for rows.Next() {
+		var p pendingWrite
+		if err := rows.Scan(&p.ID, &p.ToolName, &p.PreviewJSON); err != nil {
+			return nil, fmt.Errorf("scan open preview: %w", err)
+		}
+		open = append(open, p)
+	}
+	return open, rows.Err()
+}
+
+// previewView is the part of a stored preview that the context line shows.
+type previewView struct {
+	Action     string         `json:"action"`
+	RecordType string         `json:"record_type"`
+	Name       string         `json:"name"`
+	Title      string         `json:"title"`
+	Fields     map[string]any `json:"fields"`
+	Input      map[string]any `json:"input"`
+	Changes    map[string]any `json:"changes"`
+}
+
+// summary says what confirming the preview would do, with its key values, on one line.
+func (p pendingWrite) summary() string {
+	var v previewView
+	if err := json.Unmarshal([]byte(p.PreviewJSON), &v); err != nil {
+		return "a previewed write"
+	}
+	var line string
+	switch {
+	case p.ToolName == toolRunAction:
+		title := v.Title
+		if title == "" {
+			title = v.Action
+		}
+		line = title + " (" + pairsText(v.Input) + ")"
+	case v.Action == "update":
+		line = fmt.Sprintf("update %s %s (%s)", v.RecordType, v.Name, pairsText(v.Changes))
+	default:
+		line = fmt.Sprintf("create %s (%s)", v.RecordType, pairsText(v.Fields))
+	}
+	return truncateScript(line, 240)
+}
+
+// pairsText formats values as "name value" pairs in name order. An update change reads "old -> new".
+func pairsText(values map[string]any) string {
+	keys := make([]string, 0, len(values))
+	for k, v := range values {
+		if v != nil {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+" "+changeText(values[k]))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// changeText shows an update change as "old -> new" and any other value as it is.
+func changeText(v any) string {
+	if change, ok := v.(map[string]any); ok {
+		if _, has := change["new"]; has {
+			return fmt.Sprintf("%v -> %v", change["old"], change["new"])
+		}
+	}
+	return fmt.Sprint(v)
+}
+
+// openPreviewsBlurb is the per-turn context block that lists the open previews. It is empty
+// when there are none.
+func openPreviewsBlurb(ctx context.Context, database *sql.DB, caller pendingCaller) (string, error) {
+	open, err := listOpenPreviews(ctx, database, caller)
+	if err != nil || len(open) == 0 {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString("\n\nOPEN PREVIEWS (not saved yet):")
+	for _, p := range open {
+		fmt.Fprintf(&b, "\n- write_id %s: %s", p.ID, p.summary())
+	}
+	b.WriteString("\nConfirm one with confirm_write {write_id} only after the person agrees in a later message. Never show a write_id in a reply.")
+	return b.String(), nil
 }
 
 // confirmIdempotencyKey is the kernel idempotency key of a confirmed write. It is derived

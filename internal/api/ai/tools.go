@@ -649,12 +649,7 @@ func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.
 		batch.Execution = tx.Execution
 	}
 	if batch.Execution.Valid() {
-		actor := batch.Execution.Actor()
-		if actor.SubjectUserID != "" {
-			batch.Owner = actor.SubjectUserID
-		} else {
-			batch.Owner = actor.PrincipalID
-		}
+		batch.Owner = executionOwner(batch.Execution)
 		tx.Execution = batch.Execution
 	}
 	ctx = WithDialect(ctx, tx.Dialect)

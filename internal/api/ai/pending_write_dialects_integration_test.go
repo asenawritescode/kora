@@ -173,6 +173,25 @@ func TestChatWritesArePreviewedThenConfirmedAcrossDialects(t *testing.T) {
 			tampered := itemName + " tampered"
 			tamperPreview := turn("run-6", alice, "alice@example.test", site, conversation, call("c10", toolCreateRecord, fmt.Sprintf(`{"record_type":"Item","data":{"item_name":%q,"uom":"Each","price":100}}`, tampered)))
 			tamperToken := writeIDOf(t, tamperPreview)
+
+			// The next turn lists open previews of its own person and conversation only. The expired one is not listed.
+			listed := func(owner, conv string) string {
+				t.Helper()
+				block, err := openPreviewsBlurb(tx.Context, database, pendingCaller{Site: site, ConversationID: conv, ActorID: owner})
+				if err != nil {
+					t.Fatalf("list open previews on %s: %v", tc.name, err)
+				}
+				return block
+			}
+			if block := listed(executionOwner(alice), conversation); !strings.Contains(block, "write_id "+tamperToken) || !strings.Contains(block, "create Item") || strings.Contains(block, expiredToken) {
+				t.Fatalf("open previews for alice on %s = %q, want the fresh preview only", tc.name, block)
+			}
+			if block := listed(executionOwner(bob), conversation); block != "" {
+				t.Fatalf("open previews for bob on %s = %q, want none", tc.name, block)
+			}
+			if block := listed(executionOwner(alice), "other-"+conversation); block != "" {
+				t.Fatalf("open previews in another conversation on %s = %q, want none", tc.name, block)
+			}
 			setPendingArgs(t, database, dialect, tamperToken, strings.Replace(argsJSONOf(t, database, dialect, tamperToken), `"price":100`, `"price":999`, 1))
 			if got := turn("run-7", alice, "alice@example.test", site, conversation, call("c11", toolConfirmWrite, confirmArgs(tamperToken))); !strings.Contains(got, `"code":"confirm_invalid"`) {
 				t.Fatalf("tampered confirm on %s = %s, want confirm_invalid", tc.name, got)
