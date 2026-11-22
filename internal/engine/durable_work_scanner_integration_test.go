@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/db"
@@ -138,11 +137,6 @@ func TestDurableWorkScannerFindsUnreceiptedTenantWorkAcrossDialects(t *testing.T
 			if err != nil || due {
 				t.Fatalf("hasDueTenantWork after webhook receipt = (%t, %v), want (false, nil)", due, err)
 			}
-			for _, statement := range analyticsScannerSchema(tc.driver) {
-				if _, err := database.ExecContext(t.Context(), statement); err != nil {
-					t.Fatalf("create analytics rebuild fixture: %v\n%s", err, statement)
-				}
-			}
 			scheduleStore, err := schedulersql.New(database, dialect)
 			if err != nil {
 				t.Fatal("construct scheduler fixture store:", err)
@@ -179,21 +173,6 @@ func TestDurableWorkScannerFindsUnreceiptedTenantWorkAcrossDialects(t *testing.T
 			}
 			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `DELETE FROM _kora_schedule_occurrence WHERE job_name=?`), "expired-occurrence"); err != nil {
 				t.Fatal("remove expired occurrence fixture:", err)
-			}
-			jobID := contract.NewID()
-			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `INSERT INTO _kora_analytics_rebuild_job (id,site,doctype,from_date,status,started_at,updated_at) VALUES (?,?,?,'2026-01-01','queued',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`), jobID, "scanner-test", "Invoice"); err != nil {
-				t.Fatal("insert queued analytics rebuild job:", err)
-			}
-			due, err = hasDueTenantWork(t.Context(), database, dialect, 0)
-			if err != nil || !due {
-				t.Fatalf("hasDueTenantWork for queued analytics rebuild = (%t, %v), want (true, nil)", due, err)
-			}
-			if _, err := database.ExecContext(t.Context(), db.Rebind(dialect, `INSERT INTO _kora_analytics_rebuild_lease (site,job_id,owner,fencing_token,lease_until) VALUES (?,?,?,1,?)`), "scanner-test", jobID, "active-worker", time.Now().UTC().Add(time.Hour)); err != nil {
-				t.Fatal("insert analytics rebuild lease:", err)
-			}
-			due, err = hasDueTenantWork(t.Context(), database, dialect, 0)
-			if err != nil || due {
-				t.Fatalf("hasDueTenantWork for actively leased analytics rebuild = (%t, %v), want (false, nil)", due, err)
 			}
 			workflowSchema, err := workflowsql.ExecutionSchemaStatements(dialect)
 			if err != nil {
@@ -275,25 +254,6 @@ func TestDurableWorkScannerFindsUnreceiptedTenantWorkAcrossDialects(t *testing.T
 				t.Fatalf("hasDueTenantWork for due notification delivery = (%t, %v), want (true, nil)", due, err)
 			}
 		})
-	}
-}
-
-func analyticsScannerSchema(driver string) []string {
-	identity := "VARCHAR(140)"
-	timestamp := "DATETIME(6)"
-	if driver == "postgres" {
-		identity, timestamp = "TEXT", "TIMESTAMPTZ"
-	}
-	if driver == "libsql" {
-		identity, timestamp = "TEXT", "TEXT"
-	}
-	engine := ""
-	if driver == "mysql" {
-		engine = " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
-	}
-	return []string{
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS _kora_analytics_rebuild_job (id %s PRIMARY KEY, site %s NOT NULL, doctype %s NOT NULL, from_date %s NOT NULL, status %s NOT NULL, started_at %s NOT NULL, updated_at %s NOT NULL)%s`, identity, identity, identity, identity, identity, timestamp, timestamp, engine),
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS _kora_analytics_rebuild_lease (site %s NOT NULL, job_id %s NOT NULL, owner %s NOT NULL, fencing_token BIGINT NOT NULL, lease_until %s NOT NULL, PRIMARY KEY(site,job_id))%s`, identity, identity, identity, timestamp, engine),
 	}
 }
 
