@@ -147,58 +147,6 @@
   "contract::validateLocalSchemaReferences": {
    "cognitive": 31
   },
-  "internal/analytics::(*RebuildRunner).process": {
-   "cognitive": 51,
-   "cyclomatic": 28
-  },
-  "internal/analytics::(*Worker).flush": {
-   "cognitive": 51,
-   "cyclomatic": 45
-  },
-  "internal/analytics::(*Worker).process": {
-   "cognitive": 61,
-   "cyclomatic": 40
-  },
-  "internal/analytics::(*Worker).run": {
-   "cognitive": 20
-  },
-  "internal/analytics::Backfill": {
-   "cognitive": 59,
-   "cyclomatic": 39,
-   "statements": 78
-  },
-  "internal/analytics::BootstrapTables": {
-   "cognitive": 21,
-   "cyclomatic": 17
-  },
-  "internal/analytics::ClaimNextRebuildJob": {
-   "cognitive": 29,
-   "cyclomatic": 25,
-   "statements": 59
-  },
-  "internal/analytics::GenerateMetrics": {
-   "cognitive": 16,
-   "lines": 83
-  },
-  "internal/analytics::LoadConfig": {
-   "cognitive": 26,
-   "cyclomatic": 23
-  },
-  "internal/analytics::backfillMetricWithExec": {
-   "statements": 41
-  },
-  "internal/analytics::contributionOutsideRebuiltRange": {
-   "cognitive": 17
-  },
-  "internal/analytics::flush": {
-   "statements": 132
-  },
-  "internal/analytics::process": {
-   "statements": 79
-  },
-  "internal/analytics::rollupTableDDL": {
-   "lines": 154
-  },
   "internal/api/ai::EnsureAIRunTables": {
    "lines": 185
   },
@@ -946,11 +894,6 @@
    "cognitive": 29,
    "cyclomatic": 16
   },
-  "internal/cli::runAnalyticsBackfill": {
-   "cognitive": 19,
-   "cyclomatic": 17,
-   "statements": 50
-  },
   "internal/cli::runConfigExportContext": {
    "cognitive": 47,
    "cyclomatic": 31,
@@ -1292,24 +1235,20 @@
    "cognitive": 54,
    "cyclomatic": 26
   },
-  "internal/engine::(*DurableWorkScanner).probeTenant": {
-   "cognitive": 24,
-   "cyclomatic": 20
-  },
   "internal/engine::(*DurableWorkScanner).run": {
    "cognitive": 20
   },
   "internal/engine::(*DurableWorkScanner).scanPage": {
-   "cognitive": 29,
-   "cyclomatic": 21
+   "cognitive": 27,
+   "cyclomatic": 20
   },
   "internal/engine::(*HTTPManagementPackageArtifactResolver).ResolvePackage": {
    "cognitive": 18,
    "cyclomatic": 23
   },
   "internal/engine::(*ProcessResources).Shutdown": {
-   "cognitive": 93,
-   "cyclomatic": 56
+   "cognitive": 86,
+   "cyclomatic": 54
   },
   "internal/engine::(*TenantReloadController).Reload": {
    "cognitive": 25,
@@ -1378,9 +1317,9 @@
    "statements": 95
   },
   "internal/engine::AssembleTenantRuntime": {
-   "cognitive": 26,
-   "cyclomatic": 23,
-   "statements": 46
+   "cognitive": 22,
+   "cyclomatic": 20,
+   "statements": 43
   },
   "internal/engine::Execute": {
    "statements": 70
@@ -1418,7 +1357,7 @@
    "cognitive": 29
   },
   "internal/engine::Shutdown": {
-   "statements": 101
+   "statements": 98
   },
   "internal/engine::StartDirectoryFeed": {
    "cognitive": 32,
@@ -1471,9 +1410,9 @@
    "cognitive": 16
   },
   "internal/engine::installTenantServices": {
-   "cognitive": 163,
-   "cyclomatic": 105,
-   "statements": 324
+   "cognitive": 153,
+   "cyclomatic": 99,
+   "statements": 308
   },
   "internal/engine::loadStartupTenants": {
    "cognitive": 31,
@@ -1495,14 +1434,6 @@
   },
   "internal/engine::mergeProviderSelections": {
    "cognitive": 24
-  },
-  "internal/engine::migrateAnalyticsWALDirectories": {
-   "cognitive": 56,
-   "cyclomatic": 32,
-   "statements": 62
-  },
-  "internal/engine::migrateAnalyticsWALNamespaces": {
-   "cognitive": 27
   },
   "internal/engine::newEngine": {
    "cognitive": 66,
@@ -1532,9 +1463,9 @@
    "cyclomatic": 16
   },
   "internal/engine::registerResourceMetrics": {
-   "cognitive": 138,
-   "cyclomatic": 48,
-   "statements": 216
+   "cognitive": 96,
+   "cyclomatic": 37,
+   "statements": 187
   },
   "internal/engine::registeredConfigQueryProviders": {
    "cognitive": 52,
@@ -1555,7 +1486,7 @@
    "lines": 111
   },
   "internal/engine::scanPage": {
-   "statements": 61
+   "statements": 55
   },
   "internal/engine::validateBuiltinWorkflowSchema": {
    "cognitive": 56,
@@ -2548,8 +2479,8 @@
    "cognitive": 17
   },
   "internal/tenantruntime::(*Runtime).Close": {
-   "cognitive": 25,
-   "cyclomatic": 20
+   "cognitive": 22,
+   "cyclomatic": 18
   },
   "internal/tenantruntime::Activate": {
    "statements": 60

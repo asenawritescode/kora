@@ -255,9 +255,6 @@ func discardTenantCandidate(runtime *knet.LoadedSite) {
 	runtime.CloseSessionManager()
 	services := runtime.RuntimeServiceSnapshot()
 	StopTenantServiceBundle(services)
-	if runtime.AnalyticsWorker != nil {
-		runtime.AnalyticsWorker.Stop()
-	}
 }
 
 func newProcessMailer(common *site.CommonConfig) *email.Sender {

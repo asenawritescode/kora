@@ -3,11 +3,11 @@ package engine
 import (
 	"context"
 	"errors"
+	"github.com/asenawritescode/kora/internal/eventbus"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/db"
 	knet "github.com/asenawritescode/kora/internal/net"
 	"github.com/asenawritescode/kora/internal/site"
@@ -78,7 +78,7 @@ func TestTenantRuntimeAssemblyDerivesActivationAdmissionFromResolvedTenant(t *te
 			admitted = config
 			return func() {}, nil
 		},
-		Services: TenantServiceConfig{ProcessContext: context.Background(), Analytics: &analytics.Config{WALDir: t.TempDir()}, ResolveStorage: func(*site.Config) (storage.Backend, error) { return nil, nil }},
+		Services: TenantServiceConfig{ProcessContext: context.Background(), Analytics: &eventbus.Config{ChannelSize: 1000, MaxEventBytes: eventbus.DefaultMaxEventBytes}, ResolveStorage: func(*site.Config) (storage.Backend, error) { return nil, nil }},
 	})
 	if err != nil {
 		t.Fatal(err)

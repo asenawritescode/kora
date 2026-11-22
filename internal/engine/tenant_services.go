@@ -16,7 +16,6 @@ import (
 	"github.com/asenawritescode/kora/internal/projection"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/api"
 	"github.com/asenawritescode/kora/internal/application/process"
 	"github.com/asenawritescode/kora/internal/auth"
@@ -54,7 +53,7 @@ import (
 type TenantServiceConfig struct {
 	ProcessContext          context.Context
 	Common                  *site.CommonConfig
-	Analytics               *analytics.Config
+	Analytics               *eventbus.Config
 	CloudRelay              *cloudrelay.Config
 	CloudUsage              *usage.Config
 	AnalyticsQueueAdmission *eventbus.QueueAdmission
@@ -119,7 +118,7 @@ func NewTenantServiceInstaller(config TenantServiceConfig) (func(site.DBSiteInfo
 		return nil, errors.New("tenant storage resolver is required")
 	}
 	if config.Analytics == nil {
-		config.Analytics = analytics.LoadConfig()
+		config.Analytics = eventbus.LoadConfig()
 	}
 	if config.ProcessContext == nil {
 		config.ProcessContext = context.Background()
@@ -459,15 +458,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	}
 	services.RealtimeAdmission = config.RealtimeAdmission
 	services.UploadAdmission = config.UploadAdmission
-	bootstrapCtx, cancelBootstrap := context.WithTimeout(config.ProcessContext, 30*time.Second)
-	err = withTenantWorkAdmission(bootstrapCtx, workAdmission, "bootstrap analytics schema", func() error {
-		return analytics.BootstrapTables(bootstrapCtx, loaded.DB, dialect)
-	})
-	cancelBootstrap()
-	if err != nil {
-		return fmt.Errorf("bootstrap tenant analytics tables: %w", err)
-	}
-	baseBus := eventbus.NewChannelBusWithLimits(config.Analytics.ChannelSize, config.Analytics.MaxEventBytes, config.Analytics.MaxQueuedBytes, AnalyticsTenantWALDir(config.Analytics.WALDir, loaded.SiteID))
+	baseBus := eventbus.NewChannelBusWithLimits(config.Analytics.ChannelSize, config.Analytics.MaxEventBytes, eventbus.DefaultMaxQueuedBytes, AnalyticsTenantWALDir(eventbus.LegacyWALDir, loaded.SiteID))
 	if config.AnalyticsQueueAdmission != nil {
 		queueAware, ok := baseBus.(interface {
 			SetQueueAdmission(*eventbus.QueueAdmission) error
@@ -495,15 +486,6 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	loaded.AnalyticsEventBus = multiBus
 	if err := registerTenantWorkerStart(config, func() error { return multiBus.Start() }); err != nil {
 		return fmt.Errorf("register tenant event fanout for %s: %w", loaded.Name, err)
-	}
-	analyticsWorker := analytics.NewWorker(multiBus, loaded.DB, dialect, loaded.Registry, loaded.Name, config.Analytics)
-	analyticsWorker.SetWorkAdmission(workAdmission)
-	loaded.AnalyticsWorker = analyticsWorker
-	if err := registerTenantWorkerStart(config, func() error {
-		loaded.AnalyticsWorker.StartAsyncContext(loaded.WorkerContext(config.ProcessContext))
-		return nil
-	}); err != nil {
-		return fmt.Errorf("register analytics worker for tenant %s: %w", loaded.Name, err)
 	}
 	services.EventBus = multiBus
 	workflowConfig := config.Workflow
@@ -552,16 +534,6 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	if cloudErr := registerCloudWorkers(config, loaded, &services, multiBus, dialect); cloudErr != nil {
 		return cloudErr
 	}
-	runner := analytics.NewRebuildRunner(loaded.DB, dialect, loaded.Name, loaded.Registry, services.WorkAdmission)
-	services.AnalyticsRebuild = runner
-	if err := registerTenantWorkerStart(config, func() error {
-		if !loaded.StartWorker(config.ProcessContext, runner.Run) {
-			return fmt.Errorf("tenant runtime is stopping")
-		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("register analytics rebuild runner for tenant %s: %w", loaded.Name, err)
-	}
 	if config.NATS != nil {
 		services.Realtime = config.NATS
 		if err := registerTenantWorkerStart(config, func() error {
@@ -573,16 +545,6 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 			return nil
 		}); err != nil {
 			return fmt.Errorf("register realtime bridge for tenant %s: %w", loaded.Name, err)
-		}
-		if err := registerTenantWorkerStart(config, func() error {
-			if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
-				RunAnalyticsRebuildConsumer(ctx, loaded.Name, config.NATS, runner)
-			}) {
-				return fmt.Errorf("tenant runtime is stopping")
-			}
-			return nil
-		}); err != nil {
-			return fmt.Errorf("register analytics rebuild notification consumer for tenant %s: %w", loaded.Name, err)
 		}
 	}
 	if outboxErr := registerOutboxWorkers(config, loaded, &services, dialect); outboxErr != nil {

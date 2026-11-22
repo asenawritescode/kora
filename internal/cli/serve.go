@@ -12,7 +12,6 @@ import (
 	"github.com/asenawritescode/kora/internal/cloudrelay"
 	"github.com/asenawritescode/kora/internal/eventbus"
 
-	"github.com/asenawritescode/kora/internal/analytics"
 	purchasingengine "github.com/asenawritescode/kora/internal/application/purchasing/engineadapter"
 	subscriptionjobs "github.com/asenawritescode/kora/internal/application/subscriptions/engineadapter"
 	"github.com/asenawritescode/kora/internal/auth"
@@ -456,7 +455,7 @@ func runServe() error {
 		KernelCommands: kernelCommands, HTTPAllowlist: httpAllowlist, CloudRelay: cloudRelayConfig, CloudUsage: cloudUsageConfig,
 		CORSAllowedOrigins:   splitHTTPOrigins(os.Getenv("KORA_CORS_ALLOWED_ORIGINS")),
 		Workflow:             engine.SelfHostedWorkflowConfig(),
-		Analytics:            analytics.LoadConfig(),
+		Analytics:            eventbus.LoadConfig(),
 		OutboxEnabled:        outboxEnabledFromEnv(os.Getenv("KORA_OUTBOX"), natsEnabled()),
 		OutboxArchiveHorizon: outboxArchiveHorizon,
 		PlatformDBUser:       common.DBUser, PlatformDBPassword: common.DBPassword,

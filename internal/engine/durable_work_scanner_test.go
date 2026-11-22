@@ -4,15 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/asenawritescode/kora/internal/eventbus"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sync/atomic"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/db"
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	knet "github.com/asenawritescode/kora/internal/net"
@@ -23,132 +19,6 @@ type durableScannerDirectory struct {
 	page      []site.Descriptor
 	info      site.DBSiteInfo
 	pageCalls *atomic.Int32
-}
-
-type scannerActivationDirectory struct {
-	*tenantDirectoryStub
-	page []site.Descriptor
-}
-
-func (d *scannerActivationDirectory) GetDirectoryDescriptorPageContext(ctx context.Context, _ string, _ string, limit uint16) ([]site.Descriptor, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if len(d.page) > int(limit) {
-		return nil, errors.New("page exceeded requested limit")
-	}
-	return append([]site.Descriptor(nil), d.page...), nil
-}
-
-func TestDurableWorkScannerRetriesColdActivationAfterResidentCapacityFrees(t *testing.T) {
-	database, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
-	const scanKey = "engine:test:durable-work:default"
-	const residentID = "resident-tenant"
-	const coldID = "cold-work-tenant"
-	resident := &knet.LoadedSite{SiteID: residentID, Name: "resident.example"}
-	router := knet.NewSiteRouter([]*knet.LoadedSite{resident})
-	handle, err := router.AcquireByID(context.Background(), residentID)
-	if err != nil {
-		t.Fatal("pin resident runtime:", err)
-	}
-	defer handle.Release()
-
-	walDir := t.TempDir()
-	tenantWAL := AnalyticsTenantWALDir(walDir, coldID)
-	if err := os.MkdirAll(tenantWAL, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tenantWAL, "events.jsonl"), []byte("durable event"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	baseDirectory := &tenantDirectoryStub{
-		descriptor: site.Descriptor{SiteID: coldID, Aliases: []string{"cold-work.example"}, Status: "active", ConfigRevision: 1},
-		byID:       site.DBSiteInfo{SiteID: coldID, Name: "cold-work.example", Status: "active", ConfigRevision: 1},
-		revision:   9,
-	}
-	directory := &scannerActivationDirectory{tenantDirectoryStub: baseDirectory, page: []site.Descriptor{{SiteID: coldID, Status: "active"}}}
-	var loads atomic.Int32
-	coordinator, err := newTenantRuntimeCoordinator(TenantRuntimeCoordinatorConfig{
-		Tenants: router, Directory: directory, Common: &site.CommonConfig{}, MaxResidentTenants: 1,
-		Installer: func(site.DBSiteInfo, *knet.LoadedSite) error { return nil }, RetainRuntime: func(*knet.LoadedSite) {},
-	}, func(_ context.Context, info site.DBSiteInfo, _ *site.CommonConfig, _ *knet.LoadedSite, _ string) (*knet.LoadedSite, error) {
-		loads.Add(1)
-		return &knet.LoadedSite{SiteID: info.SiteID, Name: info.Name, ConfigRevision: info.ConfigRevision, Config: knet.SiteRouterConfig{Hostname: info.Name}}, nil
-	})
-	if err != nil {
-		t.Fatal("create coordinator:", err)
-	}
-	scanner, err := NewDurableWorkScanner(DurableWorkScannerConfig{
-		ParentContext: context.Background(), PlatformDB: database, PlatformDialect: db.Resolve("libsql"),
-		Directory: directory, Tenants: router, Coordinator: coordinator, Common: &site.CommonConfig{},
-		Analytics: &analytics.Config{WALDir: walDir}, DirectoryConsumerID: "engine:test", PageSize: 2,
-	})
-	if err != nil {
-		t.Fatal("create durable scanner:", err)
-	}
-
-	advanceSweep := func() {
-		t.Helper()
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT after_site_id,last_completed_at FROM _kora_durable_scan_cursor WHERE scan_key=?`)).
-			WithArgs(scanKey).WillReturnRows(sqlmock.NewRows([]string{"after_site_id", "last_completed_at"}).AddRow("", nil))
-		update := `UPDATE _kora_durable_scan_cursor SET after_site_id=?,last_completed_at=STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'),updated_at=STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW') WHERE scan_key=? AND after_site_id=?`
-		mock.ExpectExec(regexp.QuoteMeta(update)).WithArgs("", scanKey, "").WillReturnResult(sqlmock.NewResult(0, 1))
-		if err := scanner.ScanOnce(context.Background()); err != nil {
-			t.Fatalf("ScanOnce: %v", err)
-		}
-	}
-
-	advanceSweep()
-	if got := scanner.Snapshot(); got.CapacityRejections != 1 || got.DueTenants != 1 || loads.Load() != 0 {
-		t.Fatalf("scanner after busy-resident rejection = %+v, loads=%d; want one capacity rejection and no activation", got, loads.Load())
-	}
-	advanceSweep()
-	if got := scanner.Snapshot(); got.CapacityRejections != 2 || loads.Load() != 0 {
-		t.Fatalf("scanner retry while still busy = %+v, loads=%d; want retry and no activation", got, loads.Load())
-	}
-	handle.Release()
-	advanceSweep()
-	if router.SnapshotByID(coldID) == nil || router.SnapshotByID(residentID) != nil || loads.Load() != 1 {
-		t.Fatalf("cold activation after capacity frees: cold=%v resident=%v loads=%d", router.SnapshotByID(coldID), router.SnapshotByID(residentID), loads.Load())
-	}
-	if got := scanner.Snapshot(); got.CapacityRejections != 2 || got.DueTenants != 3 {
-		t.Fatalf("scanner recovery metrics = %+v, want 2 capacity rejections and 3 due detections", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal("scanner cursor expectations:", err)
-	}
-}
-
-func TestDurableWorkScannerWakesColdTenantForAnalyticsWAL(t *testing.T) {
-	base := t.TempDir()
-	wal := AnalyticsTenantWALDir(base, "wal-tenant")
-	if err := os.MkdirAll(wal, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(wal, "events.jsonl.flushing"), []byte("durable event"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	scanner := &DurableWorkScanner{
-		directory: durableScannerDirectory{info: site.DBSiteInfo{SiteID: "wal-tenant", Name: "wal-tenant.example", Status: "active"}},
-		common:    &site.CommonConfig{}, analytics: &analytics.Config{WALDir: base},
-	}
-	scanner.beginColdWALScan("")
-	due, err := scanner.probeTenant(context.Background(), site.Descriptor{SiteID: "wal-tenant", Status: "active"})
-	if err != nil || !due {
-		t.Fatalf("cold tenant with retained analytics WAL = (%t, %v), want (true, nil)", due, err)
-	}
-	scanner.publishColdWALSnapshot()
-	backlog := scanner.Snapshot()
-	if !backlog.ColdWALPending || !backlog.ColdWALAgeUnknown {
-		t.Fatalf("cold tenant WAL metrics = %+v, want pending with unknown legacy/corrupt age", backlog)
-	}
-	if !backlog.ColdWALBytesKnown || backlog.ColdWALBytes != int64(len("durable event")) {
-		t.Fatalf("cold tenant WAL byte metrics = %d known=%t, want %d known", backlog.ColdWALBytes, backlog.ColdWALBytesKnown, len("durable event"))
-	}
 }
 
 func TestDurableWorkScannerRechecksAssignmentAfterReadingCurrentTenant(t *testing.T) {
@@ -164,66 +34,6 @@ func TestDurableWorkScannerRechecksAssignmentAfterReadingCurrentTenant(t *testin
 	})
 	if err != nil || due {
 		t.Fatalf("probe after assignment moved = (%t, %v), want (false, nil)", due, err)
-	}
-}
-
-func TestDurableWorkScannerPublishesColdWALBytesOnlyForCompleteKnownSweep(t *testing.T) {
-	t.Run("complete sweep sums bytes", func(t *testing.T) {
-		scanner := &DurableWorkScanner{}
-		scanner.beginColdWALScan("")
-		scanner.recordColdWALBacklog(eventbus.WALBacklogSnapshot{Bytes: 17, BytesKnown: true})
-		scanner.recordColdWALBacklog(eventbus.WALBacklogSnapshot{Bytes: 23, BytesKnown: true})
-		scanner.publishColdWALSnapshot()
-		got := scanner.Snapshot()
-		if !got.ColdWALBytesKnown || got.ColdWALBytes != 40 {
-			t.Fatalf("completed cold WAL bytes = %d known=%t, want 40 known", got.ColdWALBytes, got.ColdWALBytesKnown)
-		}
-	})
-	t.Run("resumed sweep remains unknown", func(t *testing.T) {
-		scanner := &DurableWorkScanner{}
-		scanner.beginColdWALScan("tenant-previous-page")
-		scanner.recordColdWALBacklog(eventbus.WALBacklogSnapshot{Bytes: 23, BytesKnown: true})
-		scanner.publishColdWALSnapshot()
-		got := scanner.Snapshot()
-		if got.ColdWALBytesKnown {
-			t.Fatalf("resumed partial sweep bytes marked known: %+v", got)
-		}
-	})
-	t.Run("failed probe marks sweep unknown", func(t *testing.T) {
-		scanner := &DurableWorkScanner{}
-		scanner.beginColdWALScan("")
-		scanner.recordColdWALBacklog(eventbus.WALBacklogSnapshot{Bytes: 17, BytesKnown: true})
-		scanner.markColdWALBytesUnknown()
-		scanner.publishColdWALSnapshot()
-		got := scanner.Snapshot()
-		if got.ColdWALBytesKnown {
-			t.Fatalf("incomplete cold WAL sweep marked known: %+v", got)
-		}
-	})
-}
-
-func TestAnalyticsWALHasPendingIncludesCurrentAndRotatedRecords(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "tenant")
-	if pending, err := eventbus.WALHasPending(dir); err != nil || pending {
-		t.Fatalf("empty WAL state = (%t, %v), want (false, nil)", pending, err)
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "events.jsonl.flushing"), []byte("pending"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if pending, err := eventbus.WALHasPending(dir); err != nil || !pending {
-		t.Fatalf("rotated WAL state = (%t, %v), want (true, nil)", pending, err)
-	}
-	if err := os.Remove(filepath.Join(dir, "events.jsonl.flushing")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "events.jsonl"), []byte("pending"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if pending, err := eventbus.WALHasPending(dir); err != nil || !pending {
-		t.Fatalf("current WAL state = (%t, %v), want (true, nil)", pending, err)
 	}
 }
 

@@ -64,11 +64,6 @@ func AssembleTenantRuntime(config TenantRuntimeAssemblyConfig) (*TenantRuntimeAs
 	if config.Services.ProcessContext == nil || config.Services.ResolveStorage == nil {
 		return nil, errors.New("tenant runtime assembly requires process context and storage resolver")
 	}
-	if config.Services.Analytics != nil && config.Services.Analytics.WALDir != "" {
-		if err := migrateAnalyticsWALNamespaces(config.Services.ProcessContext, config.Services.Analytics.WALDir, config.Directory, config.CellID, config.DirectoryWorkAdmission); err != nil {
-			return nil, fmt.Errorf("migrate analytics WAL to stable tenant namespaces: %w", err)
-		}
-	}
 	for _, runtime := range config.Runtimes {
 		if runtime == nil {
 			return nil, errors.New("tenant runtime assembly contains a nil startup runtime")
@@ -136,7 +131,6 @@ func AssembleTenantRuntime(config TenantRuntimeAssemblyConfig) (*TenantRuntimeAs
 		},
 		Common: config.Common, CellID: config.CellID,
 		DirectoryConsumerID: config.DirectoryConsumerID,
-		Analytics:           config.Services.Analytics,
 		ArchiveHorizon:      config.Services.ArchiveHorizon,
 	})
 	if err != nil {

@@ -20,17 +20,6 @@ func TestOutboxSideEffectSubjectExcludesRealtimeNamespace(t *testing.T) {
 	}
 }
 
-func TestAnalyticsSiteWALDirIsPartitionedAndSafe(t *testing.T) {
-	first := engine.AnalyticsSiteWALDir("data/analytics/wal", "tenant-one")
-	second := engine.AnalyticsSiteWALDir("data/analytics/wal", "tenant-two")
-	if first == second || first != "data/analytics/wal/tenant-one" || second != "data/analytics/wal/tenant-two" {
-		t.Fatalf("site WAL paths are not partitioned: first=%q second=%q", first, second)
-	}
-	if got := engine.AnalyticsSiteWALDir("data/analytics/wal", "../escape/site"); strings.Contains(got, "/../") || strings.HasSuffix(got, "/site") {
-		t.Fatalf("unsafe site name escaped WAL root: %q", got)
-	}
-}
-
 func TestDecodeOutboxDeliveryRequiresCanonicalEnvelope(t *testing.T) {
 	if _, err := engine.DecodeOutboxDelivery(contract.Delivery{Data: json.RawMessage(`{"type":"change","site":"demo"}`)}); err == nil {
 		t.Fatal("raw realtime payload was accepted as an outbox event")

@@ -12,7 +12,6 @@ import (
 	"github.com/asenawritescode/kora/internal/cloudrelay"
 	"github.com/asenawritescode/kora/internal/eventbus"
 
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/application/process"
 	"github.com/asenawritescode/kora/internal/auth"
 	"github.com/asenawritescode/kora/internal/configstore"
@@ -67,7 +66,7 @@ type Config struct {
 	CORSAllowedOrigins                []string
 	CloudRelay                        *cloudrelay.Config
 	CloudUsage                        *usage.Config
-	Analytics                         *analytics.Config
+	Analytics                         *eventbus.Config
 	OutboxEnabled                     bool
 	SystemGuard                       *auth.SystemGuard
 	PlatformDBUser                    string
@@ -267,7 +266,7 @@ func newEngine(ctx context.Context, config Config, deps engineAssemblyDependenci
 	}
 	analyticsConfig := config.Analytics
 	if analyticsConfig == nil {
-		analyticsConfig = &analytics.Config{}
+		analyticsConfig = &eventbus.Config{}
 	}
 	directoryWorkAdmission, err := dbaccess.AdmissionFor(config.DBDriver, config.DBDSN)
 	if err != nil {

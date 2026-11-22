@@ -6,7 +6,6 @@ import (
 	"context"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/analytics"
 	"github.com/asenawritescode/kora/internal/cloudrelay"
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/internal/doctype"
@@ -63,7 +62,6 @@ type Services struct {
 	EventBus                  eventstream.Bus
 	Mailer                    *email.Sender
 	AnalyticsRelay            *cloudrelay.Relay
-	AnalyticsRebuild          *analytics.RebuildRunner
 	Realtime                  *natsprovider.Provider
 	ScriptStore               *script.Store
 	AsyncHookInvocations      script.AsyncHookInvocationStore

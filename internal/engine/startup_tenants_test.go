@@ -30,13 +30,11 @@ func TestStartupSiteCollectionClosesFanoutBusWhenSiblingLoadFails(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker := &startupRollbackWorker{stopped: make(chan struct{})}
 	loaded := &knet.LoadedSite{
 		Name:              "loaded.example",
 		DB:                database,
 		SessionManager:    auth.NewOwnedSessionManager(database),
 		AnalyticsEventBus: fanout,
-		AnalyticsWorker:   worker,
 	}
 	tenantWorkerDone := make(chan struct{})
 	if !loaded.StartWorker(context.Background(), func(ctx context.Context) { <-ctx.Done(); close(tenantWorkerDone) }) {
@@ -52,11 +50,6 @@ func TestStartupSiteCollectionClosesFanoutBusWhenSiblingLoadFails(t *testing.T) 
 	}
 	if err := base.Publish(eventstream.ChangeEvent{ID: "after-cleanup", Site: "loaded.example"}); err == nil {
 		t.Fatal("startup rollback left the tenant event bus open")
-	}
-	select {
-	case <-worker.stopped:
-	case <-time.After(time.Second):
-		t.Fatal("startup rollback did not stop its analytics worker")
 	}
 	select {
 	case <-tenantWorkerDone:
@@ -87,14 +80,6 @@ func TestStartupSiteCollectionJoinsRollbackCloseErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-type startupRollbackWorker struct{ stopped chan struct{} }
-
-func (w *startupRollbackWorker) StartAsyncContext(context.Context) {}
-func (w *startupRollbackWorker) Stop()                             { close(w.stopped) }
-func (w *startupRollbackWorker) InvalidateMetrics(string)          {}
-func (w *startupRollbackWorker) InvalidateAllMetrics()             {}
-func (w *startupRollbackWorker) Flush() error                      { return nil }
 
 type startupTestBackend struct{ closed int }
 

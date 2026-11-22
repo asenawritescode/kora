@@ -213,11 +213,6 @@ func (r *ProcessResources) Shutdown(ctx context.Context) error {
 			if err := loaded.StopWorkersContext(ctx); err != nil {
 				return incompleteShutdown(fmt.Errorf("stop tenant workers for %q: %w", loaded.SiteID, err))
 			}
-			if loaded.AnalyticsWorker != nil {
-				if err := stopWithContext(ctx, "analytics worker", loaded.AnalyticsWorker.Stop); err != nil {
-					return incompleteShutdown(err)
-				}
-			}
 		}
 	}
 	// Stop producers before closing the queue. The hook worker has an

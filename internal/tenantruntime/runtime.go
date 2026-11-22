@@ -43,17 +43,10 @@ type Runtime struct {
 	Registry          *doctype.Registry
 	SessionManager    *auth.SessionManager
 	AnalyticsEventBus eventstream.Bus
-	AnalyticsWorker   interface {
-		StartAsyncContext(context.Context)
-		Stop()
-		InvalidateMetrics(string)
-		InvalidateAllMetrics()
-		Flush() error
-	}
-	RuntimeServices *Services
-	workerMu        sync.Mutex
-	generation      *Generation
-	lastUsedAt      atomic.Int64
+	RuntimeServices   *Services
+	workerMu          sync.Mutex
+	generation        *Generation
+	lastUsedAt        atomic.Int64
 }
 
 type Activation struct {
@@ -65,25 +58,18 @@ type Activation struct {
 
 // Snapshot is an immutable, request-pinned view of one tenant activation.
 type Snapshot struct {
-	Activation      Activation
-	Generation      uint64
-	ConfigRevision  uint64
-	Name            string
-	Status          string
-	DBType          string
-	Config          SiteConfig
-	DB              *sql.DB
-	Registry        *doctype.Registry
-	SessionManager  *auth.SessionManager
-	AnalyticsWorker interface {
-		StartAsyncContext(context.Context)
-		Stop()
-		InvalidateMetrics(string)
-		InvalidateAllMetrics()
-		Flush() error
-	}
-	Services    Services
-	HasServices bool
+	Activation     Activation
+	Generation     uint64
+	ConfigRevision uint64
+	Name           string
+	Status         string
+	DBType         string
+	Config         SiteConfig
+	DB             *sql.DB
+	Registry       *doctype.Registry
+	SessionManager *auth.SessionManager
+	Services       Services
+	HasServices    bool
 }
 
 func (s *Runtime) Snapshot() *Snapshot {
@@ -102,7 +88,7 @@ func (s *Runtime) Snapshot() *Snapshot {
 		Generation: s.EnsureRuntimeGeneration(), ConfigRevision: s.ConfigRevision,
 		Name: s.Name, Status: s.Status, DBType: s.DBType,
 		Config: config, DB: s.DB, Registry: s.Registry, SessionManager: s.SessionManager,
-		AnalyticsWorker: s.AnalyticsWorker, Services: s.RuntimeServiceSnapshot(), HasServices: s.RuntimeServices != nil,
+		Services: s.RuntimeServiceSnapshot(), HasServices: s.RuntimeServices != nil,
 	}
 }
 
@@ -215,11 +201,6 @@ func (s *Runtime) Close(ctx context.Context) error {
 		return err
 	}
 	var closeErr error
-	if s.AnalyticsWorker != nil {
-		if err := stopWorkerWithContext(ctx, "analytics worker", s.AnalyticsWorker.Stop); err != nil {
-			return err
-		}
-	}
 	if s.SessionManager != nil {
 		var sessionCloseErr error
 		if err := runCleanupWithContext(ctx, "tenant session manager", func() { sessionCloseErr = s.SessionManager.Close() }); err != nil {

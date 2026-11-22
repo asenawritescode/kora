@@ -584,52 +584,6 @@ func listFlushingWALs(dir string) ([]string, error) {
 	return paths, nil
 }
 
-// WALHasPending reports whether the durable current or rotated WAL contains
-// bytes awaiting worker replay. A stat/read failure is returned so callers do
-// not silently treat an unreadable WAL as empty.
-func WALHasPending(dir string) (bool, error) {
-	if strings.TrimSpace(dir) == "" {
-		return false, nil
-	}
-	current := filepath.Join(dir, "events.jsonl")
-	info, err := os.Stat(current)
-	if err == nil && info.Size() > 0 {
-		return true, nil
-	}
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return false, fmt.Errorf("stat analytics WAL: %w", err)
-	}
-	paths, err := listFlushingWALs(dir)
-	if err != nil {
-		return false, fmt.Errorf("list analytics WAL rotations: %w", err)
-	}
-	for _, path := range paths {
-		info, err := os.Stat(path)
-		if err != nil {
-			return false, fmt.Errorf("stat analytics WAL rotation: %w", err)
-		}
-		if info.Size() > 0 {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// InspectWALBacklog scans the first durable record in each WAL file. Records
-// are appended in persistence-time order within a file, so the first record
-// provides the oldest timestamp without decoding the full backlog. Legacy or
-// corrupt first records remain pending and make the age unknown.
-func InspectWALBacklog(dir string) (WALBacklogSnapshot, error) {
-	if strings.TrimSpace(dir) == "" {
-		return WALBacklogSnapshot{AgeKnown: true, BytesKnown: true}, nil
-	}
-	b := &channelBus{walDir: dir, walAgeKnown: true}
-	b.walMu.Lock()
-	err := b.refreshWALBacklogLocked()
-	b.walMu.Unlock()
-	return b.WALBacklog(), err
-}
-
 // refreshWALBacklogLocked expects walMu to be held, preventing concurrent
 // append/rotation/acknowledgment while the disk snapshot is rebuilt.
 func (b *channelBus) refreshWALBacklogLocked() error {
@@ -989,4 +943,50 @@ func (b *channelBus) syncWALDir() error {
 	}
 	b.walSyncPending = false
 	return nil
+}
+
+// WALHasPending reports whether the durable current or rotated WAL contains
+// bytes awaiting worker replay. A stat/read failure is returned so callers do
+// not silently treat an unreadable WAL as empty.
+func WALHasPending(dir string) (bool, error) {
+	if strings.TrimSpace(dir) == "" {
+		return false, nil
+	}
+	current := filepath.Join(dir, "events.jsonl")
+	info, err := os.Stat(current)
+	if err == nil && info.Size() > 0 {
+		return true, nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("stat analytics WAL: %w", err)
+	}
+	paths, err := listFlushingWALs(dir)
+	if err != nil {
+		return false, fmt.Errorf("list analytics WAL rotations: %w", err)
+	}
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			return false, fmt.Errorf("stat analytics WAL rotation: %w", err)
+		}
+		if info.Size() > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// InspectWALBacklog scans the first durable record in each WAL file. Records
+// are appended in persistence-time order within a file, so the first record
+// provides the oldest timestamp without decoding the full backlog. Legacy or
+// corrupt first records remain pending and make the age unknown.
+func InspectWALBacklog(dir string) (WALBacklogSnapshot, error) {
+	if strings.TrimSpace(dir) == "" {
+		return WALBacklogSnapshot{AgeKnown: true, BytesKnown: true}, nil
+	}
+	b := &channelBus{walDir: dir, walAgeKnown: true}
+	b.walMu.Lock()
+	err := b.refreshWALBacklogLocked()
+	b.walMu.Unlock()
+	return b.WALBacklog(), err
 }
