@@ -1,6 +1,8 @@
 package site
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -55,6 +57,44 @@ transaction:
 			}
 		})
 	}
+}
+
+func TestPOSPackWritesActorOnlyToUserFields(t *testing.T) {
+	root := filepath.Join("..", "..", "config", "pos")
+	files := append(loadPackFilesAtRoot(t, root), loadPackCommandFiles(t, root)...)
+	validation, err := ValidatePack(PackManifest{SchemaVersion: 1, Name: "pos", Version: "1.0.0"}, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findingsWithCode(validation.Findings, "actor_field_not_user"); len(got) != 0 {
+		t.Fatalf("POS pack stores $actor in non-User fields: %#v", got)
+	}
+}
+
+// loadPackCommandFiles reads the command files of a pack root. The shared
+// loader skips commands, so a rule over commands needs them loaded here.
+func loadPackCommandFiles(t *testing.T, root string) []PackFile {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(root, "commands", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) == 0 {
+		t.Fatalf("no command files under %s", root)
+	}
+	var files []PackFile
+	for _, path := range paths {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, PackFile{Path: filepath.ToSlash(rel), ContentType: "command", Content: string(content)})
+	}
+	return files
 }
 
 func findingsWithCode(findings []PackFinding, code string) []PackFinding {

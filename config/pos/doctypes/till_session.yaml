@@ -26,10 +26,9 @@ fields:
     label: Location
     read_only: true
   - fieldname: cashier
-    fieldtype: Data
+    fieldtype: User
     label: Cashier
     read_only: true
-    search_index: true
   - fieldname: opening_float
     fieldtype: Currency
     label: Opening Float

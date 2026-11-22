@@ -14,7 +14,7 @@ fields:
     search_index: true
     in_list_view: true
   - fieldname: cashier
-    fieldtype: Data
+    fieldtype: User
     label: Cashier
     reqd: true
     in_list_view: true
