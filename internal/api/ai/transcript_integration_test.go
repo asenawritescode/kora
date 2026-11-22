@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	mysqldriver "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 
 	kdb "github.com/asenawritescode/kora/internal/db"
@@ -29,6 +29,9 @@ func TestTranscriptCarriesRunIDsAcrossDialects(t *testing.T) {
 			dsn := os.Getenv(tc.dsn)
 			if dsn == "" {
 				t.Skipf("set %s to a disposable %s database", tc.dsn, tc.name)
+			}
+			if tc.name == "mysql" {
+				dsn = isolatedMySQLDSN(t, dsn)
 			}
 			database, err := sql.Open(tc.name, dsn)
 			if err != nil {
@@ -84,4 +87,26 @@ func TestTranscriptCarriesRunIDsAcrossDialects(t *testing.T) {
 			}
 		})
 	}
+}
+
+// isolatedMySQLDSN creates a uniquely named database on the root DSN and drops it in Cleanup. CI's disposable DSN
+// names no database, so the test must make its own, as the projection tests do.
+func isolatedMySQLDSN(t *testing.T, root string) string {
+	t.Helper()
+	config, err := mysqldriver.ParseDSN(root)
+	if err != nil {
+		t.Fatalf("parse mysql DSN: %v", err)
+	}
+	name := fmt.Sprintf("kora_ai_transcript_%x", time.Now().UnixNano())
+	admin, err := sql.Open("mysql", root)
+	if err != nil {
+		t.Fatalf("open mysql admin connection: %v", err)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+	if _, err = admin.Exec("CREATE DATABASE `" + name + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"); err != nil {
+		t.Fatalf("create isolated mysql database: %v", err)
+	}
+	t.Cleanup(func() { _, _ = admin.Exec("DROP DATABASE IF EXISTS `" + name + "`") })
+	config.DBName = name
+	return config.FormatDSN()
 }
