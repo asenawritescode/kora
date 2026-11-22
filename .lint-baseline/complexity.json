@@ -361,8 +361,8 @@
    "cyclomatic": 18
   },
   "internal/api::(*Handler).handleChannelTool": {
-   "cognitive": 22,
-   "cyclomatic": 20
+   "cognitive": 20,
+   "cyclomatic": 19
   },
   "internal/api::(*Handler).handleSystemRealtimeSSE": {
    "cognitive": 20
@@ -617,7 +617,7 @@
    "cognitive": 16
   },
   "internal/api::handleChannelTool": {
-   "statements": 49
+   "statements": 48
   },
   "internal/api::handleConfigurationCheck": {
    "cognitive": 37,

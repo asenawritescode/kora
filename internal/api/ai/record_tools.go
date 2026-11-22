@@ -114,6 +114,12 @@ func recordTool(name, description string, schema map[string]any, operation strin
 	}
 }
 
+// IsRecordTool reports whether name is one of the fixed record tools, whose record type is in the arguments.
+func IsRecordTool(name string) bool {
+	_, ok := recordToolOperation[name]
+	return ok
+}
+
 // RecordToolTarget names the record type and role-matrix operation a fixed record tool call touches.
 // It reports false for any other tool, and for a record type the registry does not know.
 func RecordToolTarget(reg *doctype.Registry, toolName string, args map[string]any) (string, string, bool) {

@@ -120,6 +120,9 @@ func TestRecordToolTargetResolvesFixedToolsOnNonChildTypes(t *testing.T) {
 			if ok != tc.wantOK || docType != tc.wantType || operation != tc.wantOp {
 				t.Fatalf("target = %q/%q/%v, want %q/%q/%v", docType, operation, ok, tc.wantType, tc.wantOp, tc.wantOK)
 			}
+			if wantRecordTool := tc.tool != "list_doctypes"; IsRecordTool(tc.tool) != wantRecordTool {
+				t.Fatalf("IsRecordTool(%q) = %v, want %v", tc.tool, !wantRecordTool, wantRecordTool)
+			}
 		})
 	}
 }

@@ -482,10 +482,8 @@ func (h *Handler) handleChannelTool(c *gin.Context, readOnly bool) {
 		writeError(c, http.StatusNotFound, "tool.not_found", "tool not found", nil)
 		return
 	}
-	if docType, operation, ok := ai.RecordToolTarget(h.siteRegistry(c), req.ToolName, req.Args); ok {
-		if _, forbidden := checkPerm(c, h.siteRegistry(c), docType, operation); forbidden {
-			return
-		}
+	if !h.authorizeRecordTool(c, req.ToolName, req.Args) {
+		return
 	}
 	if !channelAllowed(descriptor.ChannelAllowlist, "whatsapp") {
 		writeError(c, http.StatusForbidden, "permission.denied", "tool is not allowed on this channel", nil)
@@ -594,6 +592,22 @@ func ternary[T any](condition bool, yes, no T) T {
 		return yes
 	}
 	return no
+}
+
+// authorizeRecordTool checks a fixed record tool call against the role matrix for the record type its arguments
+// name. A record tool without a valid record type is refused. It writes the error and returns false when the call
+// may not run; other tools pass.
+func (h *Handler) authorizeRecordTool(c *gin.Context, name string, args map[string]any) bool {
+	docType, operation, ok := ai.RecordToolTarget(h.siteRegistry(c), name, args)
+	if !ok {
+		if ai.IsRecordTool(name) {
+			writeError(c, http.StatusBadRequest, "validation.invalid_field", "record_type must name a record type", map[string]any{"field": "record_type"})
+			return false
+		}
+		return true
+	}
+	_, forbidden := checkPerm(c, h.siteRegistry(c), docType, operation)
+	return !forbidden
 }
 
 func optionalTime(value sql.NullTime) *time.Time {
