@@ -161,8 +161,13 @@ func (p plan) recordsFrom(d db.Dialect, group map[string]string) (string, []any)
 	rp := p
 	rp.records = true
 	var args []any
-	union := rp.factsUnion(d, &args)
 	s := p.series[0]
+	union := rp.factsUnion(d, &args)
+	if s.line && !p.hasLineDim() {
+		// A line sum counts line rows only: a header row has no line value, and a record without a matching
+		// line is not in the number.
+		union = rp.factsPart(d, p.model.Facts.LineTableName(p.model), true, &args)
+	}
 	value := "1"
 	conds := s.conds
 	if s.agg == aggSum {

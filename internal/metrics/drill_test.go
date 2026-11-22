@@ -64,7 +64,8 @@ func TestDrillTurnsNumberIntoRecordFilters(t *testing.T) {
 		{name: "ratio does not drill", req: DrillRequest{Metric: "average_sale", From: day, To: day}, clock: plain, wantErr: true},
 		{name: "balance does not drill", req: DrillRequest{Metric: "balance_sales", From: day, To: day}, clock: plain, wantErr: true},
 		{name: "count distinct does not drill", req: DrillRequest{Metric: "distinct_registers", From: day, To: day}, clock: plain, wantErr: true},
-		{name: "line sum does not drill", req: DrillRequest{Metric: "line_amount", From: day, To: day}, clock: plain, wantErr: true},
+		{name: "line sum drills to its records", req: DrillRequest{Metric: "line_amount", From: day, To: day}, clock: plain,
+			want: []Filter{{Field: "creation", Op: ">=", Value: "2026-11-19 21:00:00"}, {Field: "creation", Op: "<", Value: "2026-11-20 21:00:00"}}},
 		{name: "unknown metric", req: DrillRequest{Metric: "nope", From: day, To: day}, clock: plain, wantErr: true},
 		{name: "reversed range", req: DrillRequest{Metric: "sales", From: day, To: tenanttime.Date{Year: 2026, Month: 11, Day: 19}}, clock: plain, wantErr: true},
 	}
@@ -187,5 +188,23 @@ func TestDrillCursorRoundTrips(t *testing.T) {
 				t.Fatalf("err = %v, want ErrBadCursor", err)
 			}
 		})
+	}
+}
+
+// TestDrillLineSumIsNotOpenable checks that a line sum drills to its records but its record list cannot be
+// opened as a list: the list filters cannot say which records hold the counted lines.
+func TestDrillLineSumIsNotOpenable(t *testing.T) {
+	cat := NewCatalog(nil, nil)
+	cat.Metrics["line_amount"] = Metric{Name: "line_amount", Label: "Line amount", Type: KindSimple, Model: "Sale",
+		Measure: &Measure{Agg: aggSum, Field: "amount"}}
+	cat.Models["Sale"] = &doctype.DocType{Name: "Sale", Facts: &doctype.FactModel{Time: "creation", Lines: "items",
+		Measures: []doctype.FactMeasure{{Field: "items.amount"}}}}
+	day := tenanttime.Date{Year: 2026, Month: 11, Day: 20}
+	got, err := cat.Drill(DrillRequest{Metric: "line_amount", From: day, To: day}, tenanttime.Clock{})
+	if err != nil {
+		t.Fatalf("drill: %v", err)
+	}
+	if got.ListOpenable {
+		t.Fatal("a line sum drill is openable as a list, want not")
 	}
 }
