@@ -191,10 +191,3 @@ func (s *Server) addMetricsTool(tool ai.ToolDescriptor) {
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil, nil
 		})
 }
-
-func sanitizeName(name string) string {
-	s := strings.ToLower(name)
-	s = strings.ReplaceAll(s, " ", "_")
-	s = strings.ReplaceAll(s, "-", "_")
-	return s
-}

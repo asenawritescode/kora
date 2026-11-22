@@ -116,28 +116,6 @@ func TestValidationOnlyModeExposesConfigToolsOnly(t *testing.T) {
 	}
 }
 
-func TestSanitizeName(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"Customer", "customer"},
-		{"Work Order", "work_order"},
-		{"Sales-Invoice", "sales_invoice"},
-		{"Lead", "lead"},
-		{"already_lower", "already_lower"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := sanitizeName(tt.input)
-			if got != tt.want {
-				t.Errorf("sanitizeName(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestProjectedMCPToolsMirrorCatalog(t *testing.T) {
 	reg := doctype.NewRegistry()
 	reg.Register(&doctype.DocType{

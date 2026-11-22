@@ -66,7 +66,7 @@ func TestExtensionReadExecutorMySQLOwnerScopedRead(t *testing.T) {
 	}, map[string]any{
 		"record_type": "Task",
 		"filters":     []any{map[string]any{"field": "title", "op": "=", "value": "mine"}},
-		"limit":   10,
+		"limit":       10,
 	})
 	if err != nil {
 		t.Fatal("execute filtered tenant read:", err)
