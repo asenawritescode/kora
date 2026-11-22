@@ -593,6 +593,35 @@ func goldenCases(d goldenDates, reportID string) []goldenCase {
 				}
 			},
 		}}},
+		{name: "a thing the shop does not measure is refused without a period question", user: goldenAdminUser, roles: doctype.AdminRole, turns: []goldenTurn{{
+			message: "How many unicorns did we sell?",
+			steps: []modelStep{
+				{tool: "list_metrics", args: `{}`},
+				{content: "Zana cannot answer that from this shop's data: no unicorn sales are recorded here."},
+			},
+			check: func(t *testing.T, got ai.ChatResponse, _ []string) {
+				requireCards(t, got, 0)
+				if strings.ContainsAny(got.Reply, "0123456789") || got.Choices != nil {
+					t.Fatalf("refusal = %q choices %v; want no number and no choices", got.Reply, got.Choices)
+				}
+			},
+		}}},
+		{name: "a measure with no metric is not called untracked", user: goldenAdminUser, roles: doctype.AdminRole, turns: []goldenTurn{{
+			message: "How much tax did we collect last month?",
+			steps: []modelStep{
+				{tool: "list_metrics", args: `{}`},
+				{content: "This shop has no tax metric, so Zana cannot give the tax collected last month."},
+			},
+			check: func(t *testing.T, got ai.ChatResponse, _ []string) {
+				requireCards(t, got, 0)
+				if strings.ContainsAny(got.Reply, "0123456789") || got.Choices != nil || strings.Contains(got.Reply, "not tracked") || strings.Contains(got.Reply, "not recorded") {
+					t.Fatalf("refusal = %q choices %v; want no number, no choices and no claim the data is untracked", got.Reply, got.Choices)
+				}
+				if !strings.Contains(got.Reply, "no tax metric") {
+					t.Fatalf("refusal = %q; want it to name the missing metric", got.Reply)
+				}
+			},
+		}}},
 		{name: "cashier with owner-only access sees only own sales", user: "alice", roles: tillCashierRole, turns: []goldenTurn{{
 			message: "How did sales do last week?",
 			steps:   []modelStep{{tool: "query_metrics", args: lastWeekQuery}, {content: "Your sales last week were KES 1,350."}},
