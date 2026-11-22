@@ -325,7 +325,7 @@ func (p plan) lineDimName() string {
 // status, and per one declared dimension, and they carry no owner. Distinct counts and dimension paths
 // need the facts.
 func (p plan) fitsSummary() bool {
-	if p.scope.Owner != "" || len(p.dims) > 1 || p.hasJoins() || p.hasLineDim() || p.groupsByStatus() {
+	if p.scope.Owner != "" || len(p.dims) > 1 || p.hasJoins() || p.hasLineDim() || p.groupsByStatus() || p.groupsByOwner() {
 		return false
 	}
 	usable := func(field string) bool {
@@ -369,6 +369,16 @@ func (p plan) metricNames() []string {
 }
 
 // groupsByStatus reports whether a dimension of the plan is the status field's value.
+// groupsByOwner reports whether a dimension is the record owner, which only the fact tables carry.
+func (p plan) groupsByOwner() bool {
+	for _, d := range p.dims {
+		if d.alias == ownerColumn && d.name == ownerColumn {
+			return true
+		}
+	}
+	return false
+}
+
 func (p plan) groupsByStatus() bool {
 	for _, d := range p.dims {
 		if p.model.Facts.GroupsByStatus(d.name) {
