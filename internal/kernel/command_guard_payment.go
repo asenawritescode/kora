@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -57,49 +58,73 @@ type paymentClaim struct {
 	Ref                string
 	Amount             decimal.Decimal
 	Currency           string
+	// Preview skips a line with no reference: the caller settles that line, under its
+	// confirm, with a reference that is then checked for real. A preview writes nothing.
+	Preview bool
 }
 
 func (k *Kernel) consumePaymentGuard(dbTx *sql.Tx, claim paymentClaim, p *GuardPayment, env refEnv, index int) *contract.Error {
-	invalid := func(format string, args ...any) *contract.Error {
-		return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("require %d: "+format, append([]any{index}, args...)...))
-	}
 	list, err := resolveEnvRef(p.ForEach, env)
 	if err != nil {
-		return invalid("%v", err)
+		return paymentGuardInvalid(index, "%v", err)
 	}
 	items, ok := list.([]any)
 	if !ok {
-		return invalid("payment for_each %q must resolve to a list", p.ForEach)
+		return paymentGuardInvalid(index, "payment for_each %q must resolve to a list", p.ForEach)
 	}
 	currency, err := resolveEnvStringRef(p.Currency, env)
 	if err != nil {
-		return invalid("%v", err)
+		return paymentGuardInvalid(index, "%v", err)
 	}
 	claim.Currency = currency
 	for _, raw := range items {
 		item, ok := raw.(map[string]any)
 		if !ok {
-			return invalid("payment elements must be objects")
+			return paymentGuardInvalid(index, "payment elements must be objects")
 		}
 		env.item = item
-		ref, err := resolveEnvStringRef(p.Reference, env)
-		if err != nil || ref == "" {
-			return invalid("payment reference is required")
-		}
-		amountRef, err := resolveEnvRef(p.Amount, env)
-		if err != nil {
-			return invalid("%v", err)
-		}
-		amount, err := decimal.NewFromString(fmt.Sprint(amountRef))
-		if err != nil {
-			return invalid("payment %q amount is not a number", ref)
-		}
-		claim.Ref, claim.Amount = ref, amount
-		if cerr := consumePaymentIntent(dbTx, k.dialect(), claim); cerr != nil {
+		if cerr := k.consumePaymentLine(dbTx, claim, p, env, index); cerr != nil {
 			return cerr
 		}
 	}
 	return nil
+}
+
+// consumePaymentLine checks and consumes the intent that one payment element names. A preview skips an
+// element with no reference (see paymentClaim.Preview).
+func (k *Kernel) consumePaymentLine(dbTx *sql.Tx, claim paymentClaim, p *GuardPayment, env refEnv, index int) *contract.Error {
+	ref, absent, err := paymentLineReference(p.Reference, env)
+	if absent && claim.Preview {
+		return nil
+	}
+	if err != nil || absent {
+		return paymentGuardInvalid(index, "payment reference is required")
+	}
+	amountRef, err := resolveEnvRef(p.Amount, env)
+	if err != nil {
+		return paymentGuardInvalid(index, "%v", err)
+	}
+	amount, err := decimal.NewFromString(fmt.Sprint(amountRef))
+	if err != nil {
+		return paymentGuardInvalid(index, "payment %q amount is not a number", ref)
+	}
+	claim.Ref, claim.Amount = ref, amount
+	return consumePaymentIntent(dbTx, k.dialect(), claim)
+}
+
+// paymentGuardInvalid is the validation error of a payment guard at command index.
+func paymentGuardInvalid(index int, format string, args ...any) *contract.Error {
+	return contract.NewError(contract.CodeValidationFailed, fmt.Sprintf("require %d: "+format, append([]any{index}, args...)...))
+}
+
+// paymentLineReference reads the reference of one payment line. absent is true when the line names none,
+// or names an empty one; err is set only for a reference that cannot be resolved.
+func paymentLineReference(field string, env refEnv) (ref string, absent bool, err error) {
+	ref, err = resolveEnvStringRef(field, env)
+	if errors.Is(err, errRefAbsent) {
+		return "", true, nil
+	}
+	return ref, err == nil && ref == "", err
 }
 
 // consumePaymentIntent locks the intent row, checks it, and marks it consumed.
