@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/tenantruntime"
@@ -221,6 +222,9 @@ func (sr *SiteRouter) EnsureName(ctx context.Context, name string) (known bool, 
 	return true, sr.activateLazyDescriptor(ctx, descriptor, activate)
 }
 
+// lazyActivationTimeout bounds one lazy tenant activation independently of the request that started it.
+const lazyActivationTimeout = 5 * time.Minute
+
 func (sr *SiteRouter) activateLazyDescriptor(ctx context.Context, descriptor contract.SiteDescriptor, activate func(context.Context, string) error) error {
 	if !lazyDescriptorAcceptsTraffic(descriptor) {
 		return fmt.Errorf("tenant is not accepting traffic")
@@ -228,7 +232,11 @@ func (sr *SiteRouter) activateLazyDescriptor(ctx context.Context, descriptor con
 	if activate == nil {
 		return fmt.Errorf("tenant activation is unavailable")
 	}
-	if err := activate(ctx, descriptor.SiteID); err != nil {
+	// The first activation after an upgrade can run the system table bootstrap, which takes longer than a client
+	// waits. It must not stop halfway when the request that triggered it gives up, so it runs on its own deadline.
+	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lazyActivationTimeout)
+	defer cancel()
+	if err := activate(actx, descriptor.SiteID); err != nil {
 		slog.Error("tenant runtime activation failed", "site_id", descriptor.SiteID, "error", err)
 		return err
 	}

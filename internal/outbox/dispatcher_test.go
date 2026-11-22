@@ -414,3 +414,20 @@ func TestDispatcherFilteredTransactionalWorkerSkipsIrrelevantReceipt(t *testing.
 		t.Fatal(err)
 	}
 }
+
+func TestFilteredConsumerTakesSeveralHundredEventTypes(t *testing.T) {
+	types := func(n int) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = fmt.Sprintf("record.type%d.updated", i)
+		}
+		return out
+	}
+	worker := func(context.Context, *sql.Tx, contract.EventEnvelope) error { return nil }
+	if err := (&Dispatcher{}).RegisterTransactionalForTypes("facts", types(450), worker); err != nil {
+		t.Fatalf("450 event types: %v", err)
+	}
+	if err := (&Dispatcher{}).RegisterTransactionalForTypes("facts", types(maxFilteredEventTypes+1), worker); err == nil {
+		t.Fatal("an allowlist over the cap was accepted")
+	}
+}

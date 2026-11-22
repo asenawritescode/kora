@@ -1014,12 +1014,17 @@ func (d *Dispatcher) Register(name string, w Worker) {
 	d.Workers[name] = w
 }
 
+// maxFilteredEventTypes bounds a filtered consumer's event type allowlist. The list becomes one IN clause in the
+// claim query; a shop whose every record type keeps facts can need several hundred types (create, update and
+// delete per type), and both dialects take far more placeholders than this.
+const maxFilteredEventTypes = 1000
+
 // RegisterForTypes registers an at-least-once local consumer for an explicit
 // set of event types. It prevents unrelated command/system events from
 // accumulating receipts for consumers that cannot handle them.
 func (d *Dispatcher) RegisterForTypes(name string, eventTypes []string, worker Worker) error {
-	if len(eventTypes) == 0 || len(eventTypes) > 100 {
-		return fmt.Errorf("outbox: filtered consumer requires 1 to 100 event types")
+	if len(eventTypes) == 0 || len(eventTypes) > maxFilteredEventTypes {
+		return fmt.Errorf("outbox: filtered consumer requires 1 to %d event types", maxFilteredEventTypes)
 	}
 	allowed := make(map[string]struct{}, len(eventTypes))
 	for _, eventType := range eventTypes {
@@ -1094,8 +1099,8 @@ func (d *Dispatcher) RegisterTransactional(name string, w TransactionalWorker) e
 // type allowlist. Unmatched events receive no consumer receipt, so they do not
 // grow irrelevant receipt rows or block other outbox consumers.
 func (d *Dispatcher) RegisterTransactionalForTypes(name string, eventTypes []string, w TransactionalWorker) error {
-	if len(eventTypes) == 0 || len(eventTypes) > 100 {
-		return fmt.Errorf("outbox: filtered consumer requires 1 to 100 event types")
+	if len(eventTypes) == 0 || len(eventTypes) > maxFilteredEventTypes {
+		return fmt.Errorf("outbox: filtered consumer requires 1 to %d event types", maxFilteredEventTypes)
 	}
 	allowed := make(map[string]struct{}, len(eventTypes))
 	for _, eventType := range eventTypes {
