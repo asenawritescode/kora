@@ -67,7 +67,7 @@ func TestKoraMCPServesMetricsToAuthenticatedExtension(t *testing.T) {
 			query := callTool(t, session, "query_metrics", map[string]any{
 				"metrics": []string{"items_sold"}, "period": map[string]any{"preset": "today"}, "grain": "range",
 			})
-			if !strings.HasPrefix(query, "Error") || !strings.Contains(query, "items_sold") {
+			if !strings.Contains(query, `"error"`) || !strings.Contains(query, "items_sold") {
 				t.Fatalf("query_metrics for an unknown metric = %s, want the handler's refusal naming it", query)
 			}
 
