@@ -221,8 +221,8 @@ func (f *FactModel) checkDimensions(c *factChecks) {
 			c.bad("facts.dimensions", why)
 			continue
 		}
-		if fld == nil || !(fld.Fieldtype == "Link" || fld.Fieldtype == "Select" || fld.Fieldtype == "Data" || fld.Fieldtype == "Check") {
-			c.bad("facts.dimensions", fmt.Sprintf("facts dimension %q must be a Link, Select, Data or Check field", d.Field))
+		if fld == nil || !(fld.Fieldtype == "Link" || fld.Fieldtype == "User" || fld.Fieldtype == "Select" || fld.Fieldtype == "Data" || fld.Fieldtype == "Check") {
+			c.bad("facts.dimensions", fmt.Sprintf("facts dimension %q must be a Link, User, Select, Data or Check field", d.Field))
 		}
 		c.claim("facts.dimensions", d.ColumnName())
 	}

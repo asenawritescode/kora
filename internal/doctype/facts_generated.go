@@ -1,8 +1,8 @@
 package doctype
 
 // generatedFacts is the fact model a record type gets when its pack declares none: one row per record,
-// keyed by creation, with every header number as a measure and every header Link, Select and Check as a
-// dimension. A field whose column the fact table reserves is left out. A status Select is the status
+// keyed by creation, with every header number as a measure and every header Link, User, Select and Check as
+// a dimension. A field whose column the fact table reserves is left out. A status Select is the status
 // field. Child and single record types get no model, so it returns nil for them.
 func generatedFacts(dt *DocType) *FactModel {
 	if dt.IsChildTable || dt.IsSingle {
@@ -16,7 +16,7 @@ func generatedFacts(dt *DocType) *FactModel {
 		switch fld.Fieldtype {
 		case "Int", "Float", "Currency":
 			f.Measures = append(f.Measures, FactMeasure{Field: fld.Fieldname})
-		case "Link", "Select", "Check":
+		case "Link", "User", "Select", "Check":
 			f.Dimensions = append(f.Dimensions, FactDimension{Field: fld.Fieldname})
 		}
 	}

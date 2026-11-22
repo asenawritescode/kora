@@ -92,7 +92,7 @@ func TestFactModelValidate(t *testing.T) {
 		}, "must be an Int, Float, Currency or Percent field"},
 		{"dimension is a table", func(_ *DocType, _ map[string]*DocType, f *FactModel) {
 			f.Dimensions = []FactDimension{{Field: "items"}}
-		}, "must be a Link, Select, Data or Check field"},
+		}, "must be a Link, User, Select, Data or Check field"},
 		{"status field is not a select", func(_ *DocType, _ map[string]*DocType, f *FactModel) { f.StatusField = "register" }, "must be a Select field"},
 		{"duplicate column name", func(_ *DocType, _ map[string]*DocType, f *FactModel) {
 			f.Measures = append(f.Measures, FactMeasure{Field: "items.amount", Name: "total"})

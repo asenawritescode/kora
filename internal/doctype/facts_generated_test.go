@@ -16,6 +16,7 @@ func TestGeneratedFactsFollowHeaderFields(t *testing.T) {
 		{Fieldname: "supplier", Fieldtype: "Link"},
 		{Fieldname: "kind", Fieldtype: "Select"},
 		{Fieldname: "paid", Fieldtype: "Check"},
+		{Fieldname: "approver", Fieldtype: "User"},
 		{Fieldname: "status", Fieldtype: "Select"},
 		{Fieldname: "owner", Fieldtype: "Link"},
 		{Fieldname: "notes", Fieldtype: "Data"},
@@ -30,7 +31,7 @@ func TestGeneratedFactsFollowHeaderFields(t *testing.T) {
 		status     string
 	}{
 		{name: "header fields become measures and dimensions", dt: expense,
-			measures: []string{"amount", "qty", "rate"}, dimensions: []string{"supplier", "kind", "paid"}, status: "status"},
+			measures: []string{"amount", "qty", "rate"}, dimensions: []string{"supplier", "kind", "paid", "approver"}, status: "status"},
 		{name: "child table gets no model", dt: &DocType{Name: "Line", IsChildTable: true, Fields: expense.Fields}, wantNil: true},
 		{name: "single type gets no model", dt: &DocType{Name: "Settings", IsSingle: true, Fields: expense.Fields}, wantNil: true},
 		{name: "no numeric field is a model with no measures", dt: &DocType{Name: "Customer", Fields: []Field{{Fieldname: "town", Fieldtype: "Link"}}},
