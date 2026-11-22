@@ -60,45 +60,7 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 	if len(files) == 0 {
 		add("files_required", "", "pack has no files")
 	}
-	if err := contract.ValidateScheduledJobDefinitions(manifest.ScheduledJobs); err != nil {
-		add("scheduled_jobs_invalid", "", err.Error())
-	}
-	if err := contract.ValidateScheduledJobModuleOwners(manifest.ScheduledJobs, manifest.Modules); err != nil {
-		add("scheduled_job_owner_invalid", "", err.Error())
-	}
-	if len(manifest.ScheduledJobs) > 64 {
-		add("scheduled_jobs_limit", "", "pack contains more than 64 scheduled jobs")
-	}
-	jobNames := map[string]bool{}
-	jobConfigBytes := 0
-	for _, job := range manifest.ScheduledJobs {
-		name := strings.TrimSpace(job.Name)
-		if name == "" || strings.TrimSpace(job.Type) == "" || strings.TrimSpace(job.Schedule) == "" {
-			add("scheduled_job_required", "", "scheduled jobs require name, type, and schedule")
-			continue
-		}
-		if jobNames[name] {
-			add("scheduled_job_duplicate", "", "scheduled job names must be unique")
-		}
-		jobNames[name] = true
-		if err := contract.ValidateCronSchedule(job.Schedule); err != nil {
-			add("scheduled_job_schedule", "", "scheduled job has an unsupported schedule: "+err.Error())
-		}
-		encoded, err := json.Marshal(job.Config)
-		if err != nil {
-			add("scheduled_job_config", "", "scheduled job config must contain JSON values only")
-			continue
-		}
-		trimmedConfig := strings.TrimSpace(string(job.Config))
-		if len(job.Config) > 0 && (trimmedConfig == "" || trimmedConfig[0] != '{') {
-			add("scheduled_job_config", "", "scheduled job config must be a JSON object")
-			continue
-		}
-		jobConfigBytes += len(encoded)
-	}
-	if jobConfigBytes > 64<<10 {
-		add("scheduled_job_config_limit", "", "scheduled job configuration exceeds 64 KiB")
-	}
+	checkScheduledJobs(manifest, add)
 	seen := map[string]bool{}
 	resources := newPackResourceNames()
 	userFields := map[string]map[string]bool{}
@@ -201,6 +163,54 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 		add("pack_too_large", "", "pack exceeds 2 MB")
 	}
 	return result, nil
+}
+
+// checkScheduledJobs reports the scheduled job definitions of a pack manifest.
+func checkScheduledJobs(manifest PackManifest, add func(code, file, message string)) {
+	if err := contract.ValidateScheduledJobDefinitions(manifest.ScheduledJobs); err != nil {
+		add("scheduled_jobs_invalid", "", err.Error())
+	}
+	if err := contract.ValidateScheduledJobModuleOwners(manifest.ScheduledJobs, manifest.Modules); err != nil {
+		add("scheduled_job_owner_invalid", "", err.Error())
+	}
+	if len(manifest.ScheduledJobs) > 64 {
+		add("scheduled_jobs_limit", "", "pack contains more than 64 scheduled jobs")
+	}
+	jobNames := map[string]bool{}
+	jobConfigBytes := 0
+	for _, job := range manifest.ScheduledJobs {
+		jobConfigBytes += checkScheduledJob(job, jobNames, add)
+	}
+	if jobConfigBytes > 64<<10 {
+		add("scheduled_job_config_limit", "", "scheduled job configuration exceeds 64 KiB")
+	}
+}
+
+// checkScheduledJob reports one scheduled job, records its name, and returns the size of its encoded config.
+func checkScheduledJob(job contract.ScheduledJobDefinition, names map[string]bool, add func(code, file, message string)) int {
+	name := strings.TrimSpace(job.Name)
+	if name == "" || strings.TrimSpace(job.Type) == "" || strings.TrimSpace(job.Schedule) == "" {
+		add("scheduled_job_required", "", "scheduled jobs require name, type, and schedule")
+		return 0
+	}
+	if names[name] {
+		add("scheduled_job_duplicate", "", "scheduled job names must be unique")
+	}
+	names[name] = true
+	if err := contract.ValidateCronSchedule(job.Schedule); err != nil {
+		add("scheduled_job_schedule", "", "scheduled job has an unsupported schedule: "+err.Error())
+	}
+	encoded, err := json.Marshal(job.Config)
+	if err != nil {
+		add("scheduled_job_config", "", "scheduled job config must contain JSON values only")
+		return 0
+	}
+	trimmedConfig := strings.TrimSpace(string(job.Config))
+	if len(job.Config) > 0 && (trimmedConfig == "" || trimmedConfig[0] != '{') {
+		add("scheduled_job_config", "", "scheduled job config must be a JSON object")
+		return 0
+	}
+	return len(encoded)
 }
 
 func isLinkTitleSearchableType(fieldType string) bool {

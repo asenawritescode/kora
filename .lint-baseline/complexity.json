@@ -2178,7 +2178,7 @@
   "internal/schema::AnalyzeImpact": {
    "cognitive": 27,
    "cyclomatic": 18,
-   "statements": 50
+   "statements": 49
   },
   "internal/schema::ComputeDiff": {
    "cognitive": 138,
@@ -2345,9 +2345,9 @@
    "statements": 52
   },
   "internal/site::ValidatePack": {
-   "cognitive": 96,
-   "cyclomatic": 53,
-   "statements": 105
+   "cognitive": 83,
+   "cyclomatic": 41,
+   "statements": 82
   },
   "internal/site::acquirePlatformRegistryBootstrapLock": {
    "cognitive": 27,
