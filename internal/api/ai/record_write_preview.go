@@ -43,6 +43,9 @@ func previewRecordWrite(tx *orm.TxManager, reg *doctype.Registry, inv toolInvoca
 	if aerr != nil {
 		return aerr.text()
 	}
+	if inv.Turn != nil {
+		markSuggested(preview, inv.Turn.words)
+	}
 	return storePreview(tx, inv, w, preview)
 }
 

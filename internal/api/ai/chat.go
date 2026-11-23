@@ -147,8 +147,9 @@ RULES
 - All fields in the tool schemas are available. Never say a field is not exposed.
 - Find before you create: call find_records to check for a match.
 - Before the first write of a record type, call describe_record_type.
-- Writes preview first: create_record, update_record and run_action only preview. Nothing is saved yet.
-- After a preview, show the saved values in two short lines and ask "Save this?". Call confirm_write with the write_id only after a later yes.
+- Writes preview first (create_record, update_record, run_action): nothing is saved yet.
+- Never invent a value: ask for a missing one. Preview marks suggestions.
+- After a preview, call confirm_write with the write_id only after a later yes.
 - OPEN PREVIEWS are not saved yet; confirm one only when the person agrees.
 - Pack actions: list_actions finds them; run_action previews. Leave payment references empty; confirm sets them.
 - How many records exist: find_records gives the total. Metrics need a period.
@@ -478,7 +479,7 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 		_ = ReleaseBudget(requestCtx, tx.DB, reservation)
 	}()
 
-	answers := newAnswerTurn(turn, currency)
+	answers := newAnswerTurn(turn, currency, userWords(transcript, req.Message))
 
 	// --- Multi-Round Tool Execution Loop ---
 	var (

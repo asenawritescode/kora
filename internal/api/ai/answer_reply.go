@@ -13,10 +13,11 @@ import (
 
 // newAnswerTurn starts the answer state of one chat turn: what the person may see on a card, and the metrics
 // runner. Only the administrator may pin a question or share it with the shop.
-func newAnswerTurn(turn ChatTurn, currency string) *answerTurn {
+func newAnswerTurn(turn ChatTurn, currency, words string) *answerTurn {
 	return &answerTurn{
-		run:  turn.Metrics,
-		page: cardPage{Currency: currency, CanShare: executionHasRole(turn.Execution, doctype.AdminRole)},
+		run:   turn.Metrics,
+		page:  cardPage{Currency: currency, CanShare: executionHasRole(turn.Execution, doctype.AdminRole)},
+		words: words,
 	}
 }
 
