@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -216,14 +217,34 @@ var directProviders = []struct{ key, base, defaultModel string }{
 	{"anthropic_api_key", "https://api.anthropic.com/v1", "claude-sonnet-4-6"},
 }
 
+// cloudGatewayPath is the Cloud route that relays AI completions, relative to the Cloud origin.
+const cloudGatewayPath = "/internal/engine/ai"
+
+// cloudGatewayURL reports whether the Engine is connected to Cloud and the gateway base URL. An explicit
+// KORA_CLOUD_AI_GATEWAY_URL wins. Otherwise the gateway is the origin of KORA_ENGINE_CLOUD_IDENTITY_URL. A connected
+// Engine whose identity URL is unusable has no gateway, and it still counts as connected.
+func cloudGatewayURL() (gateway string, connected bool) {
+	if explicit := strings.TrimRight(strings.TrimSpace(os.Getenv("KORA_CLOUD_AI_GATEWAY_URL")), "/"); explicit != "" {
+		return explicit, true
+	}
+	identity := strings.TrimSpace(os.Getenv("KORA_ENGINE_CLOUD_IDENTITY_URL"))
+	if identity == "" {
+		return "", false
+	}
+	u, err := url.Parse(identity)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return "", true
+	}
+	return u.Scheme + "://" + u.Host + cloudGatewayPath, true
+}
+
 func resolveProvider(db *sql.DB, siteName, modelOverride string, dialect ...kdb.Dialect) (providerKey, apiKey, baseURL, model string) {
-	// When Cloud is configured as the shared provider, keep the external
-	// credential there. The Engine sends its completion request to Cloud using
-	// a private service token. If no Cloud gateway is configured, self-hosted
-	// sites may still use a provider key stored in their own Secrets page.
-	if gatewayURL := strings.TrimRight(strings.TrimSpace(os.Getenv("KORA_CLOUD_AI_GATEWAY_URL")), "/"); gatewayURL != "" {
+	// When the Engine is connected to Cloud, the external credential stays there. The Engine sends its completion
+	// request to Cloud using a private service token. A site's own Secrets key is used only when Cloud is not
+	// connected.
+	if gatewayURL, connected := cloudGatewayURL(); connected {
 		gatewayToken := envcompat.IntegrationToken()
-		if gatewayToken == "" {
+		if gatewayURL == "" || gatewayToken == "" {
 			return "", "", "", ""
 		}
 		gatewayModel := strings.TrimSpace(os.Getenv("KORA_CLOUD_AI_GATEWAY_MODEL"))
@@ -305,6 +326,43 @@ func requestBody(body map[string]any, baseURL string) map[string]any {
 	return out
 }
 
+// gatewayRefusal is a Cloud gateway refusal of the request itself: the workspace is off, unknown or out of its token
+// budget. The gateway answers 403 or 429 with {"error":{"code","message"}}. A refusal is never retried.
+type gatewayRefusal struct {
+	Status  int
+	Code    string
+	Message string
+}
+
+func (e *gatewayRefusal) Error() string {
+	return fmt.Sprintf("AI gateway refused the request (%s): %s", e.Code, e.Message)
+}
+
+// gatewayRefusalCodes are the refusal codes the gateway sends on 403 or 429.
+var gatewayRefusalCodes = map[string]bool{
+	"ai.workspace_disabled": true,
+	"ai.budget_exhausted":   true,
+	"ai.unknown_workspace":  true,
+}
+
+// parseGatewayRefusal returns the refusal a gateway answer carries, or nil for any other answer. A plain 429 rate
+// limit has no refusal code and stays retryable.
+func parseGatewayRefusal(status int, body []byte) *gatewayRefusal {
+	if status != http.StatusForbidden && status != http.StatusTooManyRequests {
+		return nil
+	}
+	var envelope struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &envelope) == nil && gatewayRefusalCodes[envelope.Error.Code] {
+		return &gatewayRefusal{Status: status, Code: envelope.Error.Code, Message: envelope.Error.Message}
+	}
+	return nil
+}
+
 func callAI(client *http.Client, baseURL, apiKey string, body map[string]any, headers map[string]string) (map[string]any, error) {
 	jsonBody, _ := json.Marshal(requestBody(body, baseURL))
 	req, _ := http.NewRequest("POST", baseURL+"/chat/completions", bytes.NewReader(jsonBody))
@@ -322,6 +380,9 @@ func callAI(client *http.Client, baseURL, apiKey string, body map[string]any, he
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
+		if refusal := parseGatewayRefusal(resp.StatusCode, respBody); refusal != nil {
+			return nil, refusal
+		}
 		return nil, fmt.Errorf("AI provider returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -395,6 +456,10 @@ func callAIWithRetry(call providerCall) (map[string]any, error) {
 
 func isTransientError(err error) bool {
 	if err == nil {
+		return false
+	}
+	var refusal *gatewayRefusal
+	if errors.As(err, &refusal) {
 		return false
 	}
 	msg := err.Error()
