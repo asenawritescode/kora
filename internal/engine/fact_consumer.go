@@ -95,7 +95,7 @@ func registerFactConsumer(config TenantServiceConfig, loaded *knet.LoadedSite, s
 			dispatched := make(chan struct{})
 			go func() {
 				defer close(dispatched)
-				RunWorkflowTriggerDispatcher(ctx, dispatcher)
+				RunWorkflowTriggerDispatcher(ctx, dispatcher, nil)
 			}()
 			runner.Run(ctx)
 			<-dispatched

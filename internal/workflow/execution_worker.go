@@ -9,6 +9,7 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/dbaccess"
+	"github.com/asenawritescode/kora/internal/sweep"
 )
 
 const (
@@ -76,29 +77,22 @@ func NewExecutionWorker(store ExecutionStore, handler ClaimHandler, config Execu
 	return &ExecutionWorker{store: store, handler: handler, config: config, onError: onError}, nil
 }
 
-// Run polls immediately and then at a fixed bounded interval. Cancellation
-// waits for the active batch and each claim's lease-renewal loop to exit.
+// Run sweeps the claim loop on a jittered PollInterval, starting at a random
+// offset. Cancellation waits for the active batch and each claim's
+// lease-renewal loop to exit.
 func (w *ExecutionWorker) Run(ctx context.Context) error {
 	if w == nil || ctx == nil {
 		return fmt.Errorf("workflow execution worker requires a context")
 	}
-	ticker := time.NewTicker(w.config.PollInterval)
-	defer ticker.Stop()
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil
-		}
+	timer := sweep.New(w.config.PollInterval, nil)
+	for timer.Wait(ctx) {
 		if err := w.RunOnce(ctx); err != nil && ctx.Err() == nil {
 			if w.onError != nil {
 				w.onError(err)
 			}
 		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-		}
 	}
+	return nil
 }
 
 // RunOnce claims no more work than the worker can execute concurrently. It

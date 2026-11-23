@@ -213,6 +213,9 @@ func newWorker(tenant contract.TenantID, store Store, sender Sender, clock Clock
 	return worker, nil
 }
 
+// Batch returns the number of deliveries one RunOnce claims at most.
+func (w *Worker) Batch() int { return w.batch }
+
 // Configure bounds worker retention and delivery attempts. It rejects unsafe
 // values rather than silently creating unbounded batches or leases.
 func (w *Worker) Configure(lease time.Duration, batch int, maxAttempt uint16, idle time.Duration) error {

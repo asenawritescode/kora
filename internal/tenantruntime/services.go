@@ -25,6 +25,7 @@ import (
 	"github.com/asenawritescode/kora/internal/script"
 	"github.com/asenawritescode/kora/internal/secret"
 	"github.com/asenawritescode/kora/internal/storage"
+	"github.com/asenawritescode/kora/internal/sweep"
 	"github.com/asenawritescode/kora/internal/webhook"
 	"github.com/asenawritescode/kora/internal/workflow"
 )
@@ -81,6 +82,9 @@ type Services struct {
 	ModuleOpenWorkInspectors        []ModuleOpenWorkInspector
 	WorkflowApprovalPoliciesByTable map[string][]string
 	Scheduler                       *scheduler.Scheduler
+
+	// OutboxWake wakes the tenant outbox workers after a record write commits.
+	OutboxWake *sweep.Wake
 }
 
 // ModuleOpenWorkInspector binds a module owner to its lifecycle inspection
