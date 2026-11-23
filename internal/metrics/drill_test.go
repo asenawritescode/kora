@@ -224,7 +224,8 @@ func TestDerivedDrillRefusalNamesItsParts(t *testing.T) {
 		want   string
 	}{
 		{metric: "net_sales", want: "Net sales is Sales minus Refunds; open one of them to see records."},
-		{metric: "average_plus_one", want: "Plus is a derived metric: only simple metrics drill to records."},
+		{metric: "average_sale", want: "Average sale is Sales divided by Receipts; open one of them to see records."},
+		{metric: "average_plus_one", want: "Plus is calculated, so it has no records of its own."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.metric, func(t *testing.T) {

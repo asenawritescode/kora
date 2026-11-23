@@ -28,24 +28,25 @@ type Drill struct {
 	ListOpenable bool
 }
 
-// DerivedDrillRefusal is a drill on a derived metric. Its message names the parts to open instead.
+// DerivedDrillRefusal is a drill on a ratio or derived metric. Its message names the parts to open instead.
 type DerivedDrillRefusal struct{ Message string }
 
 func (r DerivedDrillRefusal) Error() string { return r.Message }
 
-// notDrillable is the refusal for a metric that is not simple: a derived metric names its parts instead.
+// notDrillable is the refusal for a metric that is not simple: a ratio or derived metric names its parts instead.
 func (c Catalog) notDrillable(m Metric) error {
-	if m.Type == KindDerived {
+	if m.Type == KindRatio || m.Type == KindDerived {
 		return c.derivedRefusal(m)
 	}
 	return fmt.Errorf("metric %q is %s: only simple metrics drill to records", m.Name, m.Type)
 }
 
-// derivedRefusal says what a derived metric is made of, so the caller opens one of its parts instead.
+// derivedRefusal says what a ratio or derived metric is made of, so the caller opens one of its parts instead.
+// A metric with no parts is calculated and has no records of its own.
 func (c Catalog) derivedRefusal(m Metric) DerivedDrillRefusal {
 	parts := m.Parts()
 	if len(parts) == 0 {
-		return DerivedDrillRefusal{Message: fmt.Sprintf("%s is a derived metric: only simple metrics drill to records.", m.Label)}
+		return DerivedDrillRefusal{Message: fmt.Sprintf("%s is calculated, so it has no records of its own.", m.Label)}
 	}
 	return DerivedDrillRefusal{Message: fmt.Sprintf("%s is %s; open one of them to see records.", m.Label, c.partsInWords(parts))}
 }

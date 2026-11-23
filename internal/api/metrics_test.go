@@ -352,23 +352,34 @@ func TestMetricSummariesNameTheirParts(t *testing.T) {
 
 func TestDerivedDrillRefusalIsStableCodeWithPartsMessage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	refusal := metrics.DerivedDrillRefusal{Message: "Net sales is Sales minus Refunds; open one of them to see records."}
-	drillError(c, refusal)
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status=%d, want 422", rec.Code)
+	tests := []struct {
+		name    string
+		message string
+	}{
+		{name: "derived with parts", message: "Net sales is Sales minus Refunds; open one of them to see records."},
+		{name: "ratio", message: "Average sale is Sales divided by Receipts; open one of them to see records."},
+		{name: "calculated without parts", message: "Plus is calculated, so it has no records of its own."},
 	}
-	var body struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal("decode error:", err)
-	}
-	if body.Error.Code != "metric.derived_not_drillable" || body.Error.Message != refusal.Message {
-		t.Fatalf("error = %+v, want code metric.derived_not_drillable and the parts message", body.Error)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			drillError(c, metrics.DerivedDrillRefusal{Message: tt.message})
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status=%d, want 422", rec.Code)
+			}
+			var body struct {
+				Error struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatal("decode error:", err)
+			}
+			if body.Error.Code != "metric.derived_not_drillable" || body.Error.Message != tt.message {
+				t.Fatalf("error = %+v, want code metric.derived_not_drillable and message %q", body.Error, tt.message)
+			}
+		})
 	}
 }
