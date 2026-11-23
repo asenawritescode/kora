@@ -19,7 +19,7 @@ func TestExecuteToolCallsForAIRejectsMalformedCalls(t *testing.T) {
 	}{
 		{"not an object", "junk", "invalid tool call format"},
 		{"missing function", map[string]any{"id": "c1"}, "missing function in tool call"},
-		{"bad arguments", map[string]any{"id": "c1", "function": map[string]any{"name": "list_doctypes", "arguments": "{"}}, "invalid arguments JSON"},
+		{"bad arguments", map[string]any{"id": "c1", "function": map[string]any{"name": "list_doctypes", "arguments": "{"}}, "invalid_arguments"},
 		{"known tool runs", map[string]any{"id": "c1", "function": map[string]any{"name": "list_doctypes", "arguments": "{}"}}, "No doctypes"},
 	}
 	for _, tt := range tests {

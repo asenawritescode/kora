@@ -160,7 +160,7 @@ func TestRequestPrefixIsStableAcrossPages(t *testing.T) {
 	}
 }
 
-func TestMaxRoundsReplySaysWhatIsLeft(t *testing.T) {
+func TestStopReplySaysWhatIsLeft(t *testing.T) {
 	tests := []struct {
 		name      string
 		steps     int
@@ -172,14 +172,14 @@ func TestMaxRoundsReplySaysWhatIsLeft(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := maxRoundsReply(tc.steps, tc.request)
+			got := stopReply(stopMaxRounds, tc.steps, tc.request)
 			for _, part := range tc.wantParts {
 				if !strings.Contains(got, part) {
-					t.Errorf("maxRoundsReply() = %q, missing %q", got, part)
+					t.Errorf("stopReply() = %q, missing %q", got, part)
 				}
 			}
 			if strings.Count(got, "\n") != 0 || strings.Count(got, ".") < 1 {
-				t.Errorf("maxRoundsReply() = %q, want one plain sentence", got)
+				t.Errorf("stopReply() = %q, want one plain sentence", got)
 			}
 		})
 	}

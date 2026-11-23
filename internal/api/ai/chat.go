@@ -482,11 +482,11 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 
 	// --- Multi-Round Tool Execution Loop ---
 	var (
-		runUsage   Usage    // the provider usage of this run so far, summed over its rounds
-		stepsDone  int      // tool calls in this run that succeeded
-		stallCount int      // consecutive identical tool calls
-		toolErrors int      // cumulative tool errors for circuit breaker
-		lastSigs   []string // tool call signatures from previous round
+		runUsage   Usage // the provider usage of this run so far, summed over its rounds
+		stepsDone  int   // tool calls in this run that succeeded
+		toolErrors int   // cumulative tool errors for circuit breaker
+		stops      = newTurnStops(time.Now())
+		stop       = stopMaxRounds // why the turn ends when no round answers; the loop sets it on every other stop
 	)
 
 	defer func() {
@@ -494,7 +494,12 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 		out.ConversationID = conversationID
 	}()
 
+loop:
 	for round := 0; round < cfg.MaxRounds; round++ {
+		if reason, ok := stops.beforeRound(time.Now()); ok {
+			stop = reason
+			break loop
+		}
 		stepID := ulid.Make().String()
 		_ = UpsertStep(requestCtx, tx.DB, StepRecord{ID: stepID, Site: siteName, RunID: runID, ConversationID: conversationID, StepKey: fmt.Sprintf("round-%d", round+1), Status: "planning"})
 		_ = UpsertTask(requestCtx, tx.DB, TaskRecord{
@@ -714,52 +719,21 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 			}
 
 			// --- Stall detection ---
-			sigs := toolCallSignatures(toolCalls)
-			if stringSlicesEqual(sigs, lastSigs) {
-				stallCount++
-				if stallCount >= cfg.StallThreshold {
-					// Build a specific nudge telling the model what happened.
-					lastToolName := ""
-					if len(toolCalls) > 0 {
-						lastToolName = safeGetToolName(toolCalls[0])
-					}
-					nudge := fmt.Sprintf(
-						"You've called %s with the same arguments %d times without making progress. If the record doesn't exist, use the create_record tool. If you have enough information to answer the user, please do so now without calling more tools.",
-						lastToolName, stallCount,
-					)
-					messages = append(messages, map[string]any{
-						"role":    "user",
-						"content": nudge,
-					})
-					stallCount = 0
-					aiBody["messages"] = messages
-					continue
-				}
-			} else {
-				stallCount = 0
-				lastSigs = sigs
+			if stops.stallOn(toolCallSignatures(toolCalls)) {
+				stop = stopStall
+				break loop
+			}
+			if totalTokens > cfg.TokenBudget {
+				stop = stopTokenBudget
+				break loop
 			}
 
 			// --- Execute tools ---
-			for _, tc := range toolCalls {
-				if call, ok := tc.(map[string]any); ok {
-					fn := safeGetMap(call, "function")
-					slog.Info("AI tool call", "name", safeGetString(fn, "name"), "args", safeGetString(fn, "arguments"))
-				}
-			}
+			logToolCalls(toolCalls)
 			toolResults := RunToolTurn(auditCtx, tx, reg, toolCallBatch{Calls: toolCalls, Owner: currentUser, Site: siteName, RunID: runID, StepID: stepID, ConversationID: conversationID, Execution: turn.Execution, Turn: answers, Commands: turn.Commands, Operations: turn.Operations})
-			for i, tr := range toolResults {
-				raw := tr["content"].(string)
-				slog.Info("Tool result", "content", raw[:min(len(raw), 200)])
-				if isToolError(raw) {
-					toolErrors++
-					tr["is_error"] = true
-				} else {
-					stepsDone++
-				}
-				// Cap result size.
-				toolResults[i]["content"] = capResultSize(raw, cfg.MaxToolResultChars)
-			}
+			newErrors, newSteps := tallyToolResults(toolResults, cfg.MaxToolResultChars)
+			toolErrors += newErrors
+			stepsDone += newSteps
 
 			// --- Clarifying question: the turn ends here, with the choices shown to the person. The question is
 			// only known once its tool has run, so the check follows the execution, before the model is asked again. ---
@@ -772,6 +746,11 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 			if len(answers.previews) > 0 {
 				out = replyOutcome(endWithPreviews(requestCtx, tx, answers.previews, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, SubjectKey: subjectKey, Model: model, Provider: providerKey}))
 				return
+			}
+
+			if reason, ok := stops.resultStop(toolResults); ok {
+				stop = reason
+				break loop
 			}
 
 			// --- Error circuit breaker ---
@@ -890,11 +869,13 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 		}
 	}
 
-	// --- SAFETY NET: Max rounds exhausted ---
-	slog.Warn("Max rounds exhausted in chat loop", "max_rounds", cfg.MaxRounds)
+	// --- Stop: the turn ends with the reply its trace supports ---
+	slog.Warn("Chat turn stopped", "reason", stop, "max_rounds", cfg.MaxRounds)
+	stopText := stopReply(stop, stepsDone, req.Message)
+	_ = AppendConversationMessage(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID, Role: "assistant", Content: stopText, Kind: "summary"})
 	out = replyOutcome(ChatResponse{
-		Reply:  storedMaxRoundsReply(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID}, stepsDone, req.Message),
-		Action: "max_rounds_reached",
+		Reply:  stopText,
+		Action: stopAction(stop),
 		RunID:  runID,
 	})
 	_ = UpsertRun(requestCtx, tx.DB, RunRecord{
@@ -904,7 +885,7 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 		Channel:        "chat",
 		Status:         "failed",
 		InputMessage:   req.Message,
-		ErrorMessage:   "max_rounds_reached",
+		ErrorMessage:   string(stop),
 		Model:          model,
 		Provider:       providerKey,
 	})
@@ -912,19 +893,18 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 	return
 }
 
-// storedMaxRoundsReply builds the round-cap reply and saves it to the conversation like any other reply, so the next
-// turn's history shows what was said. base carries the site, conversation and run.
-func storedMaxRoundsReply(ctx context.Context, database *sql.DB, base MessageRecord, stepsDone int, request string) string {
-	reply := maxRoundsReply(stepsDone, request)
-	base.Role, base.Content, base.Kind = "assistant", reply, "summary"
-	_ = AppendConversationMessage(ctx, database, base)
-	return reply
+// stopAction is the chat response action of a stopped turn. The round cap keeps its own action name.
+func stopAction(stop stopReason) string {
+	if stop == stopMaxRounds {
+		return "max_rounds_reached"
+	}
+	return "turn_stopped"
 }
 
-// maxRoundsReply is the reply when the round cap ends a run: one sentence on what got done and what is left.
-func maxRoundsReply(stepsDone int, request string) string {
-	return fmt.Sprintf("I finished %d step(s) for %q and ran out of rounds. Reply continue to pick up the rest.",
-		stepsDone, truncateScript(request, 120))
+// stopReply is the reply of a stopped turn. Its wording is replaced by the trace-based ending of H9e.
+func stopReply(stop stopReason, stepsDone int, request string) string {
+	return fmt.Sprintf("I finished %d step(s) for %q and stopped (%s). Reply continue to pick up the rest.",
+		stepsDone, truncateScript(request, 120), stop)
 }
 
 func estimatePromptTokens(messages []map[string]any, functions []map[string]any) int {
@@ -1037,18 +1017,6 @@ func safeGetSlice(m map[string]any, key string) []any {
 		return nil
 	}
 	return s
-}
-
-func safeGetToolName(tc any) string {
-	call, ok := tc.(map[string]any)
-	if !ok {
-		return "unknown"
-	}
-	fn, ok := call["function"].(map[string]any)
-	if !ok {
-		return "unknown"
-	}
-	return safeGetString(fn, "name")
 }
 
 // ---------------------------------------------------------------------------
