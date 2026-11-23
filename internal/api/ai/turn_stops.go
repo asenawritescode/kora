@@ -3,6 +3,8 @@ package ai
 import (
 	"encoding/json"
 	"log/slog"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -26,6 +28,10 @@ type turnStops struct {
 	deadline    time.Time
 	lastSigs    []string
 	lastErrCode string
+	// done is what the turn saved, in order: the outcome line of each confirmed write.
+	done []string
+	// lastErr is the message of the last structured tool error, the blocker in the ending.
+	lastErr string
 }
 
 func newTurnStops(start time.Time) *turnStops {
@@ -49,15 +55,20 @@ func (s *turnStops) stallOn(sigs []string) bool {
 	return false
 }
 
-// resultStop reports the stop that the executed tool results call for: the same error code twice in a row.
-func (s *turnStops) resultStop(results []map[string]any) (stopReason, bool) {
+// afterResults records what the executed tool results did and reports the stop they call for: the same error code
+// twice in a row. A saved write is recorded as done; a structured error is recorded as the blocker.
+func (s *turnStops) afterResults(results []map[string]any) (stopReason, bool) {
 	for _, tr := range results {
 		content, _ := tr["content"].(string)
-		code := toolErrorCode(content)
+		code, message := toolErrorOf(content)
 		if code == "" {
 			s.lastErrCode = ""
+			if isSavedOutcome(content) {
+				s.done = append(s.done, content)
+			}
 			continue
 		}
+		s.lastErr = message
 		if code == s.lastErrCode {
 			return stopRepeatError, true
 		}
@@ -66,18 +77,24 @@ func (s *turnStops) resultStop(results []map[string]any) (stopReason, bool) {
 	return "", false
 }
 
-// toolErrorCode is the structured error code of a tool result, or "" for a result that is not a structured error.
-// Malformed tool-call JSON is a structured error too, so a second malformed call in a row ends the turn: one repair.
-func toolErrorCode(content string) string {
+// isSavedOutcome reports whether a successful tool result is the outcome line of a confirmed write.
+func isSavedOutcome(content string) bool {
+	return strings.HasPrefix(content, "Created ") || strings.HasPrefix(content, "Updated ")
+}
+
+// toolErrorOf is the structured error code and message of a tool result, or "" for a result that is not a structured
+// error. Malformed tool-call JSON is a structured error too, so a second malformed call in a row ends the turn: one repair.
+func toolErrorOf(content string) (code, message string) {
 	var env struct {
 		Error struct {
-			Code string `json:"code"`
+			Code    string `json:"code"`
+			Message string `json:"message"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal([]byte(content), &env); err != nil {
-		return ""
+		return "", ""
 	}
-	return env.Error.Code
+	return env.Error.Code, env.Error.Message
 }
 
 // logToolCalls writes each tool call of a round to the log, by name and arguments.
@@ -90,19 +107,58 @@ func logToolCalls(toolCalls []any) {
 	}
 }
 
-// tallyToolResults counts the successful and failed tool results of a round, marks the failed ones, and caps each
-// result to maxChars so the next model call stays small.
-func tallyToolResults(results []map[string]any, maxChars int) (errs, steps int) {
+// tallyToolResults marks the failed tool results of a round and caps each result to maxChars so the next model call
+// stays small. It returns how many results failed.
+func tallyToolResults(results []map[string]any, maxChars int) (errs int) {
 	for i, tr := range results {
 		raw, _ := tr["content"].(string)
 		slog.Info("Tool result", "content", raw[:min(len(raw), 200)])
 		if isToolError(raw) {
 			errs++
 			tr["is_error"] = true
-		} else {
-			steps++
 		}
 		results[i]["content"] = capResultSize(raw, maxChars)
 	}
-	return errs, steps
+	return errs
+}
+
+// stopReply is the ending of a stopped turn, built from its trace: what was saved, what blocked it, and one next
+// step. It never says the turn ran out of rounds.
+func stopReply(stop stopReason, trace *turnStops) string {
+	done := "Nothing is saved yet."
+	if len(trace.done) > 0 {
+		done = "Done: " + strings.Join(trace.done, " ")
+	}
+	return done + " Blocked: " + stopBlocker(stop, trace) + " Next: " + stopNextStep(stop)
+}
+
+// stopBlocker says in plain words why the turn stopped.
+func stopBlocker(stop stopReason, trace *turnStops) string {
+	switch stop {
+	case stopStall:
+		return "the same lookup repeated without a new result."
+	case stopRepeatError:
+		if trace.lastErr != "" {
+			return trace.lastErr
+		}
+		return "the same error came back twice."
+	case stopTimeBudget:
+		return "the request took longer than " + strconv.Itoa(int(turnTimeBudget.Seconds())) + " seconds."
+	case stopTokenBudget:
+		return "the request used more of its token budget than it allows."
+	default:
+		return "the request needed more steps than it allows."
+	}
+}
+
+// stopNextStep is the one thing the person does next.
+func stopNextStep(stop stopReason) string {
+	switch stop {
+	case stopStall:
+		return "name the record exactly, or give more detail."
+	case stopRepeatError:
+		return "check the value named above and ask again."
+	default:
+		return "reply continue to pick up the rest."
+	}
 }

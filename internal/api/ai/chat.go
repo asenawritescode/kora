@@ -483,7 +483,6 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 	// --- Multi-Round Tool Execution Loop ---
 	var (
 		runUsage   Usage // the provider usage of this run so far, summed over its rounds
-		stepsDone  int   // tool calls in this run that succeeded
 		toolErrors int   // cumulative tool errors for circuit breaker
 		stops      = newTurnStops(time.Now())
 		stop       = stopMaxRounds // why the turn ends when no round answers; the loop sets it on every other stop
@@ -731,9 +730,7 @@ loop:
 			// --- Execute tools ---
 			logToolCalls(toolCalls)
 			toolResults := RunToolTurn(auditCtx, tx, reg, toolCallBatch{Calls: toolCalls, Owner: currentUser, Site: siteName, RunID: runID, StepID: stepID, ConversationID: conversationID, Execution: turn.Execution, Turn: answers, Commands: turn.Commands, Operations: turn.Operations})
-			newErrors, newSteps := tallyToolResults(toolResults, cfg.MaxToolResultChars)
-			toolErrors += newErrors
-			stepsDone += newSteps
+			toolErrors += tallyToolResults(toolResults, cfg.MaxToolResultChars)
 
 			// --- Clarifying question: the turn ends here, with the choices shown to the person. The question is
 			// only known once its tool has run, so the check follows the execution, before the model is asked again. ---
@@ -748,7 +745,7 @@ loop:
 				return
 			}
 
-			if reason, ok := stops.resultStop(toolResults); ok {
+			if reason, ok := stops.afterResults(toolResults); ok {
 				stop = reason
 				break loop
 			}
@@ -871,7 +868,7 @@ loop:
 
 	// --- Stop: the turn ends with the reply its trace supports ---
 	slog.Warn("Chat turn stopped", "reason", stop, "max_rounds", cfg.MaxRounds)
-	stopText := stopReply(stop, stepsDone, req.Message)
+	stopText := stopReply(stop, stops)
 	_ = AppendConversationMessage(requestCtx, tx.DB, MessageRecord{Site: siteName, ConversationID: conversationID, RunID: runID, Role: "assistant", Content: stopText, Kind: "summary"})
 	out = replyOutcome(ChatResponse{
 		Reply:  stopText,
@@ -899,12 +896,6 @@ func stopAction(stop stopReason) string {
 		return "max_rounds_reached"
 	}
 	return "turn_stopped"
-}
-
-// stopReply is the reply of a stopped turn. Its wording is replaced by the trace-based ending of H9e.
-func stopReply(stop stopReason, stepsDone int, request string) string {
-	return fmt.Sprintf("I finished %d step(s) for %q and stopped (%s). Reply continue to pick up the rest.",
-		stepsDone, truncateScript(request, 120), stop)
 }
 
 func estimatePromptTokens(messages []map[string]any, functions []map[string]any) int {

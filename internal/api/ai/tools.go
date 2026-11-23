@@ -724,7 +724,7 @@ func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.
 			results = append(results, map[string]any{
 				"role":         "tool",
 				"tool_call_id": id,
-				"content":      aiToolError{Code: errInvalidArguments, Message: fmt.Sprintf("The arguments are not valid JSON: %v. Arguments received: %s", err, argsJSON), Fix: "Send the same call again with valid JSON arguments."}.text(),
+				"content":      aiToolError{Code: errInvalidArguments, Message: "The arguments are not valid JSON.", Fix: "Send the same call again with valid JSON arguments."}.text(),
 			})
 			continue
 		}

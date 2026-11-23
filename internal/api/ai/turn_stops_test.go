@@ -53,7 +53,7 @@ func TestTurnStopsStall(t *testing.T) {
 	}
 }
 
-func TestTurnStopsResultStop(t *testing.T) {
+func TestTurnStopsAfterResults(t *testing.T) {
 	malformed := `{"error":{"code":"invalid_arguments","message":"bad"}}`
 	missing := `{"error":{"code":"missing_fields","message":"name"}}`
 	tests := []struct {
@@ -75,8 +75,8 @@ func TestTurnStopsResultStop(t *testing.T) {
 				for _, c := range contents {
 					results = append(results, map[string]any{"role": "tool", "content": c})
 				}
-				if _, got := stops.resultStop(results); got != tc.want[i] {
-					t.Fatalf("round %d: resultStop() stop = %v, want %v", i+1, got, tc.want[i])
+				if _, got := stops.afterResults(results); got != tc.want[i] {
+					t.Fatalf("round %d: afterResults() stop = %v, want %v", i+1, got, tc.want[i])
 				}
 			}
 		})
@@ -108,13 +108,12 @@ func TestTallyToolResults(t *testing.T) {
 		contents   []string
 		maxChars   int
 		wantErrs   int
-		wantSteps  int
 		wantCapped bool // the first result was trimmed to maxChars plus its marker
 	}{
-		{name: "successes count as steps", contents: []string{`{"data":[]}`, "done"}, maxChars: 100, wantSteps: 2},
+		{name: "successes are not errors", contents: []string{`{"data":[]}`, "done"}, maxChars: 100},
 		{name: "structured error counts as error", contents: []string{`{"error":{"code":"not_found","message":"x"}}`}, maxChars: 100, wantErrs: 1},
 		{name: "plain error counts as error", contents: []string{"Error: boom"}, maxChars: 100, wantErrs: 1},
-		{name: "long result is capped", contents: []string{long}, maxChars: 20, wantSteps: 1, wantCapped: true},
+		{name: "long result is capped", contents: []string{long}, maxChars: 20, wantCapped: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -122,13 +121,41 @@ func TestTallyToolResults(t *testing.T) {
 			for _, c := range tc.contents {
 				results = append(results, map[string]any{"role": "tool", "content": c})
 			}
-			errs, steps := tallyToolResults(results, tc.maxChars)
-			if errs != tc.wantErrs || steps != tc.wantSteps {
-				t.Fatalf("tallyToolResults() = (errs %d, steps %d), want (errs %d, steps %d)", errs, steps, tc.wantErrs, tc.wantSteps)
+			if errs := tallyToolResults(results, tc.maxChars); errs != tc.wantErrs {
+				t.Fatalf("tallyToolResults() = %d errors, want %d", errs, tc.wantErrs)
 			}
 			got, _ := results[0]["content"].(string)
 			if capped := strings.Contains(got, "characters trimmed"); capped != tc.wantCapped {
 				t.Fatalf("first result capped = %v, want %v: %q", capped, tc.wantCapped, got)
+			}
+		})
+	}
+}
+
+func TestStopReplyBuildsFromTrace(t *testing.T) {
+	saved := &turnStops{done: []string{`Created Item "ITM-3".`}}
+	tests := []struct {
+		name      string
+		stop      stopReason
+		trace     *turnStops
+		wantParts []string
+	}{
+		{name: "nothing saved, budget ran out", stop: stopMaxRounds, trace: &turnStops{}, wantParts: []string{"Nothing is saved yet.", "needed more steps", "continue"}},
+		{name: "saved then time ran out", stop: stopTimeBudget, trace: saved, wantParts: []string{`Done: Created Item "ITM-3".`, "30 seconds", "continue"}},
+		{name: "token budget", stop: stopTokenBudget, trace: &turnStops{}, wantParts: []string{"token budget", "continue"}},
+		{name: "stall names the repeat", stop: stopStall, trace: &turnStops{}, wantParts: []string{"repeated", "name the record"}},
+		{name: "repeated error quotes the blocker", stop: stopRepeatError, trace: &turnStops{lastErr: "The arguments are not valid JSON."}, wantParts: []string{"Blocked: The arguments are not valid JSON.", "check the value"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stopReply(tc.stop, tc.trace)
+			for _, part := range tc.wantParts {
+				if !strings.Contains(got, part) {
+					t.Errorf("stopReply() = %q, missing %q", got, part)
+				}
+			}
+			if strings.Contains(got, "ran out of rounds") || strings.Contains(got, "finished") {
+				t.Errorf("stopReply() = %q, uses the old round-cap wording", got)
 			}
 		})
 	}

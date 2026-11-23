@@ -160,31 +160,6 @@ func TestRequestPrefixIsStableAcrossPages(t *testing.T) {
 	}
 }
 
-func TestStopReplySaysWhatIsLeft(t *testing.T) {
-	tests := []struct {
-		name      string
-		steps     int
-		request   string
-		wantParts []string
-	}{
-		{name: "no step finished", steps: 0, request: "add a task", wantParts: []string{"finished 0 step(s)", `"add a task"`, "continue"}},
-		{name: "long request is cut", steps: 3, request: strings.Repeat("x", 200), wantParts: []string{"finished 3 step(s)", "...", "continue"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := stopReply(stopMaxRounds, tc.steps, tc.request)
-			for _, part := range tc.wantParts {
-				if !strings.Contains(got, part) {
-					t.Errorf("stopReply() = %q, missing %q", got, part)
-				}
-			}
-			if strings.Count(got, "\n") != 0 || strings.Count(got, ".") < 1 {
-				t.Errorf("stopReply() = %q, want one plain sentence", got)
-			}
-		})
-	}
-}
-
 func TestBusinessDayBlurbNamesTheTenantDay(t *testing.T) {
 	// No database: the default zone applies. 2026-11-22 21:30 UTC is a Monday in Nairobi (UTC+3).
 	got := businessDayBlurb(context.Background(), nil, nil, "x", time.Date(2026, 11, 22, 21, 30, 0, 0, time.UTC))
