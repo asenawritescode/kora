@@ -539,3 +539,15 @@ func sortStrings(s []string) {
 		}
 	}
 }
+
+// ViewName is a view's name as stored (its YAML name:) or as pack.yaml retires it.
+type ViewName string
+
+// Key is the comparison form of the name: lower-case, with space, underscore and
+// hyphen treated as one separator, so "Owner Dashboard", "owner_dashboard" and
+// "owner-dashboard" all match.
+func (n ViewName) Key() string {
+	return strings.Join(strings.FieldsFunc(strings.ToLower(string(n)), func(r rune) bool {
+		return r == ' ' || r == '_' || r == '-'
+	}), " ")
+}

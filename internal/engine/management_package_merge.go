@@ -451,18 +451,19 @@ func dropRetiredViews(views []*doctype.View, incoming *doctype.ConfigSnapshot) [
 	shipped := make(map[string]bool, len(incoming.Views))
 	for _, v := range incoming.Views {
 		if v != nil {
-			shipped[v.Name] = true
+			shipped[doctype.ViewName(v.Name).Key()] = true
 		}
 	}
 	retired := make(map[string]bool, len(incoming.RetiredViews))
 	for _, name := range incoming.RetiredViews {
-		if shipped[name] {
+		key := doctype.ViewName(name).Key()
+		if shipped[key] {
 			slog.Warn("retired view is still shipped by this package; keeping it", "view", name)
 			continue
 		}
-		retired[name] = true
+		retired[key] = true
 	}
-	return slices.DeleteFunc(views, func(v *doctype.View) bool { return v != nil && retired[v.Name] })
+	return slices.DeleteFunc(views, func(v *doctype.View) bool { return v != nil && retired[doctype.ViewName(v.Name).Key()] })
 }
 
 func mergeSnapshotItems[T any](current, incoming []*T, key func(*T) string) []*T {

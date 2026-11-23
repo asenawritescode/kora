@@ -2,4 +2,4 @@ name: erpsell
 label: Selling
 version: "6"
 retires:
-  views: [owner_dashboard]
+  views: ["Owner Dashboard"]

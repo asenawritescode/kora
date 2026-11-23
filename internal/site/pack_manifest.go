@@ -174,12 +174,13 @@ func checkManifestDefinitions(manifest PackManifest, files []PackFile, add func(
 // checkRetiredViews reports a view that a pack's pack.yaml retires and the same pack still ships.
 func checkRetiredViews(files []PackFile, add func(code, file, message string)) {
 	shipped := map[string]bool{}
-	retiredBy := map[string]string{} // view name -> pack.yaml path that retires it
+	type retirement struct{ name, path string } // the name as pack.yaml writes it, and the file that retires it
+	retiredBy := map[string]retirement{}        // doctype.ViewName key -> retirement
 	for _, file := range files {
 		switch file.ContentType {
 		case "view":
 			if v, err := doctype.ParseViewYAML([]byte(file.Content)); err == nil {
-				shipped[v.Name] = true
+				shipped[doctype.ViewName(v.Name).Key()] = true
 			}
 		case "pack":
 			names, err := parsePackRetiredViews([]byte(file.Content))
@@ -188,13 +189,13 @@ func checkRetiredViews(files []PackFile, add func(code, file, message string)) {
 				continue
 			}
 			for _, name := range names {
-				retiredBy[name] = file.Path
+				retiredBy[doctype.ViewName(name).Key()] = retirement{name: name, path: file.Path}
 			}
 		}
 	}
-	for _, name := range sortedKeys(retiredBy) {
-		if shipped[name] {
-			add("retired_view_shipped", retiredBy[name], fmt.Sprintf("view %q is retired in %s but this pack still ships it", name, packFileName))
+	for _, key := range sortedKeys(retiredBy) {
+		if r := retiredBy[key]; shipped[key] {
+			add("retired_view_shipped", r.path, fmt.Sprintf("view %q is retired in %s but this pack still ships it", r.name, packFileName))
 		}
 	}
 }
