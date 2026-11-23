@@ -28,17 +28,32 @@ type Drill struct {
 	ListOpenable bool
 }
 
-// DerivedDrillRefusal is a drill on a ratio or derived metric. Its message names the parts to open instead.
+// DerivedDrillRefusal is a drill on a metric that is not simple: a ratio or derived metric, or a running total.
+// Its message says what to open instead.
 type DerivedDrillRefusal struct{ Message string }
 
 func (r DerivedDrillRefusal) Error() string { return r.Message }
 
-// notDrillable is the refusal for a metric that is not simple: a ratio or derived metric names its parts instead.
+// notDrillable is the refusal for a metric that is not simple. A ratio or derived metric names its parts
+// instead; a running total names the record type that changes it.
 func (c Catalog) notDrillable(m Metric) error {
-	if m.Type == KindRatio || m.Type == KindDerived {
+	switch m.Type {
+	case KindRatio, KindDerived:
 		return c.derivedRefusal(m)
+	case KindBalance, KindCumulative:
+		return runningRefusal(m)
+	case KindSimple:
 	}
-	return fmt.Errorf("metric %q is %s: only simple metrics drill to records", m.Name, m.Type)
+	return fmt.Errorf("metric %q of type %s does not drill to records", m.Name, m.Type)
+}
+
+// runningRefusal says a balance or cumulative metric is a running total. Its definition names the record type
+// it reads, and that record type is what changes the total, so the message points there when it is set.
+func runningRefusal(m Metric) DerivedDrillRefusal {
+	if m.Model == "" {
+		return DerivedDrillRefusal{Message: m.Label + " is a running total, so it has no records of its own."}
+	}
+	return DerivedDrillRefusal{Message: m.Label + " is a running total, so it has no records of its own; open " + m.Model + " to see what changed it."}
 }
 
 // derivedRefusal says what a ratio or derived metric is made of, so the caller opens one of its parts instead.

@@ -359,6 +359,7 @@ func TestDerivedDrillRefusalIsStableCodeWithPartsMessage(t *testing.T) {
 		{name: "derived with parts", message: "Net sales is Sales minus Refunds; open one of them to see records."},
 		{name: "ratio", message: "Average sale is Sales divided by Receipts; open one of them to see records."},
 		{name: "calculated without parts", message: "Plus is calculated, so it has no records of its own."},
+		{name: "running total", message: "Balance is a running total, so it has no records of its own; open Sale to see what changed it."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
