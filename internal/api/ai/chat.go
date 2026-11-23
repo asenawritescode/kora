@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -340,15 +339,47 @@ func failOutcome(status int, body gin.H) ChatOutcome {
 	return ChatOutcome{Status: status, Failure: body}
 }
 
+// chatSiteCurrency reads the site's currency for the turn. A read failure is logged and the turn continues with no
+// currency, which the system prompt tells the model not to guess.
+func chatSiteCurrency(ctx context.Context, tx *orm.TxManager, siteName string) string {
+	currency, err := siteCurrencyForChat(ctx, tx.DB, siteName, tx.Dialect)
+	if err != nil {
+		slog.Warn("AI chat could not read site currency", "site", siteName, "error", err)
+	}
+	return currency
+}
+
+// providerNotConfiguredOutcome is the refusal for a turn with no provider. A site that is connected to Cloud never
+// gets the Secrets advice: its shared provider is Cloud's to reconnect.
+func providerNotConfiguredOutcome() ChatOutcome {
+	message := "AI chat needs a provider key. Add an OpenAI, DeepSeek, or Anthropic key in Workspace → Admin → Secrets, or ask your administrator whether a shared provider is configured."
+	if _, connected := cloudGatewayURL(); connected {
+		message = "Kigae Cloud's shared AI provider is unavailable. Ask your administrator to reconnect the Cloud provider."
+	}
+	return failOutcome(http.StatusServiceUnavailable, gin.H{
+		"error": gin.H{
+			"code":    "ai.provider_not_configured",
+			"message": message,
+		},
+	})
+}
+
+// refusalFailure maps a Cloud gateway refusal to the chat failure the person sees: the gateway's status, code and
+// message, passed through. ok is false for any other error.
+func refusalFailure(err error) (outcome ChatOutcome, ok bool) {
+	var refusal *gatewayRefusal
+	if !errors.As(err, &refusal) {
+		return ChatOutcome{}, false
+	}
+	return failOutcome(refusal.Status, gin.H{"error": gin.H{"code": refusal.Code, "message": refusal.Message}}), true
+}
+
 // HandleChat runs one chat turn for a decoded request: it persists the message, runs the provider and tool loop, and
 // returns the outcome. The workspace chat and the channel chat both run it.
 func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOutcome) {
 	tx, reg, siteName, currentUser := turn.Tx, turn.Registry, turn.Site, turn.User
 	requestCtx := WithDialect(ctx, tx.Dialect)
-	currency, currencyErr := siteCurrencyForChat(requestCtx, tx.DB, siteName, tx.Dialect)
-	if currencyErr != nil {
-		slog.Warn("AI chat could not read site currency", "site", siteName, "error", currencyErr)
-	}
+	currency := chatSiteCurrency(requestCtx, tx, siteName)
 	if len(req.Context.ThreadID) > 100 {
 		return failOutcome(http.StatusBadRequest, gin.H{"error": gin.H{"message": "Invalid conversation identifier."}})
 	}
@@ -359,16 +390,7 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 	// Read the configured AI provider key.
 	providerKey, apiKey, baseURL, model := resolveProvider(tx.DB, siteName, req.Model, tx.Dialect)
 	if apiKey == "" {
-		message := "AI chat needs a provider key. Add an OpenAI, DeepSeek, or Anthropic key in Workspace → Admin → Secrets, or ask your administrator whether a shared provider is configured."
-		if strings.TrimSpace(os.Getenv("KORA_CLOUD_AI_GATEWAY_URL")) != "" {
-			message = "Kigae Cloud's shared AI provider is unavailable. Ask your administrator to reconnect the Cloud provider."
-		}
-		out = failOutcome(http.StatusServiceUnavailable, gin.H{
-			"error": gin.H{
-				"code":    "ai.provider_not_configured",
-				"message": message,
-			},
-		})
+		out = providerNotConfiguredOutcome()
 		return
 	}
 
@@ -549,6 +571,11 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 					"error":    err.Error(),
 				},
 			})
+			// A gateway refusal ends the turn with the gateway's own code and message, on any round.
+			if refused, ok := refusalFailure(err); ok {
+				out = refused
+				return
+			}
 			// On first-round failure, return an error.
 			// On later rounds, return whatever tool results we've accumulated.
 			if round == 0 {
