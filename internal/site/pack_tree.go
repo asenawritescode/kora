@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 
@@ -29,16 +30,50 @@ func ParsePackFile(dir string) (contract.PackManifest, bool, error) {
 	return parsePackManifest(body, filepath.Base(filepath.Clean(dir)))
 }
 
+// packManifestYAML is the strict shape of pack.yaml.
+type packManifestYAML struct {
+	Name     string                     `yaml:"name"`
+	Label    string                     `yaml:"label"` // display label, read by metrics.PackLabel
+	Version  string                     `yaml:"version"`
+	Requires []contract.ManifestPackRef `yaml:"requires"`
+	Retires  packRetires                `yaml:"retires"`
+}
+
+// packRetires lists what a release of the pack no longer ships. The upgrade removes the listed views.
+type packRetires struct {
+	Views []string `yaml:"views"`
+}
+
+func decodePackManifest(body []byte) (packManifestYAML, error) {
+	var raw packManifestYAML
+	if err := yaml.NewDecoder(bytes.NewReader(body), yaml.Strict()).Decode(&raw); err != nil {
+		return packManifestYAML{}, fmt.Errorf("parse %s: %w", packFileName, err)
+	}
+	return raw, nil
+}
+
+// parsePackRetiredViews returns the view names pack.yaml retires. A blank name is an error.
+func parsePackRetiredViews(body []byte) ([]string, error) {
+	raw, err := decodePackManifest(body)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]string, 0, len(raw.Retires.Views))
+	for _, name := range raw.Retires.Views {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return nil, fmt.Errorf("%s retires.views names a blank view", packFileName)
+		}
+		views = append(views, name)
+	}
+	return views, nil
+}
+
 // parsePackManifest decodes pack.yaml bytes; name must equal the pack name.
 func parsePackManifest(body []byte, dirName string) (contract.PackManifest, bool, error) {
-	var raw struct {
-		Name     string                     `yaml:"name"`
-		Label    string                     `yaml:"label"` // display label, read by metrics.PackLabel
-		Version  string                     `yaml:"version"`
-		Requires []contract.ManifestPackRef `yaml:"requires"`
-	}
-	if err := yaml.NewDecoder(bytes.NewReader(body), yaml.Strict()).Decode(&raw); err != nil {
-		return contract.PackManifest{}, false, fmt.Errorf("parse %s: %w", packFileName, err)
+	raw, err := decodePackManifest(body)
+	if err != nil {
+		return contract.PackManifest{}, false, err
 	}
 	if raw.Name != dirName {
 		return contract.PackManifest{}, false, fmt.Errorf("%s name %q must equal directory name", packFileName, raw.Name)
@@ -149,7 +184,7 @@ func mergePackSnapshot(dst, next *doctype.ConfigSnapshot, names map[string]bool)
 	dst.DocTypes = append(dst.DocTypes, next.DocTypes...)
 	dst.Permissions = append(dst.Permissions, next.Permissions...)
 	dst.Views = append(dst.Views, next.Views...)
-	dst.Metrics, dst.Dashboards = append(dst.Metrics, next.Metrics...), append(dst.Dashboards, next.Dashboards...)
+	dst.Metrics, dst.Dashboards, dst.RetiredViews = append(dst.Metrics, next.Metrics...), append(dst.Dashboards, next.Dashboards...), append(dst.RetiredViews, next.RetiredViews...)
 	dst.Commands = append(dst.Commands, next.Commands...)
 	dst.Modules = append(dst.Modules, next.Modules...)
 	dst.Queries = append(dst.Queries, next.Queries...)

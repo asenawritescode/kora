@@ -37,6 +37,7 @@ type ConfigSnapshot struct {
 	Permissions         []*Permission                          `json:"permissions"`
 	WorkflowDefinitions []contract.WorkflowDefinition          `json:"workflow_definitions,omitempty"`
 	Views               []*View                                `json:"views,omitempty"`
+	RetiredViews        []string                               `json:"retired_views,omitempty"` // views pack.yaml retires; read only by the upgrade merge
 	Metrics             []json.RawMessage                      `json:"metrics,omitempty"`
 	Dashboards          []json.RawMessage                      `json:"dashboards,omitempty"`
 	Commands            []json.RawMessage                      `json:"commands,omitempty"`
