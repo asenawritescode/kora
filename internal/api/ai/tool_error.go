@@ -20,6 +20,7 @@ const (
 	errGuardFailed           = "guard_failed"
 	errConfirmExpired        = "confirm_expired"
 	errConfirmInvalid        = "confirm_invalid"
+	errInvalidArguments      = "invalid_arguments"
 )
 
 // maxValidValues caps the closest options a structured error lists.

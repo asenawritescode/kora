@@ -79,6 +79,10 @@ type answerTurn struct {
 	queries []queryAnswer
 	drills  []drillAnswer
 	choice  *contract.ChoiceQuestion
+	// previews are the writes this turn previewed, in order. A turn with previews ends at once with one card.
+	previews []previewCard
+	// words is the person's own text in this conversation; a preview marks the values it does not give.
+	words string
 	// building is every read whose history was still building: it gives no number, only its progress.
 	building []buildingRead
 	catalog  *metricsCatalog

@@ -29,13 +29,14 @@ func TestPackActionsChatSettlesCashAtConfirm(t *testing.T) {
 			f.thread = "pack-cash-" + tc.driver
 			sale := fmt.Sprintf(`{"action":%q,"input":{"register":"REG-1","location":"LOC-1","till_session":%q,"currency":"KES","items":[{"item":"ITM-1","quantity":2,"unit_price":250,"amount":500}],"payments":[{"method":"Cash","amount":500,"currency":"KES"}]}}`, recordTaskRecordSale, recordTaskTill)
 
-			// Turn 1: the preview names the payment and writes nothing: no intent, no sale.
-			bodies, _ := f.chatScripted("Sell 2 Sugar 2kg, cash.", []packChatStep{
+			// Turn 1: the preview names the payment and writes nothing: no intent, no sale. The preview ends the turn,
+			// so the payment line is read from the stored preview.
+			f.chatScripted("Sell 2 Sugar 2kg, cash.", []packChatStep{
 				{tool: "run_action", args: func() string { return sale }},
-				{content: "Sell 2 Sugar 2kg for 500 KES in cash? Reply yes to confirm."},
+				{content: "Preview ready."},
 			})
-			if !strings.Contains(bodies[len(bodies)-1], "Cash payment of 500 KES") {
-				t.Fatalf("the preview does not name the cash payment: %.400s", bodies[len(bodies)-1])
+			if !strings.Contains(f.one("SELECT preview_json FROM _kora_ai_pending_write WHERE site = ? AND state = ?", f.siteName, "previewed"), "Cash payment of 500 KES") {
+				t.Fatal("the stored preview does not name the cash payment")
 			}
 			if n := f.one("SELECT COUNT(*) FROM _kora_payment_intent WHERE site = ?", f.siteName); n != "0" {
 				t.Fatalf("payment intents after preview = %s, want 0", n)

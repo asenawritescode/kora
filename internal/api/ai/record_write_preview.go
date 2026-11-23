@@ -43,6 +43,9 @@ func previewRecordWrite(tx *orm.TxManager, reg *doctype.Registry, inv toolInvoca
 	if aerr != nil {
 		return aerr.text()
 	}
+	if inv.Turn != nil {
+		markSuggested(preview, inv.Turn.words)
+	}
 	return storePreview(tx, inv, w, preview)
 }
 
@@ -65,6 +68,9 @@ func storePreview(tx *orm.TxManager, inv toolInvocation, stored any, preview map
 	})
 	if err != nil {
 		return (&aiToolError{Code: errConfirmInvalid, Message: "The preview could not be saved."}).text()
+	}
+	if inv.Turn != nil {
+		inv.Turn.previews = append(inv.Turn.previews, previewCard{WriteID: writeID, Summary: pendingWrite{ToolName: inv.Name, PreviewJSON: string(previewJSON)}.summary()})
 	}
 	out, err := json.Marshal(previewReply{
 		Preview:   preview,

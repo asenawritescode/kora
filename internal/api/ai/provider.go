@@ -72,7 +72,7 @@ type AIConfig struct {
 	TokenBudget         int     // Context window budget in tokens
 	CompactionThreshold float64 // 0.0-1.0, when to start compacting history
 	MaxToolResultChars  int     // Cap on a single tool result string
-	StallThreshold      int     // Consecutive identical tool calls before nudge
+	StallThreshold      int     // Identical tool-call rounds in a row that stop the turn (default 2: the second repeat)
 	MaxToolErrors       int     // Total tool errors before circuit breaker
 	MaxTokensPerCall    int     // max_tokens per AI API call
 	HTTPTimeoutSec      int     // Timeout in seconds for AI provider HTTP calls
@@ -88,7 +88,7 @@ func DefaultAIConfig() AIConfig {
 		TokenBudget:         80000,
 		CompactionThreshold: 0.80,
 		MaxToolResultChars:  4000,
-		StallThreshold:      3,
+		StallThreshold:      2,
 		MaxToolErrors:       5,
 		MaxTokensPerCall:    4096,
 		HTTPTimeoutSec:      60,
@@ -101,7 +101,7 @@ func DefaultAIConfig() AIConfig {
 // deepseekFlashConfig is the tuned config of deepseek-flash, the model DeepSeek serves for deepseek-chat too.
 var deepseekFlashConfig = AIConfig{
 	MaxRounds: 6, TokenBudget: 60000, CompactionThreshold: 0.80,
-	MaxToolResultChars: 3000, StallThreshold: 3, MaxToolErrors: 5,
+	MaxToolResultChars: 3000, StallThreshold: 2, MaxToolErrors: 5,
 	MaxTokensPerCall: 1024, HTTPTimeoutSec: 90, MaxRetries: 2,
 	RetryBackoffMs: 1000, HistoryLimit: 12,
 }
@@ -112,37 +112,37 @@ var deepseekFlashConfig = AIConfig{
 var modelConfigs = map[string]AIConfig{
 	"gpt-4o": {
 		MaxRounds: 15, TokenBudget: 120000, CompactionThreshold: 0.80,
-		MaxToolResultChars: 4000, StallThreshold: 3, MaxToolErrors: 5,
+		MaxToolResultChars: 4000, StallThreshold: 2, MaxToolErrors: 5,
 		MaxTokensPerCall: 4096, HTTPTimeoutSec: 60, MaxRetries: 2,
 		RetryBackoffMs: 500, HistoryLimit: 20,
 	},
 	"gpt-4o-mini": {
 		MaxRounds: 10, TokenBudget: 120000, CompactionThreshold: 0.80,
-		MaxToolResultChars: 4000, StallThreshold: 3, MaxToolErrors: 5,
+		MaxToolResultChars: 4000, StallThreshold: 2, MaxToolErrors: 5,
 		MaxTokensPerCall: 4096, HTTPTimeoutSec: 60, MaxRetries: 2,
 		RetryBackoffMs: 500, HistoryLimit: 20,
 	},
 	"gpt-4.1": {
 		MaxRounds: 15, TokenBudget: 950000, CompactionThreshold: 0.85,
-		MaxToolResultChars: 8000, StallThreshold: 3, MaxToolErrors: 5,
+		MaxToolResultChars: 8000, StallThreshold: 2, MaxToolErrors: 5,
 		MaxTokensPerCall: 8192, HTTPTimeoutSec: 60, MaxRetries: 2,
 		RetryBackoffMs: 500, HistoryLimit: 30,
 	},
 	"claude-sonnet-4-6": {
 		MaxRounds: 20, TokenBudget: 190000, CompactionThreshold: 0.85,
-		MaxToolResultChars: 8000, StallThreshold: 3, MaxToolErrors: 5,
+		MaxToolResultChars: 8000, StallThreshold: 2, MaxToolErrors: 5,
 		MaxTokensPerCall: 8192, HTTPTimeoutSec: 90, MaxRetries: 3,
 		RetryBackoffMs: 1000, HistoryLimit: 30,
 	},
 	"claude-opus-4-8": {
 		MaxRounds: 25, TokenBudget: 190000, CompactionThreshold: 0.85,
-		MaxToolResultChars: 8000, StallThreshold: 3, MaxToolErrors: 5,
+		MaxToolResultChars: 8000, StallThreshold: 2, MaxToolErrors: 5,
 		MaxTokensPerCall: 8192, HTTPTimeoutSec: 120, MaxRetries: 3,
 		RetryBackoffMs: 1000, HistoryLimit: 30,
 	},
 	"claude-haiku-4-5": {
 		MaxRounds: 10, TokenBudget: 190000, CompactionThreshold: 0.85,
-		MaxToolResultChars: 4000, StallThreshold: 3, MaxToolErrors: 5,
+		MaxToolResultChars: 4000, StallThreshold: 2, MaxToolErrors: 5,
 		MaxTokensPerCall: 4096, HTTPTimeoutSec: 60, MaxRetries: 2,
 		RetryBackoffMs: 500, HistoryLimit: 20,
 	},
@@ -151,7 +151,7 @@ var modelConfigs = map[string]AIConfig{
 	"deepseek-chat": deepseekFlashConfig,
 	"deepseek-v4-pro": {
 		MaxRounds: 15, TokenBudget: 120000, CompactionThreshold: 0.80,
-		MaxToolResultChars: 4000, StallThreshold: 3, MaxToolErrors: 5,
+		MaxToolResultChars: 4000, StallThreshold: 2, MaxToolErrors: 5,
 		MaxTokensPerCall: 4096, HTTPTimeoutSec: 90, MaxRetries: 2,
 		RetryBackoffMs: 1000, HistoryLimit: 20,
 	},

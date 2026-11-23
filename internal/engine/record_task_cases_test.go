@@ -3,6 +3,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -128,6 +129,53 @@ var recordTasks = []recordTask{
 			}
 			return nil
 		}},
+	{id: 11, message: "Can you help me fill in new products?",
+		settled: func(f *chatFixture) error {
+			if err := expectCountOf(f, "Item", 2); err != nil {
+				return err
+			}
+			if n := f.openPreviews(); n != 1 {
+				return fmt.Errorf("open previews = %d, want 1", n)
+			}
+			return expectEveryFieldSuggested(f)
+		},
+		answered: func(reply string) bool {
+			return strings.Contains(reply, "Soda Fanta 1L") && strings.Contains(reply, "Save this?")
+		}},
+	{id: 12, message: "Can you help me fill in new products?",
+		settled: func(f *chatFixture) error {
+			if err := expectCountOf(f, "Item", 2); err != nil {
+				return err
+			}
+			if n := f.openPreviews(); n != 0 {
+				return fmt.Errorf("open previews = %d, want 0: the model guessed before it asked", n)
+			}
+			return nil
+		},
+		answered: func(reply string) bool { return strings.HasSuffix(strings.TrimSpace(reply), "?") }},
+}
+
+// expectEveryFieldSuggested checks the open preview: the person gave no values, so every field it saves is marked as a
+// suggestion.
+func expectEveryFieldSuggested(f *chatFixture) error {
+	var p struct {
+		Preview struct {
+			Fields    map[string]any `json:"fields"`
+			Suggested map[string]any `json:"suggested"`
+		} `json:"preview"`
+	}
+	if err := json.Unmarshal([]byte(f.one("SELECT preview_json FROM _kora_ai_pending_write WHERE site = ? AND state = ?", f.siteName, "previewed")), &p.Preview); err != nil {
+		return fmt.Errorf("preview is not readable: %w", err)
+	}
+	if len(p.Preview.Fields) == 0 {
+		return fmt.Errorf("preview has no fields")
+	}
+	for field := range p.Preview.Fields {
+		if p.Preview.Suggested[field] != true {
+			return fmt.Errorf("field %q is not marked as a suggestion", field)
+		}
+	}
+	return nil
 }
 
 // expectCountOf checks the row count of a doctype.
@@ -167,7 +215,7 @@ var recordTaskScripts = map[int]func(f *chatFixture) []scriptedRecordTurn{
 					callStep("find_records", map[string]any{"record_type": "Item", "search": "Sugar 1kg"}),
 					callStep("describe_record_type", map[string]any{"record_type": "Item"}),
 					callStep("create_record", map[string]any{"record_type": "Item", "data": map[string]any{"item_name": "Sugar 1kg", "price": 140}}),
-					textStep("Save Sugar 1kg at price 140? Reply yes to save."),
+					textStep("Preview ready."),
 				}
 			}, check: func(f *chatFixture, _ []string) error { return expectCountOf(f, "Item", 2) }},
 			{message: "yes", steps: func(f *chatFixture) []packChatStep {
@@ -196,7 +244,7 @@ var recordTaskScripts = map[int]func(f *chatFixture) []scriptedRecordTurn{
 				return []packChatStep{
 					callStep("find_records", map[string]any{"record_type": "Item", "search": "Sugar 2kg"}),
 					callStep("update_record", map[string]any{"record_type": "Item", "name": "ITM-1", "data": map[string]any{"price": 260}}),
-					textStep("Change Sugar 2kg from 250 to 260? Reply yes to save."),
+					textStep("Preview ready."),
 				}
 			}, check: func(f *chatFixture, _ []string) error {
 				return expectNumber(f, "SELECT price FROM "+f.tbl("Item")+" WHERE name = ?", 250, "ITM-1")
@@ -212,7 +260,7 @@ var recordTaskScripts = map[int]func(f *chatFixture) []scriptedRecordTurn{
 				return []packChatStep{
 					callStep("list_actions", map[string]any{"record_type": "Till Session"}),
 					callStep("run_action", map[string]any{"action": recordTaskPayOut, "input": map[string]any{"till_session": recordTaskTill, "amount": 500, "reason": "Transport"}}),
-					textStep("Pay out 500 for transport from TILL-1? Reply yes to confirm."),
+					textStep("Preview ready."),
 				}
 			}, check: func(f *chatFixture, _ []string) error { return expectCountOf(f, "Cash Movement", 0) }},
 			{message: "yes", steps: func(f *chatFixture) []packChatStep {
@@ -258,9 +306,15 @@ var recordTaskScripts = map[int]func(f *chatFixture) []scriptedRecordTurn{
 			{message: recordTasks[6].message, steps: func(*chatFixture) []packChatStep {
 				return []packChatStep{
 					create("Tea", 50), create("Milk", 60), create("Bread", 55),
-					textStep("Save 3 products: Tea 50, Milk 60, Bread 55? Reply yes to save them."),
+					textStep("Preview ready."),
 				}
-			}, check: func(f *chatFixture, _ []string) error { return expectCountOf(f, "Item", 2) }},
+			}, check: func(f *chatFixture, _ []string) error {
+				// Three previews in consecutive window rounds, one turn: all three stay open until yes.
+				if n := f.openPreviews(); n != 3 {
+					return fmt.Errorf("open previews after the turn = %d, want 3", n)
+				}
+				return expectCountOf(f, "Item", 2)
+			}},
 			{message: "yes", steps: func(f *chatFixture) []packChatStep {
 				return []packChatStep{
 					confirmStep(f, "Tea"), confirmStep(f, "Milk"), confirmStep(f, "Bread"),
@@ -299,6 +353,38 @@ var recordTaskScripts = map[int]func(f *chatFixture) []scriptedRecordTurn{
 			}},
 		}
 	},
+	11: func(f *chatFixture) []scriptedRecordTurn {
+		return []scriptedRecordTurn{
+			{message: recordTasks[10].message, steps: func(*chatFixture) []packChatStep {
+				return []packChatStep{
+					callStep("find_records", map[string]any{"record_type": "Item", "search": "Soda Fanta"}),
+					callStep("describe_record_type", map[string]any{"record_type": "Item"}),
+					callStep("create_record", map[string]any{"record_type": "Item", "data": map[string]any{"item_name": "Soda Fanta 1L", "uom": "Nos", "price": 70, "cost": 50}}),
+					textStep("Preview ready."),
+				}
+			}, check: func(_ *chatFixture, bodies []string) error {
+				if len(bodies) > 4 {
+					return fmt.Errorf("the turn took %d rounds, want at most 4", len(bodies))
+				}
+				return nil
+			}},
+		}
+	},
+	12: func(f *chatFixture) []scriptedRecordTurn {
+		return []scriptedRecordTurn{
+			{message: recordTasks[11].message, steps: func(*chatFixture) []packChatStep {
+				return []packChatStep{
+					callStep("find_records", map[string]any{"record_type": "Item"}),
+					textStep("What is the product name, and what is its price?"),
+				}
+			}, check: func(_ *chatFixture, bodies []string) error {
+				if len(bodies) > 2 {
+					return fmt.Errorf("the turn took %d rounds, want at most 2", len(bodies))
+				}
+				return nil
+			}},
+		}
+	},
 	10: func(f *chatFixture) []scriptedRecordTurn {
 		sale := map[string]any{
 			"register": "REG-1", "location": "LOC-1", "till_session": recordTaskTill, "currency": "KES",
@@ -310,7 +396,7 @@ var recordTaskScripts = map[int]func(f *chatFixture) []scriptedRecordTurn{
 				return []packChatStep{
 					callStep("list_actions", map[string]any{"action": recordTaskRecordSale}),
 					callStep("run_action", map[string]any{"action": recordTaskRecordSale, "input": sale}),
-					textStep("Sell 2 Sugar 2kg for 500 KES in cash? Reply yes to confirm."),
+					textStep("Preview ready."),
 				}
 			}, check: func(f *chatFixture, _ []string) error { return expectCountOf(f, "Sale", 0) }},
 			{message: "yes", steps: func(f *chatFixture) []packChatStep {

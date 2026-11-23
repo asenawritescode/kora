@@ -151,9 +151,9 @@
    "lines": 185
   },
   "internal/api/ai::HandleChat": {
-   "cognitive": 103,
-   "cyclomatic": 45,
-   "statements": 207
+   "cognitive": 93,
+   "cyclomatic": 43,
+   "statements": 62
   },
   "internal/api/ai::ValidateProviderProfile": {
    "cyclomatic": 16
