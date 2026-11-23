@@ -22,6 +22,7 @@ import (
 	"github.com/asenawritescode/kora/internal/outbox"
 	"github.com/asenawritescode/kora/internal/policy"
 	"github.com/asenawritescode/kora/internal/script"
+	"github.com/asenawritescode/kora/internal/sweep"
 	"github.com/asenawritescode/kora/internal/tenanttime"
 	"github.com/asenawritescode/kora/internal/workflow"
 )
@@ -130,6 +131,8 @@ type TxManager struct {
 	// as the business write (RFC §8.1). Mutation entry points are owned by the
 	// kernel; a missing outbox is therefore an explicit disabled-delivery mode.
 	Outbox outbox.Writer
+	// OutboxWake wakes the tenant's outbox workers once the transaction commits.
+	OutboxWake *sweep.Wake
 	// EventOrigin is set by the kernel for one operation. It stamps the single
 	// change event of each mutation with the authenticated origin, which
 	// record-triggered workflows require.
@@ -295,7 +298,30 @@ func (tx *TxManager) writeOutbox(dbTx *sql.Tx, op eventstream.EventOp, dt *docty
 		envelope.CausationID = origin.CausationID
 		envelope.CausationDepth = origin.CausationDepth
 	}
-	return tx.Outbox.Append(ctx, dbTx, envelope)
+	return tx.WakingOutbox(tx.Outbox).Append(ctx, dbTx, envelope)
+}
+
+// WakingOutbox wraps w so each successful Append also queues a tenant outbox
+// wake for after the transaction commits. The wake rides the post-commit
+// hooks: a rolled-back write wakes nothing, and a write whose owner never runs
+// the hooks is still caught by the sweep.
+func (tx *TxManager) WakingOutbox(w outbox.Writer) outbox.Writer {
+	return wakingWriter{Writer: w, tx: tx}
+}
+
+type wakingWriter struct {
+	outbox.Writer
+	tx *TxManager
+}
+
+func (w wakingWriter) Append(ctx context.Context, dbTx *sql.Tx, event contract.EventEnvelope) error {
+	if err := w.Writer.Append(ctx, dbTx, event); err != nil {
+		return err
+	}
+	if w.tx.OutboxWake != nil {
+		w.tx.PostCommitHooks = append(w.tx.PostCommitHooks, w.tx.OutboxWake.Signal)
+	}
+	return nil
 }
 
 // PrepareInsert runs the before_insert and before_save lifecycle hooks. It is

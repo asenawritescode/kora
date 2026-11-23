@@ -12,6 +12,7 @@ import (
 	"github.com/asenawritescode/kora/internal/dbaccess"
 	knet "github.com/asenawritescode/kora/internal/net"
 	"github.com/asenawritescode/kora/internal/outbox"
+	"github.com/asenawritescode/kora/internal/sweep"
 	"github.com/asenawritescode/kora/internal/tenantruntime"
 	"github.com/asenawritescode/kora/internal/workflow"
 )
@@ -48,6 +49,7 @@ func registerWorkflowTriggerConsumer(config TenantServiceConfig, loaded *knet.Lo
 	dispatcher := outbox.NewDispatcher(loaded.DB, dialect)
 	background := services.WorkAdmission.Background()
 	dispatcher.WorkAdmission = background
+	wake := services.OutboxWake.Subscribe()
 	if err := registerRecordTriggerConsumer(dispatcher, func(ctx context.Context, trigger contract.EventEnvelope) error {
 		release, err := background.Acquire(ctx)
 		if err != nil {
@@ -61,7 +63,7 @@ func registerWorkflowTriggerConsumer(config TenantServiceConfig, loaded *knet.Lo
 	}
 	return registerTenantWorkerStart(config, func() error {
 		if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
-			RunWorkflowTriggerDispatcher(ctx, dispatcher)
+			RunWorkflowTriggerDispatcher(ctx, dispatcher, wake)
 		}) {
 			return errors.New("tenant runtime is stopping")
 		}
@@ -69,17 +71,18 @@ func registerWorkflowTriggerConsumer(config TenantServiceConfig, loaded *knet.Lo
 	})
 }
 
-func RunWorkflowTriggerDispatcher(ctx context.Context, dispatcher *outbox.Dispatcher) {
+// RunWorkflowTriggerDispatcher dispatches outbox events to record-triggered
+// workflow starts. A full batch drains at once; otherwise it waits for a wake
+// or the sweep.
+func RunWorkflowTriggerDispatcher(ctx context.Context, dispatcher *outbox.Dispatcher, wake <-chan struct{}) {
 	if ctx == nil || dispatcher == nil {
 		return
 	}
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for ctx.Err() == nil {
-		workCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		processed, err := dispatcher.Run(workCtx, 25)
+	sweep.Loop(ctx, sweep.New(backgroundSweep, wake), func(passCtx context.Context) bool {
+		workCtx, cancel := context.WithTimeout(passCtx, 30*time.Second)
+		processed, err := dispatcher.Run(workCtx, dispatcherBatch)
 		cancel()
-		if err != nil && ctx.Err() == nil && !dbaccess.IsBackgroundBusy(err) {
+		if err != nil && passCtx.Err() == nil && !dbaccess.IsBackgroundBusy(err) {
 			// Outbox delivery is retried by leaving the event unreceipted. Avoid
 			// logging record contents because they may contain user data.
 			var domainErr *contract.Error
@@ -89,15 +92,8 @@ func RunWorkflowTriggerDispatcher(ctx context.Context, dispatcher *outbox.Dispat
 				slog.Warn("workflow trigger dispatch failed", "error_type", fmt.Sprintf("%T", err))
 			}
 		}
-		if processed > 0 {
-			continue
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
+		return err == nil && processed == dispatcherBatch
+	})
 }
 
 // registerRecordTriggerConsumer delivers record change events to start as

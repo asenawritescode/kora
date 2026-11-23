@@ -666,7 +666,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 		if k.Outbox == nil {
 			break // no provider wired; skip silently only in tests — production wiring always sets Outbox
 		}
-		if err := k.Outbox.Append(ctx, dbTx, env); err != nil {
+		if err := txMgr.WakingOutbox(k.Outbox).Append(ctx, dbTx, env); err != nil {
 			return nil, contract.NewError(contract.CodeInternal, "recording command event failed")
 		}
 	}
@@ -684,7 +684,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 		if execution == nil || !execution.Verified() || execution.OwnerModuleID != eventDef.OwnerModuleID {
 			return nil, contract.NewError(contract.CodePermissionDenied, "business event requires verified owner execution")
 		}
-		if _, err := contract.AppendBusinessEvent(ctx, k.Outbox, dbTx, k.CommandSchemas, *execution, eventDef, eventDef.PayloadSchema, op.Payload, op.Context.Site, lastRecord, lastName, op.Context.CorrelationID, opID); err != nil {
+		if _, err := contract.AppendBusinessEvent(ctx, txMgr.WakingOutbox(k.Outbox), dbTx, k.CommandSchemas, *execution, eventDef, eventDef.PayloadSchema, op.Payload, op.Context.Site, lastRecord, lastName, op.Context.CorrelationID, opID); err != nil {
 			return nil, contract.NewError(contract.CodeValidationFailed, "recording owned business event failed: "+err.Error())
 		}
 	}

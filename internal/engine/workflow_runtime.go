@@ -365,7 +365,7 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 		lease = 30 * time.Second
 	}
 	if poll == 0 {
-		poll = 500 * time.Millisecond
+		poll = 2 * time.Second
 	}
 	worker, err := workflow.NewExecutionWorker(executionStore, claimHandler, workflow.ExecutionWorkerConfig{Tenant: tenant, Owner: contract.NewID(), Concurrency: concurrency, Batch: batch, Lease: lease, PollInterval: poll, WorkAdmission: deps.admission.Background()}, func(err error) {
 		logWorkflowExecutionPassFailure(tenant, err)

@@ -15,6 +15,7 @@ import (
 	knet "github.com/asenawritescode/kora/internal/net"
 	"github.com/asenawritescode/kora/internal/site"
 	"github.com/asenawritescode/kora/internal/storage"
+	"github.com/asenawritescode/kora/internal/tenantruntime"
 	"github.com/asenawritescode/kora/internal/webhook"
 )
 
@@ -64,7 +65,7 @@ func TestRegisterWebhookDeliveryDoesNotStartLossyListenerWhenOutboxDisabled(t *t
 			starts.Add(1)
 			return start()
 		},
-	}, &knet.LoadedSite{Name: "tenant"}, worker, nil, nil)
+	}, &knet.LoadedSite{Name: "tenant"}, &tenantruntime.Services{WebhookWorker: worker}, nil, nil)
 	if err != nil {
 		t.Fatalf("register disabled webhook delivery: %v", err)
 	}

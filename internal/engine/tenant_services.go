@@ -40,6 +40,7 @@ import (
 	"github.com/asenawritescode/kora/internal/secret"
 	"github.com/asenawritescode/kora/internal/site"
 	"github.com/asenawritescode/kora/internal/storage"
+	"github.com/asenawritescode/kora/internal/sweep"
 	"github.com/asenawritescode/kora/internal/tenantruntime"
 	"github.com/asenawritescode/kora/internal/usage"
 	"github.com/asenawritescode/kora/internal/webhook"
@@ -145,7 +146,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		}
 	}
 	services := loaded.RuntimeServiceSnapshot()
-	services.Mailer = config.Mailer
+	services.Mailer, services.OutboxWake = config.Mailer, sweep.NewWake()
 	services.CommandSchemas = config.ModuleSchemas
 	// Publish the in-progress bundle to the still-unpublished runtime so its
 	// single Close path can roll back any worker started by this installer.
@@ -416,7 +417,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		return fmt.Errorf("construct tenant approval transaction opener: %w", err)
 	}
 	domainTx := &orm.TxManager{
-		DB: loaded.DB, Registry: loaded.Registry, Dialect: dialect, Outbox: domainKernel.Outbox,
+		DB: loaded.DB, Registry: loaded.Registry, Dialect: dialect, Outbox: domainKernel.Outbox, OutboxWake: services.OutboxWake,
 		SiteName: loaded.Name, AsyncHookTenantID: tenantID,
 		AsyncHookConfigRevision: loaded.ConfigRevision,
 		ModuleDescriptors:       append([]contract.ModuleDescriptor(nil), moduleSnapshot.Modules...),
@@ -528,8 +529,8 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 	worker := webhook.NewWorker(loaded.DB, multiBus, loaded.Name, dialect)
 	worker.WorkAdmission = workAdmission
 	services.WebhookWorker = worker
-	if err := registerWebhookDelivery(config, loaded, worker, dialect, workAdmission); err != nil {
-		return fmt.Errorf("configure webhook delivery for tenant %s: %w", loaded.Name, err)
+	if webhookErr := registerWebhookDelivery(config, loaded, &services, dialect, workAdmission); webhookErr != nil {
+		return fmt.Errorf("configure webhook delivery for tenant %s: %w", loaded.Name, webhookErr)
 	}
 	if cloudErr := registerCloudWorkers(config, loaded, &services, multiBus, dialect); cloudErr != nil {
 		return cloudErr
@@ -743,10 +744,11 @@ func validateModuleExtensionSchemas(modules []contract.ModuleDescriptor, schemas
 	return contract.ValidateModuleExtensions(modules, schemas.Registered)
 }
 
-func registerWebhookDelivery(config TenantServiceConfig, loaded *knet.LoadedSite, worker *webhook.Worker, dialect kdb.Dialect, admission *dbaccess.Admission) error {
+func registerWebhookDelivery(config TenantServiceConfig, loaded *knet.LoadedSite, services *tenantruntime.Services, dialect kdb.Dialect, admission *dbaccess.Admission) error {
 	if !config.OutboxEnabled {
 		return nil
 	}
+	worker := services.WebhookWorker
 	if loaded == nil || worker == nil {
 		return errors.New("durable webhook delivery requires a tenant runtime and worker")
 	}
@@ -757,9 +759,10 @@ func registerWebhookDelivery(config TenantServiceConfig, loaded *knet.LoadedSite
 	if err != nil {
 		return fmt.Errorf("construct durable webhook dispatcher: %w", err)
 	}
+	wake := services.OutboxWake.Subscribe()
 	return registerTenantWorkerStart(config, func() error {
 		if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
-			RunWebhookOutboxDispatcher(ctx, dispatcher, admission.Background())
+			RunWebhookOutboxDispatcher(ctx, dispatcher, admission.Background(), wake)
 		}) {
 			return errors.New("tenant runtime is stopping")
 		}
@@ -939,9 +942,10 @@ func registerOutboxPublisher(config TenantServiceConfig, loaded *knet.LoadedSite
 		destination = eventbus.NewLocalProvider(services.EventBus)
 	}
 	publisher := outbox.NewPublisher(loaded.DB, destination, dialect)
+	wake := services.OutboxWake.Subscribe()
 	if err := registerTenantWorkerStart(config, func() error {
 		if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
-			RunOutboxPublisher(ctx, publisher, services.WorkAdmission.Background(), services.OutboxBacklog)
+			RunOutboxPublisher(ctx, publisher, services.WorkAdmission.Background(), wake, services.OutboxBacklog)
 		}) {
 			return fmt.Errorf("tenant runtime is stopping")
 		}

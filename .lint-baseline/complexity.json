@@ -1344,12 +1344,6 @@
   "internal/engine::RunNATSConsumerWithBackoff": {
    "cognitive": 19
   },
-  "internal/engine::RunOutboxPublisher": {
-   "cognitive": 17
-  },
-  "internal/engine::RunRequestNotificationWorker": {
-   "cognitive": 29
-  },
   "internal/engine::Shutdown": {
    "statements": 98
   },

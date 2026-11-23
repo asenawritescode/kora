@@ -102,9 +102,10 @@ func registerRequestNotifications(config TenantServiceConfig, loaded *knet.Loade
 	if err != nil {
 		return fmt.Errorf("construct request notification worker: %w", err)
 	}
+	wake := services.OutboxWake.Subscribe()
 	if err := registerTenantWorkerStart(config, func() error {
 		if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
-			RunRequestNotificationDispatcher(ctx, dispatcher)
+			RunRequestNotificationDispatcher(ctx, dispatcher, wake)
 		}) {
 			return errors.New("tenant runtime is stopping")
 		}
@@ -114,7 +115,7 @@ func registerRequestNotifications(config TenantServiceConfig, loaded *knet.Loade
 	}
 	if err := registerTenantWorkerStart(config, func() error {
 		if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
-			RunRequestNotificationWorker(ctx, worker)
+			RunRequestNotificationWorker(ctx, worker, nil)
 		}) {
 			return errors.New("tenant runtime is stopping")
 		}

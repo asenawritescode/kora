@@ -21,6 +21,7 @@ import (
 	"github.com/asenawritescode/kora/internal/scheduler"
 	schedulersql "github.com/asenawritescode/kora/internal/scheduler/sqlstore"
 	"github.com/asenawritescode/kora/internal/site"
+	"github.com/asenawritescode/kora/internal/sweep"
 	"github.com/asenawritescode/kora/internal/tenantruntime"
 )
 
@@ -190,7 +191,7 @@ func (s *DurableWorkScanner) run() {
 				return
 			}
 		}
-		if !waitContext(s.ctx, s.interval) {
+		if !waitContext(s.ctx, sweep.Jitter(s.interval)) {
 			return
 		}
 	}
