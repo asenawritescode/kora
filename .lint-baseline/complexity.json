@@ -153,7 +153,7 @@
   "internal/api/ai::HandleChat": {
    "cognitive": 93,
    "cyclomatic": 43,
-   "statements": 63
+   "statements": 62
   },
   "internal/api/ai::ValidateProviderProfile": {
    "cyclomatic": 16

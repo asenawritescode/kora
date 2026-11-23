@@ -148,7 +148,7 @@ RULES
 - Find before you create: call find_records to check for a match.
 - Before the first write of a record type, call describe_record_type.
 - Writes preview first (create_record, update_record, run_action): nothing is saved yet.
-- Never invent a value: ask for a missing one. Preview marks suggestions.
+- Never invent a value: ask one short question, or ask_choice for 2-4 answers. Preview marks suggestions.
 - After a preview, call confirm_write with the write_id only after a later yes.
 - OPEN PREVIEWS are not saved yet; confirm one only when the person agrees.
 - Pack actions: list_actions finds them; run_action previews. Leave payment references empty; confirm sets them.
@@ -444,23 +444,10 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 	// Build function definitions from the canonical tool catalog projection.
 	functions := chatFunctions(turn, reg, req.DisableTools)
 
-	// Durable server history is the source of truth for the conversation.
-	sanitizedHistory := sanitizeHistory(transcript, cfg.HistoryLimit)
-
-	standing := chatSystemPrompt + financialDisplayContext(currency) + insightsNoteFor(turn.Insights)
-	messages := buildChatMessages(standing, sanitizedHistory, turnContext, req.Message)
+	messages := turnMessages(transcript, cfg.HistoryLimit, financialDisplayContext(currency)+insightsNoteFor(turn.Insights), turnContext, req.Message)
 
 	// Build the initial AI request body. Tools and tool_choice persist across all rounds.
-	aiBody := map[string]any{
-		"model":               model,
-		"messages":            messages,
-		"max_tokens":          cfg.MaxTokensPerCall,
-		"parallel_tool_calls": false, // Force sequential — avoids ordering issues.
-	}
-	if len(functions) > 0 {
-		aiBody["tools"] = functions
-		aiBody["tool_choice"] = "auto"
-	}
+	aiBody := providerBody(model, messages, functions, cfg.MaxTokensPerCall)
 
 	if estimatePromptTokens(messages, functions) > cfg.TokenBudget {
 		out = failOutcome(http.StatusBadRequest, gin.H{
@@ -480,6 +467,7 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 	}()
 
 	answers := newAnswerTurn(turn, currency, userWords(transcript, req.Message))
+	end := chatEnd{ctx: requestCtx, tx: tx, answer: finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, Message: req.Message, SubjectKey: subjectKey, Model: model, Provider: providerKey}}
 
 	// --- Multi-Round Tool Execution Loop ---
 	var (
@@ -669,6 +657,11 @@ loop:
 		switch finishReason {
 
 		case "stop":
+			// Open previews end the turn with their card: the model's text does not replace it.
+			if answers.windowOpen() {
+				out = end.cardOutcome(answers, stepID)
+				return
+			}
 			// Check for textified tool calls before accepting as genuine stop.
 			if hasTextifiedToolCall(content) {
 				slog.Warn("Detected textified tool call in AI response, retrying", "model", model)
@@ -719,30 +712,29 @@ loop:
 			}
 
 			// --- Stall detection ---
-			if stops.stallOn(toolCallSignatures(toolCalls)) {
-				stop = stopStall
-				break loop
-			}
 			if totalTokens > cfg.TokenBudget {
 				stop = stopTokenBudget
 				break loop
 			}
 
+			// --- A stall, or an open window refusing a call that is not a write preview, ends the turn before the
+			// calls run. An open window ends with its card; a stall with its trace. ---
+			if answers.closesRound(stops, toolCalls) {
+				stop = stopStall
+				break loop
+			}
+
 			// --- Execute tools ---
+			previewsBefore := len(answers.previews)
 			logToolCalls(toolCalls)
 			toolResults := RunToolTurn(auditCtx, tx, reg, toolCallBatch{Calls: toolCalls, Owner: currentUser, Site: siteName, RunID: runID, StepID: stepID, ConversationID: conversationID, Execution: turn.Execution, Turn: answers, Commands: turn.Commands, Operations: turn.Operations})
 			toolErrors += tallyToolResults(toolResults, cfg.MaxToolResultChars)
 
-			// --- Clarifying question: the turn ends here, with the choices shown to the person. The question is
-			// only known once its tool has run, so the check follows the execution, before the model is asked again. ---
-			if answers.choice != nil {
-				out = replyOutcome(endWithChoice(requestCtx, tx, answers.choice, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, Model: model, Provider: providerKey}))
-				return
-			}
-
-			// --- Writes previewed: the turn ends with one card for them. The model is not asked again. ---
-			if len(answers.previews) > 0 {
-				out = replyOutcome(endWithPreviews(requestCtx, tx, answers.previews, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, SubjectKey: subjectKey, Model: model, Provider: providerKey}))
+			// --- Clarifying question, or a round that added no preview to an open window: the turn ends here. The
+			// question is only known once its tool has run, so the check follows the execution, before the model is
+			// asked again. ---
+			if done, ok := end.afterTools(answers, stepID, previewsBefore); ok {
+				out = done
 				return
 			}
 
@@ -764,6 +756,7 @@ loop:
 
 			// --- Append assistant message + tool results for the next call ---
 			messages = appendRound(messages, msg["content"], toolCalls, toolResults, functions)
+			answers.narrowTools(aiBody, functions)
 
 			// --- Context compaction ---
 			if totalTokens > int(float64(cfg.TokenBudget)*cfg.CompactionThreshold) {
@@ -861,6 +854,11 @@ loop:
 		}
 	}
 
+	// --- Stop at the round cap with a window open: the turn ends with the card of its previews ---
+	if answers.windowOpen() {
+		out = end.cardOutcome(answers, "")
+		return
+	}
 	// --- Stop: the turn ends with the reply its trace supports ---
 	slog.Warn("Chat turn stopped", "reason", stop, "max_rounds", cfg.MaxRounds)
 	stopText := stopReply(stop, stops)
