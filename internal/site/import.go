@@ -728,7 +728,27 @@ func parsePackPart(packName string, files []PackFile) (*doctype.ConfigSnapshot, 
 	if err != nil {
 		return nil, nil, err
 	}
+	snapshot.RetiredViews, err = packRetiredViews(files)
+	if err != nil {
+		return nil, nil, err
+	}
 	return snapshot, scripts, nil
+}
+
+// packRetiredViews collects the views named in the pack.yaml files of one pack part.
+func packRetiredViews(files []PackFile) ([]string, error) {
+	var names []string
+	for _, f := range files {
+		if !isPackManifestPath(strings.TrimSpace(f.Path)) {
+			continue
+		}
+		retired, err := parsePackRetiredViews([]byte(f.Content))
+		if err != nil {
+			return nil, err
+		}
+		names = append(names, retired...)
+	}
+	return names, nil
 }
 
 func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot, map[string]string, error) {

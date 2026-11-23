@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"slices"
 	"sort"
@@ -47,7 +48,8 @@ func mergeManagementPackageSnapshot(current, incoming *doctype.ConfigSnapshot, a
 	merged.Roles = mergeSnapshotItems(current.Roles, incoming.Roles, func(v *doctype.Role) string { return v.Name })
 	merged.Permissions = mergeSnapshotItems(current.Permissions, incoming.Permissions, func(v *doctype.Permission) string { return v.Doctype + "\x00" + v.Role })
 	merged.WorkflowDefinitions = mergeWorkflowDefinitions(current.WorkflowDefinitions, incoming.WorkflowDefinitions)
-	merged.Views = mergeSnapshotItems(current.Views, incoming.Views, func(v *doctype.View) string { return v.Name })
+	merged.Views = dropRetiredViews(mergeSnapshotItems(current.Views, incoming.Views, func(v *doctype.View) string { return v.Name }), incoming)
+	merged.RetiredViews = nil
 	merged.Scripts = mergeSnapshotItems(current.Scripts, incoming.Scripts, func(v *doctype.ScriptSnapshot) string { return v.Name })
 	modules, err := mergeModuleDescriptors(current.Modules, incoming.Modules, authority)
 	if err != nil {
@@ -438,6 +440,29 @@ func mergeScheduledJobs(current, incoming []contract.ScheduledJobDefinition) []c
 	}
 	sort.Slice(merged, func(i, j int) bool { return merged[i].Name < merged[j].Name })
 	return merged
+}
+
+// dropRetiredViews removes the views that the package's pack.yaml retires. A retired view that the
+// same artifact still ships is kept, with a warning. Views the list does not name are never removed.
+func dropRetiredViews(views []*doctype.View, incoming *doctype.ConfigSnapshot) []*doctype.View {
+	if len(incoming.RetiredViews) == 0 {
+		return views
+	}
+	shipped := make(map[string]bool, len(incoming.Views))
+	for _, v := range incoming.Views {
+		if v != nil {
+			shipped[v.Name] = true
+		}
+	}
+	retired := make(map[string]bool, len(incoming.RetiredViews))
+	for _, name := range incoming.RetiredViews {
+		if shipped[name] {
+			slog.Warn("retired view is still shipped by this package; keeping it", "view", name)
+			continue
+		}
+		retired[name] = true
+	}
+	return slices.DeleteFunc(views, func(v *doctype.View) bool { return v != nil && retired[v.Name] })
 }
 
 func mergeSnapshotItems[T any](current, incoming []*T, key func(*T) string) []*T {

@@ -60,7 +60,7 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 	if len(files) == 0 {
 		add("files_required", "", "pack has no files")
 	}
-	checkScheduledJobs(manifest, add)
+	checkManifestDefinitions(manifest, files, add)
 	seen := map[string]bool{}
 	resources := newPackResourceNames()
 	userFields := map[string]map[string]bool{}
@@ -163,6 +163,40 @@ func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, erro
 		add("pack_too_large", "", "pack exceeds 2 MB")
 	}
 	return result, nil
+}
+
+// checkManifestDefinitions runs the pack-level checks of the manifest's scheduled jobs and retired views.
+func checkManifestDefinitions(manifest PackManifest, files []PackFile, add func(code, file, message string)) {
+	checkScheduledJobs(manifest, add)
+	checkRetiredViews(files, add)
+}
+
+// checkRetiredViews reports a view that a pack's pack.yaml retires and the same pack still ships.
+func checkRetiredViews(files []PackFile, add func(code, file, message string)) {
+	shipped := map[string]bool{}
+	retiredBy := map[string]string{} // view name -> pack.yaml path that retires it
+	for _, file := range files {
+		switch file.ContentType {
+		case "view":
+			if v, err := doctype.ParseViewYAML([]byte(file.Content)); err == nil {
+				shipped[v.Name] = true
+			}
+		case "pack":
+			names, err := parsePackRetiredViews([]byte(file.Content))
+			if err != nil {
+				add("retires_invalid", file.Path, err.Error())
+				continue
+			}
+			for _, name := range names {
+				retiredBy[name] = file.Path
+			}
+		}
+	}
+	for _, name := range sortedKeys(retiredBy) {
+		if shipped[name] {
+			add("retired_view_shipped", retiredBy[name], fmt.Sprintf("view %q is retired in %s but this pack still ships it", name, packFileName))
+		}
+	}
 }
 
 // checkScheduledJobs reports the scheduled job definitions of a pack manifest.
