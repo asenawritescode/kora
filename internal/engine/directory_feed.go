@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/internal/site"
 )
 
@@ -80,7 +81,7 @@ func StartDirectoryFeed(parent context.Context, consumer *site.DirectoryConsumer
 	go func() {
 		defer workers.Done()
 		consumer.Run(ctx, pollInterval, func(err error) {
-			slog.Warn("site directory consumer will retry without advancing its cursor", "consumer_id", consumer.ID, "error", err)
+			logDirectoryConsumerRetry(consumer.ID, err)
 		})
 	}()
 	if revisionWakeups != nil {
@@ -132,4 +133,12 @@ func (w *DirectoryFeedWorker) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return fmt.Errorf("join tenant directory feed: %w", ctx.Err())
 	}
+}
+
+// logDirectoryConsumerRetry skips background-busy passes, which are normal.
+func logDirectoryConsumerRetry(consumerID string, err error) {
+	if dbaccess.IsBackgroundBusy(err) {
+		return
+	}
+	slog.Warn("site directory consumer will retry without advancing its cursor", "consumer_id", consumerID, "error", err)
 }

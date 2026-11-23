@@ -1345,7 +1345,7 @@
    "cognitive": 19
   },
   "internal/engine::RunOutboxPublisher": {
-   "cognitive": 20
+   "cognitive": 17
   },
   "internal/engine::RunRequestNotificationWorker": {
    "cognitive": 29
@@ -1459,7 +1459,7 @@
   "internal/engine::registerResourceMetrics": {
    "cognitive": 96,
    "cyclomatic": 37,
-   "statements": 186
+   "statements": 185
   },
   "internal/engine::registeredConfigQueryProviders": {
    "cognitive": 52,
@@ -2476,7 +2476,7 @@
    "cognitive": 22
   },
   "internal/webhook::(*Worker).acquireDBWork": {
-   "cognitive": 17
+   "cognitive": 16
   },
   "internal/webhook::(*Worker).loadMatchingExtensions": {
    "cognitive": 17

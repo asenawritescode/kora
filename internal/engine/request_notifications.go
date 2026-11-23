@@ -83,21 +83,22 @@ func registerRequestNotifications(config TenantServiceConfig, loaded *knet.Loade
 	if err != nil {
 		return fmt.Errorf("construct request notification service: %w", err)
 	}
+	background := services.WorkAdmission.Background()
 	dispatcher := outbox.NewDispatcher(loaded.DB, dialect)
-	dispatcher.WorkAdmission = services.WorkAdmission
+	dispatcher.WorkAdmission = background
 	if err := dispatcher.RegisterForTypes("request-notifications", []string{
 		"request.created", "request.responded", "request.reassigned", "request.cancelled", "request.expired", "request.stale",
 	}, func(ctx context.Context, event contract.EventEnvelope) error {
-		release, err := services.WorkAdmission.Acquire(ctx)
-		if err != nil {
-			return err
+		release, admitErr := background.Acquire(ctx)
+		if admitErr != nil {
+			return admitErr
 		}
 		defer release()
 		return service.Consume(ctx, event)
 	}); err != nil {
 		return fmt.Errorf("register request notification outbox consumer: %w", err)
 	}
-	worker, err := notifications.NewWorkerWithAdmission(tenant, store, inboxNotificationSender{site: loaded.Name, bus: services.EventBus}, requestWallClock{}, contract.NewID(), services.WorkAdmission)
+	worker, err := notifications.NewWorkerWithAdmission(tenant, store, inboxNotificationSender{site: loaded.Name, bus: services.EventBus}, requestWallClock{}, contract.NewID(), background)
 	if err != nil {
 		return fmt.Errorf("construct request notification worker: %w", err)
 	}

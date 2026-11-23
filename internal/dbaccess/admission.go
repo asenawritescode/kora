@@ -4,10 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// ErrBackgroundBusy marks a background pass skipped because no background slot
+// was free by its deadline. It is not a failure; the next tick retries.
+var ErrBackgroundBusy = errors.New("background database lane is busy")
+
+// IsBackgroundBusy reports whether err is a skipped background pass.
+func IsBackgroundBusy(err error) bool { return errors.Is(err, ErrBackgroundBusy) }
 
 type workAdmissionContextKey struct{}
 
@@ -96,6 +105,10 @@ type AdmissionSnapshot struct {
 	WaitCount           uint64
 	WaitDuration        time.Duration
 	Rejected            uint64
+	BackgroundActive    int
+	BackgroundCapacity  int
+	BackgroundWaiters   int
+	BackgroundSkipped   uint64
 }
 
 // Admission independently limits active work. It is intentionally separate
@@ -107,11 +120,41 @@ type Admission struct {
 	wait        time.Duration
 	ordinary    chan struct{}
 	maintenance chan struct{}
+	background  chan struct{}
+	lane        *BackgroundLane
 	mu          sync.Mutex
 	waiters     int
+	bgWaiters   int
 	waitCount   atomic.Uint64
 	waitNanos   atomic.Uint64
 	rejected    atomic.Uint64
+	bgSkipped   atomic.Uint64
+}
+
+// BackgroundLane is the admission view for background workers; its slots never
+// block request admission.
+type BackgroundLane struct{ admission *Admission }
+
+// Background returns the background lane; nil for a nil admission.
+func (a *Admission) Background() *BackgroundLane {
+	if a == nil {
+		return nil
+	}
+	return a.lane
+}
+
+// Acquire waits for a slot until the context deadline (or the admission wait
+// when there is none) and returns ErrBackgroundBusy when the pass is skipped.
+func (l *BackgroundLane) Acquire(ctx context.Context) (func(), error) {
+	if l == nil || l.admission == nil {
+		return nil, errors.New("background database lane is required")
+	}
+	return l.admission.acquireBackground(ctx)
+}
+
+// backgroundLaneCapacity is max(2, budget/4), leaving at least one ordinary slot.
+func backgroundLaneCapacity(capacity, maintenanceCapacity int) int {
+	return max(0, min(max(2, capacity/4), capacity-maintenanceCapacity-1))
 }
 
 func NewAdmission(capacity, maxWaiters int, wait time.Duration) (*Admission, error) {
@@ -134,8 +177,15 @@ func NewAdmissionWithMaintenance(capacity, maxWaiters int, wait time.Duration, m
 	if maintenanceCapacity < 0 || maintenanceCapacity >= capacity {
 		return nil, errors.New("maintenance work capacity must be non-negative and leave ordinary active work capacity")
 	}
-	ordinaryCapacity := capacity - maintenanceCapacity
-	return &Admission{capacity: capacity, maxQueued: maxWaiters, wait: wait, ordinary: make(chan struct{}, ordinaryCapacity), maintenance: make(chan struct{}, maintenanceCapacity)}, nil
+	backgroundCapacity := backgroundLaneCapacity(capacity, maintenanceCapacity)
+	ordinaryCapacity := capacity - maintenanceCapacity - backgroundCapacity
+	a := &Admission{
+		capacity: capacity, maxQueued: maxWaiters, wait: wait,
+		ordinary: make(chan struct{}, ordinaryCapacity), maintenance: make(chan struct{}, maintenanceCapacity),
+		background: make(chan struct{}, backgroundCapacity),
+	}
+	a.lane = &BackgroundLane{admission: a}
+	return a, nil
 }
 
 // Acquire reserves one work slot. Always release after the complete unit of
@@ -153,6 +203,58 @@ func (a *Admission) AcquireMaintenance(ctx context.Context) (func(), error) {
 		return nil, ErrExhausted
 	}
 	return a.acquire(ctx, a.maintenance)
+}
+
+func (a *Admission) acquireBackground(ctx context.Context) (func(), error) {
+	select {
+	case a.background <- struct{}{}:
+		return a.releaseFunc(a.background), nil
+	default:
+	}
+	a.mu.Lock()
+	if a.bgWaiters >= a.maxQueued {
+		a.mu.Unlock()
+		return nil, a.skipBackground(nil)
+	}
+	a.bgWaiters++
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.bgWaiters--
+		a.mu.Unlock()
+	}()
+	var expired <-chan time.Time
+	if _, bounded := ctx.Deadline(); !bounded {
+		timer := time.NewTimer(a.wait)
+		defer timer.Stop()
+		expired = timer.C
+	}
+	select {
+	case a.background <- struct{}{}:
+		release := a.releaseFunc(a.background)
+		if err := ctx.Err(); err != nil {
+			release()
+			return nil, a.skipBackground(err)
+		}
+		return release, nil
+	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, a.skipBackground(ctx.Err())
+		}
+		return nil, ctx.Err()
+	case <-expired:
+		return nil, a.skipBackground(nil)
+	}
+}
+
+// skipBackground counts a skipped pass and wraps ErrBackgroundBusy with cause.
+func (a *Admission) skipBackground(cause error) error {
+	a.bgSkipped.Add(1)
+	slog.Debug("background database lane busy; pass skipped")
+	if cause == nil {
+		return ErrBackgroundBusy
+	}
+	return fmt.Errorf("%w: %w", ErrBackgroundBusy, cause)
 }
 
 func (a *Admission) acquire(ctx context.Context, lane chan struct{}) (func(), error) {
@@ -216,11 +318,13 @@ func (a *Admission) releaseFunc(lane chan struct{}) func() {
 
 func (a *Admission) Snapshot() AdmissionSnapshot {
 	a.mu.Lock()
-	waiters := a.waiters
+	waiters, bgWaiters := a.waiters, a.bgWaiters
 	a.mu.Unlock()
 	return AdmissionSnapshot{
-		Capacity: a.capacity, Active: len(a.ordinary) + len(a.maintenance),
+		Capacity: a.capacity, Active: len(a.ordinary) + len(a.maintenance) + len(a.background),
 		MaintenanceActive: len(a.maintenance), MaintenanceCapacity: cap(a.maintenance), Waiters: waiters,
 		WaitCount: a.waitCount.Load(), WaitDuration: time.Duration(a.waitNanos.Load()), Rejected: a.rejected.Load(),
+		BackgroundActive: len(a.background), BackgroundCapacity: cap(a.background),
+		BackgroundWaiters: bgWaiters, BackgroundSkipped: a.bgSkipped.Load(),
 	}
 }

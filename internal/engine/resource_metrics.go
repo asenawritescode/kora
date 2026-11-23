@@ -59,6 +59,7 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 		"kora.db.pools.open", "kora.db.pools.in_use", "kora.db.pools.idle", "kora.db.pools.max_open", "kora.db.pools.wait_total", "kora.db.pools.wait_duration_ns",
 		"kora.db.operations.total", "kora.db.operations.duration_ns", "kora.db.lock_contention.total",
 		"kora.db.work.capacity", "kora.db.work.active", "kora.db.work.waiters", "kora.db.work.wait_total", "kora.db.work.wait_duration_ns", "kora.db.work.rejected", "kora.db.work.maintenance_active", "kora.db.work.maintenance_capacity",
+		"kora.db.work.background_active", "kora.db.work.background_capacity", "kora.db.work.background_waiters", "kora.db.work.background_skipped",
 		"kora.tenant.runtimes.active", "kora.tenant.runtimes.retiring",
 		"kora.async_hooks.queue.items", "kora.async_hooks.queue.bytes", "kora.async_hooks.queue.max_items", "kora.async_hooks.queue.max_bytes", "kora.async_hooks.queue.rejected_items",
 		"kora.scripts.active", "kora.scripts.waiters", "kora.scripts.active_tenants", "kora.scripts.max_active_tenants",
@@ -86,7 +87,7 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 		"Allocated physical database connection capacity across configured endpoints", "Physical database connections currently in use", "Database connection waiters", "Cumulative database connection waits", "Cumulative database connection wait duration", "Database connection admission rejections",
 		"Open database/sql connections across platform and resident tenant pools", "In-use database/sql connections across platform and resident tenant pools", "Idle database/sql connections across platform and resident tenant pools", "Configured database/sql maximum open connections across platform and resident tenant pools", "Cumulative database/sql connection waits", "Cumulative database/sql connection wait duration",
 		"SQL driver operations executed through the shared connector", "Cumulative duration of SQL driver operations", "Database lock contention errors observed by the shared connector",
-		"Active database work capacity across configured endpoints", "Active database work units", "Database work waiters", "Cumulative database work waits", "Cumulative database work wait duration", "Database work admission rejections", "Active heavy maintenance work units", "Heavy maintenance work capacity across configured endpoints",
+		"Active database work capacity across configured endpoints", "Active database work units", "Database work waiters", "Cumulative database work waits", "Cumulative database work wait duration", "Database work admission rejections", "Active heavy maintenance work units", "Heavy maintenance work capacity across configured endpoints", "Active background database work units across configured endpoints", "Background database work capacity across configured endpoints", "Background database work waiters", "Cumulative background database passes skipped because the lane was busy",
 		"Tenant runtimes in the active directory snapshot", "Tenant runtime generations in retirement",
 		"Async hook items queued", "Estimated bytes retained in the async hook queue", "Async hook queue item capacity", "Async hook queue byte capacity", "Rejected async hook items",
 		"Active script executions", "Script execution waiters", "Tenant gates with active or waiting script executions", "Maximum script tenant gates",
@@ -176,8 +177,7 @@ func registerResourceMetrics(meter metric.Meter, tenants *knet.SiteRouter, hooks
 			values["kora.db.work.wait_total"] += int64(snapshot.Work.WaitCount)
 			values["kora.db.work.wait_duration_ns"] += snapshot.Work.WaitDuration.Nanoseconds()
 			values["kora.db.work.rejected"] += int64(snapshot.Work.Rejected)
-			values["kora.db.work.maintenance_active"] += int64(snapshot.Work.MaintenanceActive)
-			values["kora.db.work.maintenance_capacity"] += int64(snapshot.Work.MaintenanceCapacity)
+			addWorkLaneValues(values, snapshot.Work)
 			values["kora.db.operations.total"] += int64(snapshot.OperationCount)
 			values["kora.db.operations.duration_ns"] += snapshot.OperationDuration.Nanoseconds()
 			values["kora.db.lock_contention.total"] += int64(snapshot.LockContention)
@@ -397,6 +397,16 @@ func int64Pair(a, b int) (int64, int64) { return int64(a), int64(b) }
 // addEventStreamUsage copies the last event stream usage sample into values.
 // The sample is taken off the collection path by natsprovider's sampler, so
 // this performs no I/O; the gauges are omitted until a sample succeeds.
+// addWorkLaneValues adds the maintenance and background lane gauges and counters.
+func addWorkLaneValues(values map[string]int64, work dbaccess.AdmissionSnapshot) {
+	values["kora.db.work.maintenance_active"] += int64(work.MaintenanceActive)
+	values["kora.db.work.maintenance_capacity"] += int64(work.MaintenanceCapacity)
+	values["kora.db.work.background_active"] += int64(work.BackgroundActive)
+	values["kora.db.work.background_capacity"] += int64(work.BackgroundCapacity)
+	values["kora.db.work.background_waiters"] += int64(work.BackgroundWaiters)
+	values["kora.db.work.background_skipped"] += int64(work.BackgroundSkipped)
+}
+
 func addEventStreamUsage(values map[string]int64, provider *natsprovider.Provider) {
 	if provider == nil {
 		return

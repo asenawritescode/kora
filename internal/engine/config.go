@@ -280,7 +280,7 @@ func newEngine(ctx context.Context, config Config, deps engineAssemblyDependenci
 		Runtimes: startup.Tenants.Runtimes, Directory: startup.Platform.Directory,
 		DirectoryDescriptors: startup.Platform.Descriptors,
 		DirectoryRevision:    startup.Platform.StartCursor, DirectoryConsumerID: startup.DirectoryConsumerID,
-		CellID: startup.Platform.CellID, DirectoryWorkAdmission: directoryWorkAdmission, RetirementLimit: config.RetirementLimit,
+		CellID: startup.Platform.CellID, DirectoryWorkAdmission: directoryWorkAdmission, DirectoryBackgroundAdmission: directoryWorkAdmission.Background(), RetirementLimit: config.RetirementLimit,
 		TenantActivationWorkAdmission: func(ctx context.Context, tenantConfig *site.Config) (func(), error) {
 			admission, admissionErr := site.ConnectionAdmission(tenantConfig)
 			if admissionErr != nil {
