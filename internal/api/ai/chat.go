@@ -485,7 +485,7 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 	var (
 		runUsage   Usage // the provider usage of this run so far, summed over its rounds
 		toolErrors int   // cumulative tool errors for circuit breaker
-		stops      = newTurnStops(time.Now())
+		stops      = newTurnStops(time.Now(), cfg.StallThreshold)
 		stop       = stopMaxRounds // why the turn ends when no round answers; the loop sets it on every other stop
 	)
 

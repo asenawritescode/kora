@@ -21,7 +21,7 @@ func TestTurnStopsBeforeRound(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := newTurnStops(start).beforeRound(tc.at)
+			got, ok := newTurnStops(start, 2).beforeRound(tc.at)
 			if ok != tc.isStop || got != tc.want {
 				t.Fatalf("beforeRound() = (%q, %v), want (%q, %v)", got, ok, tc.want, tc.isStop)
 			}
@@ -31,19 +31,22 @@ func TestTurnStopsBeforeRound(t *testing.T) {
 
 func TestTurnStopsStall(t *testing.T) {
 	tests := []struct {
-		name   string
-		rounds [][]string
-		want   []bool // stall verdict per round
+		name      string
+		threshold int
+		rounds    [][]string
+		want      []bool // stall verdict per round
 	}{
-		{name: "first call is not a stall", rounds: [][]string{{"find_records::{}"}}, want: []bool{false}},
-		{name: "same call twice stalls on the second", rounds: [][]string{{"find_records::{}"}, {"find_records::{}"}}, want: []bool{false, true}},
-		{name: "different arguments do not stall", rounds: [][]string{{"find_records::{\"a\":1}"}, {"find_records::{\"a\":2}"}}, want: []bool{false, false}},
-		{name: "a call between repeats resets", rounds: [][]string{{"find_records::{}"}, {"get_record::{}"}, {"find_records::{}"}}, want: []bool{false, false, false}},
-		{name: "same batch twice stalls", rounds: [][]string{{"a::1", "b::2"}, {"a::1", "b::2"}}, want: []bool{false, true}},
+		{name: "first call is not a stall", threshold: 2, rounds: [][]string{{"find_records::{}"}}, want: []bool{false}},
+		{name: "same call twice stalls on the second by default", threshold: 2, rounds: [][]string{{"find_records::{}"}, {"find_records::{}"}}, want: []bool{false, true}},
+		{name: "threshold 3 allows one repeat", threshold: 3, rounds: [][]string{{"f::{}"}, {"f::{}"}, {"f::{}"}}, want: []bool{false, false, true}},
+		{name: "different arguments do not stall", threshold: 2, rounds: [][]string{{"find_records::{\"a\":1}"}, {"find_records::{\"a\":2}"}}, want: []bool{false, false}},
+		{name: "a call between repeats resets", threshold: 2, rounds: [][]string{{"find_records::{}"}, {"get_record::{}"}, {"find_records::{}"}}, want: []bool{false, false, false}},
+		{name: "same batch twice stalls", threshold: 2, rounds: [][]string{{"a::1", "b::2"}, {"a::1", "b::2"}}, want: []bool{false, true}},
+		{name: "threshold below two is two", threshold: 1, rounds: [][]string{{"f::{}"}, {"f::{}"}}, want: []bool{false, true}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			stops := newTurnStops(time.Now())
+			stops := newTurnStops(time.Now(), tc.threshold)
 			for i, sigs := range tc.rounds {
 				if got := stops.stallOn(sigs); got != tc.want[i] {
 					t.Fatalf("round %d: stallOn() = %v, want %v", i+1, got, tc.want[i])
@@ -69,7 +72,7 @@ func TestTurnStopsAfterResults(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			stops := newTurnStops(time.Now())
+			stops := newTurnStops(time.Now(), 2)
 			for i, contents := range tc.results {
 				var results []map[string]any
 				for _, c := range contents {

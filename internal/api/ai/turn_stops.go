@@ -25,17 +25,22 @@ const (
 // turnStops is the repeat and budget state of one turn. A tool call that repeats the previous round's calls is
 // a stall: the turn ends on the second identical round rather than calling the same tool again.
 type turnStops struct {
-	deadline    time.Time
-	lastSigs    []string
-	lastErrCode string
+	deadline       time.Time
+	stallThreshold int // identical rounds in a row that stop the turn
+	repeats        int // consecutive rounds identical to the one before
+	lastSigs       []string
+	lastErrCode    string
 	// done is what the turn saved, in order: the outcome line of each confirmed write.
 	done []string
 	// lastErr is the message of the last structured tool error, the blocker in the ending.
 	lastErr string
 }
 
-func newTurnStops(start time.Time) *turnStops {
-	return &turnStops{deadline: start.Add(turnTimeBudget)}
+func newTurnStops(start time.Time, stallThreshold int) *turnStops {
+	if stallThreshold < 2 {
+		stallThreshold = 2 // one call can never be a stall
+	}
+	return &turnStops{deadline: start.Add(turnTimeBudget), stallThreshold: stallThreshold}
 }
 
 // beforeRound reports the stop that ends the turn before another model round is called.
@@ -46,13 +51,17 @@ func (s *turnStops) beforeRound(now time.Time) (stopReason, bool) {
 	return "", false
 }
 
-// stallOn reports whether this round's tool calls repeat the previous round's calls exactly. The repeated calls are not run.
+// stallOn reports whether this round's tool calls have repeated the previous round's calls exactly, enough times in a
+// row to reach the stall threshold. With the default threshold of 2 the second identical round stops the turn, and its
+// calls are not run.
 func (s *turnStops) stallOn(sigs []string) bool {
 	if len(sigs) > 0 && stringSlicesEqual(sigs, s.lastSigs) {
-		return true
+		s.repeats++
+	} else {
+		s.repeats = 0
 	}
 	s.lastSigs = sigs
-	return false
+	return len(sigs) > 0 && s.repeats+1 >= s.stallThreshold
 }
 
 // afterResults records what the executed tool results did and reports the stop they call for: the same error code
