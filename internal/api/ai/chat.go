@@ -762,14 +762,8 @@ loop:
 				continue
 			}
 
-			// --- Append assistant message + tool results ---
-			// Preserve content alongside tool_calls — don't nil it.
-			messages = append(messages, map[string]any{
-				"role":       "assistant",
-				"content":    msg["content"], // may be nil — that's fine
-				"tool_calls": toolCalls,
-			})
-			messages = append(messages, toolResults...)
+			// --- Append assistant message + tool results for the next call ---
+			messages = appendRound(messages, msg["content"], toolCalls, toolResults, functions)
 
 			// --- Context compaction ---
 			if totalTokens > int(float64(cfg.TokenBudget)*cfg.CompactionThreshold) {
