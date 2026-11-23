@@ -66,6 +66,9 @@ func storePreview(tx *orm.TxManager, inv toolInvocation, stored any, preview map
 	if err != nil {
 		return (&aiToolError{Code: errConfirmInvalid, Message: "The preview could not be saved."}).text()
 	}
+	if inv.Turn != nil {
+		inv.Turn.previews = append(inv.Turn.previews, previewCard{WriteID: writeID, Summary: pendingWrite{ToolName: inv.Name, PreviewJSON: string(previewJSON)}.summary()})
+	}
 	out, err := json.Marshal(previewReply{
 		Preview:   preview,
 		WriteID:   writeID,

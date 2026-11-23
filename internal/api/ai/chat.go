@@ -69,6 +69,8 @@ type ChatResponse struct {
 	Cards []contract.AnswerCard `json:"cards,omitempty"`
 	// Choices is set when the reply is a clarifying question: the reply is the question.
 	Choices *contract.ChoiceQuestion `json:"choices,omitempty"`
+	// Previews are the writes waiting for the person's yes; the reply is their card.
+	Previews []previewCard `json:"pending_writes,omitempty"`
 }
 
 // followUpBlurb gives the model the question the conversation last answered, so a follow-up keeps its metric.
@@ -763,6 +765,12 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 			// only known once its tool has run, so the check follows the execution, before the model is asked again. ---
 			if answers.choice != nil {
 				out = replyOutcome(endWithChoice(requestCtx, tx, answers.choice, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, Model: model, Provider: providerKey}))
+				return
+			}
+
+			// --- Writes previewed: the turn ends with one card for them. The model is not asked again. ---
+			if len(answers.previews) > 0 {
+				out = replyOutcome(endWithPreviews(requestCtx, tx, answers.previews, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, SubjectKey: subjectKey, Model: model, Provider: providerKey}))
 				return
 			}
 
