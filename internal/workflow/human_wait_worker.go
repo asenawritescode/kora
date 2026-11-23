@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
-	"github.com/asenawritescode/kora/internal/dbaccess"
 )
 
 const maxHumanWaitRecoveryBatch uint16 = 500
@@ -20,10 +19,16 @@ type HumanWaitRecoveryWorker struct {
 	batch     uint16
 	interval  time.Duration
 	onError   func(error)
-	admission *dbaccess.Admission
+	admission interface {
+		Acquire(context.Context) (func(), error)
+	}
 }
 
-func NewHumanWaitRecoveryWorker(store HumanWaitRecoveryStore, tenant contract.TenantID, batch uint16, interval time.Duration, onError func(error), admission ...*dbaccess.Admission) (*HumanWaitRecoveryWorker, error) {
+// NewHumanWaitRecoveryWorker builds a recovery worker. At most one admission
+// controller may be passed; it guards each recovery pass.
+func NewHumanWaitRecoveryWorker(store HumanWaitRecoveryStore, tenant contract.TenantID, batch uint16, interval time.Duration, onError func(error), admission ...interface {
+	Acquire(context.Context) (func(), error)
+}) (*HumanWaitRecoveryWorker, error) {
 	if store == nil {
 		return nil, fmt.Errorf("human wait recovery requires a store")
 	}

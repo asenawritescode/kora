@@ -32,6 +32,10 @@ type Worker struct {
 	WorkAdmission interface {
 		Acquire(context.Context) (func(), error)
 	}
+	// BackgroundAdmission serves outbox-driven database work; nil keeps WorkAdmission.
+	BackgroundAdmission interface {
+		Acquire(context.Context) (func(), error)
+	}
 	client  *http.Client
 	done    chan struct{}
 	ctx     context.Context
@@ -402,20 +406,35 @@ func (w *Worker) updateExtensionStats(ctx context.Context, extName, status strin
 	}
 }
 
+// dbWorkAdmission picks the lane for one database unit (outbox work: background).
+func (w *Worker) dbWorkAdmission(ctx context.Context) interface {
+	Acquire(context.Context) (func(), error)
+} {
+	if w == nil {
+		return nil
+	}
+	if isOutboxEvent(ctx) && w.BackgroundAdmission != nil {
+		return w.BackgroundAdmission
+	}
+	return w.WorkAdmission
+}
+
 func (w *Worker) acquireDBWork(ctx context.Context) (func(), error) {
-	if w == nil || w.WorkAdmission == nil {
+	admission := w.dbWorkAdmission(ctx)
+	if admission == nil {
 		return func() {}, nil
 	}
 	if ctx == nil {
 		return nil, fmt.Errorf("webhook database work requires a context")
 	}
 	for {
-		release, err := w.WorkAdmission.Acquire(ctx)
+		release, err := admission.Acquire(ctx)
 		if err == nil {
 			return release, nil
 		}
+		// A busy lane already waited to the deadline; return, do not retry.
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, err
 		}
 		timer := time.NewTimer(100 * time.Millisecond)
 		select {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/dbaccess"
 	knet "github.com/asenawritescode/kora/internal/net"
 	"github.com/asenawritescode/kora/internal/outbox"
 	"github.com/asenawritescode/kora/internal/tenantruntime"
@@ -45,9 +46,10 @@ func registerWorkflowTriggerConsumer(config TenantServiceConfig, loaded *knet.Lo
 		return fmt.Errorf("parse workflow trigger tenant: %w", err)
 	}
 	dispatcher := outbox.NewDispatcher(loaded.DB, dialect)
-	dispatcher.WorkAdmission = services.WorkAdmission
+	background := services.WorkAdmission.Background()
+	dispatcher.WorkAdmission = background
 	if err := registerRecordTriggerConsumer(dispatcher, func(ctx context.Context, trigger contract.EventEnvelope) error {
-		release, err := services.WorkAdmission.Acquire(ctx)
+		release, err := background.Acquire(ctx)
 		if err != nil {
 			return err
 		}
@@ -77,7 +79,7 @@ func RunWorkflowTriggerDispatcher(ctx context.Context, dispatcher *outbox.Dispat
 		workCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		processed, err := dispatcher.Run(workCtx, 25)
 		cancel()
-		if err != nil && ctx.Err() == nil {
+		if err != nil && ctx.Err() == nil && !dbaccess.IsBackgroundBusy(err) {
 			// Outbox delivery is retried by leaving the event unreceipted. Avoid
 			// logging record contents because they may contain user data.
 			var domainErr *contract.Error

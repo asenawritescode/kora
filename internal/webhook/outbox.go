@@ -15,6 +15,14 @@ import (
 
 const outboxConsumerName = "engine-webhooks-v1"
 
+// outboxEventKey marks a context whose database work belongs to the outbox
+// dispatcher, so it draws on the background lane.
+type outboxEventKey struct{}
+
+func isOutboxEvent(ctx context.Context) bool {
+	return ctx != nil && ctx.Value(outboxEventKey{}) != nil
+}
+
 // NewOutboxDispatcher registers the webhook worker for canonical document
 // lifecycle events. The outbox receipt is written only after every matching
 // extension accepted the delivery or produced a permanent 4xx result.
@@ -26,7 +34,9 @@ func NewOutboxDispatcher(database *sql.DB, dialect db.QueryDialect, worker *Work
 	if err := dispatcher.RegisterForPatterns(outboxConsumerName, []string{
 		"kora.%.after!_insert", "kora.%.after!_save", "kora.%.after!_delete",
 		"kora.%.after!_submit", "kora.%.after!_cancel",
-	}, worker.ProcessOutboxEvent); err != nil {
+	}, func(ctx context.Context, event contract.EventEnvelope) error {
+		return worker.ProcessOutboxEvent(context.WithValue(ctx, outboxEventKey{}, true), event)
+	}); err != nil {
 		return nil, err
 	}
 	return dispatcher, nil

@@ -187,11 +187,13 @@ func OutboxEventOperation(eventType string) eventstream.EventOp {
 
 // RunOutboxPublisher repeatedly publishes bounded due batches from the durable
 // tenant outbox through its configured destination.
-func RunOutboxPublisher(ctx context.Context, p *outbox.Publisher, admission *dbaccess.Admission, backlog ...*outbox.BacklogMetrics) {
+func RunOutboxPublisher(ctx context.Context, p *outbox.Publisher, admission *dbaccess.BackgroundLane, backlog ...*outbox.BacklogMetrics) {
 	if ctx == nil || p == nil {
 		return
 	}
-	p.WorkAdmission = admission
+	if admission != nil {
+		p.WorkAdmission = admission
+	}
 	var snapshot *outbox.BacklogMetrics
 	if len(backlog) > 0 {
 		snapshot = backlog[0]
@@ -206,10 +208,8 @@ func RunOutboxPublisher(ctx context.Context, p *outbox.Publisher, admission *dba
 			return
 		case <-ticker.C:
 			publishCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			if _, err := p.PublishDue(publishCtx, 100); err != nil && !errors.Is(err, context.Canceled) {
-				recordOutboxPublishError(snapshot, err)
-				slog.Warn("outbox publisher: publish due failed", "error", err)
-			}
+			_, err := p.PublishDue(publishCtx, 100)
+			reportOutboxPublishFailure(snapshot, err)
 			if snapshot != nil && (refreshAt.IsZero() || !time.Now().Before(refreshAt)) {
 				if err := snapshot.Refresh(publishCtx, p); err != nil && !errors.Is(err, context.Canceled) {
 					slog.Warn("outbox publisher: backlog metrics refresh failed", "error", err)
@@ -219,6 +219,15 @@ func RunOutboxPublisher(ctx context.Context, p *outbox.Publisher, admission *dba
 			cancel()
 		}
 	}
+}
+
+// reportOutboxPublishFailure logs a failed pass; cancellation and busy skips are not failures.
+func reportOutboxPublishFailure(snapshot *outbox.BacklogMetrics, err error) {
+	if err == nil || errors.Is(err, context.Canceled) || dbaccess.IsBackgroundBusy(err) {
+		return
+	}
+	recordOutboxPublishError(snapshot, err)
+	slog.Warn("outbox publisher: publish due failed", "error", err)
 }
 
 func recordOutboxPublishError(snapshot *outbox.BacklogMetrics, err error) {
@@ -231,19 +240,21 @@ func recordOutboxPublishError(snapshot *outbox.BacklogMetrics, err error) {
 // event-level receipt behind successful external delivery. Its batch and
 // active-work admission are bounded; idle tenants retain no polling goroutine
 // after their runtime generation is retired.
-func RunWebhookOutboxDispatcher(ctx context.Context, dispatcher *outbox.Dispatcher, admission *dbaccess.Admission) {
+func RunWebhookOutboxDispatcher(ctx context.Context, dispatcher *outbox.Dispatcher, admission *dbaccess.BackgroundLane) {
 	if ctx == nil || dispatcher == nil {
 		return
 	}
 	// The dispatcher admits its SQL selection, receipt and local transaction
 	// units individually. External webhook HTTP calls must not hold a database
 	// work permit while waiting on extension servers.
-	dispatcher.WorkAdmission = admission
+	if admission != nil {
+		dispatcher.WorkAdmission = admission
+	}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
 		workCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		if _, err := dispatcher.Run(workCtx, 25); err != nil && ctx.Err() == nil {
+		if _, err := dispatcher.Run(workCtx, 25); err != nil && ctx.Err() == nil && !dbaccess.IsBackgroundBusy(err) {
 			slog.Warn("webhook outbox: dispatch failed", "error", err)
 		}
 		cancel()
@@ -266,7 +277,7 @@ func RunRequestNotificationDispatcher(ctx context.Context, dispatcher *outbox.Di
 	for ctx.Err() == nil {
 		workCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		processed, err := dispatcher.Run(workCtx, 25)
-		if err != nil && ctx.Err() == nil {
+		if err != nil && ctx.Err() == nil && !dbaccess.IsBackgroundBusy(err) {
 			slog.Warn("request notification outbox: dispatch failed", "error_type", fmt.Sprintf("%T", err))
 		}
 		cancel()
@@ -281,6 +292,14 @@ func RunRequestNotificationDispatcher(ctx context.Context, dispatcher *outbox.Di
 	}
 }
 
+// ignoreBackgroundBusy treats a skipped background pass as an idle pass.
+func ignoreBackgroundBusy(err error) error {
+	if dbaccess.IsBackgroundBusy(err) {
+		return nil
+	}
+	return err
+}
+
 // RunRequestNotificationWorker retries transient database and local-bus
 // failures while the durable delivery row remains available for recovery.
 func RunRequestNotificationWorker(ctx context.Context, worker *notifications.Worker) {
@@ -292,6 +311,7 @@ func RunRequestNotificationWorker(ctx context.Context, worker *notifications.Wor
 		workCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		accepted, err := worker.RunOnce(workCtx)
 		cancel()
+		err = ignoreBackgroundBusy(err)
 		if err != nil && ctx.Err() == nil {
 			slog.Warn("request notification delivery: attempt failed", "error_type", fmt.Sprintf("%T", err))
 			timer := time.NewTimer(delay)

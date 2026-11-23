@@ -750,14 +750,16 @@ func registerWebhookDelivery(config TenantServiceConfig, loaded *knet.LoadedSite
 	if loaded == nil || worker == nil {
 		return errors.New("durable webhook delivery requires a tenant runtime and worker")
 	}
+	if admission != nil {
+		worker.BackgroundAdmission = admission.Background()
+	}
 	dispatcher, err := webhook.NewOutboxDispatcher(loaded.DB, dialect, worker)
 	if err != nil {
 		return fmt.Errorf("construct durable webhook dispatcher: %w", err)
 	}
-	dispatcher.WorkAdmission = admission
 	return registerTenantWorkerStart(config, func() error {
 		if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
-			RunWebhookOutboxDispatcher(ctx, dispatcher, admission)
+			RunWebhookOutboxDispatcher(ctx, dispatcher, admission.Background())
 		}) {
 			return errors.New("tenant runtime is stopping")
 		}
@@ -939,7 +941,7 @@ func registerOutboxPublisher(config TenantServiceConfig, loaded *knet.LoadedSite
 	publisher := outbox.NewPublisher(loaded.DB, destination, dialect)
 	if err := registerTenantWorkerStart(config, func() error {
 		if !loaded.StartWorker(config.ProcessContext, func(ctx context.Context) {
-			RunOutboxPublisher(ctx, publisher, services.WorkAdmission, services.OutboxBacklog)
+			RunOutboxPublisher(ctx, publisher, services.WorkAdmission.Background(), services.OutboxBacklog)
 		}) {
 			return fmt.Errorf("tenant runtime is stopping")
 		}

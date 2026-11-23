@@ -367,13 +367,21 @@ func configureTenantWorkflow(ctx context.Context, cfg *WorkflowTenantConfig, loa
 	if poll == 0 {
 		poll = 500 * time.Millisecond
 	}
-	worker, err := workflow.NewExecutionWorker(executionStore, claimHandler, workflow.ExecutionWorkerConfig{Tenant: tenant, Owner: contract.NewID(), Concurrency: concurrency, Batch: batch, Lease: lease, PollInterval: poll, WorkAdmission: deps.admission}, func(err error) {
-		slog.Warn("durable workflow execution pass failed", "tenant_id", tenant, "error", err)
+	worker, err := workflow.NewExecutionWorker(executionStore, claimHandler, workflow.ExecutionWorkerConfig{Tenant: tenant, Owner: contract.NewID(), Concurrency: concurrency, Batch: batch, Lease: lease, PollInterval: poll, WorkAdmission: deps.admission.Background()}, func(err error) {
+		logWorkflowExecutionPassFailure(tenant, err)
 	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("construct tenant workflow execution worker: %w", err)
 	}
 	return worker, definitionService, instanceService, nil
+}
+
+// logWorkflowExecutionPassFailure skips background-busy passes, which are normal.
+func logWorkflowExecutionPassFailure(tenant contract.TenantID, err error) {
+	if dbaccess.IsBackgroundBusy(err) {
+		return
+	}
+	slog.Warn("durable workflow execution pass failed", "tenant_id", tenant, "error", err)
 }
 
 func newEngineWorkflowIdentity(tenant contract.TenantID, siteName string, grants []policy.Grant) (workflow.ExecutionIdentityProvider, error) {

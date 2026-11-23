@@ -102,11 +102,13 @@ func TestMaintenanceLaneReservesInteractiveCapacityAndCapsHeavyWork(t *testing.T
 	if _, err := admission.AcquireMaintenance(context.Background()); !errors.Is(err, ErrExhausted) {
 		t.Fatalf("second maintenance admission error=%v, want bounded rejection", err)
 	}
-	first, err := admission.Acquire(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	// Ordinary capacity is what remains after the maintenance and background
+	// lanes; at this budget the background lane takes one slot.
+	ordinary := cap(admission.ordinary)
+	if ordinary != 1 || admission.Snapshot().BackgroundCapacity != 1 {
+		t.Fatalf("ordinary=%d background=%d, want 1 and 1", ordinary, admission.Snapshot().BackgroundCapacity)
 	}
-	second, err := admission.Acquire(context.Background())
+	first, err := admission.Acquire(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,10 +116,9 @@ func TestMaintenanceLaneReservesInteractiveCapacityAndCapsHeavyWork(t *testing.T
 		t.Fatalf("ordinary admission consumed reserved maintenance capacity: %v", err)
 	}
 	snapshot := admission.Snapshot()
-	if snapshot.Active != 3 || snapshot.MaintenanceActive != 1 || snapshot.MaintenanceCapacity != 1 {
+	if snapshot.Active != 2 || snapshot.MaintenanceActive != 1 || snapshot.MaintenanceCapacity != 1 {
 		t.Fatalf("unexpected lane snapshot: %#v", snapshot)
 	}
-	second()
 	first()
 	heavy()
 	if got := admission.Snapshot(); got.Active != 0 || got.MaintenanceActive != 0 {

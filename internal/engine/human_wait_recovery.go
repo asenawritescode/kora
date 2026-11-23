@@ -8,6 +8,7 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	kdb "github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/dbaccess"
 	knet "github.com/asenawritescode/kora/internal/net"
 	requestsql "github.com/asenawritescode/kora/internal/requests/sqlstore"
 	"github.com/asenawritescode/kora/internal/workflow"
@@ -36,8 +37,11 @@ func StartHumanWaitRecoveryWorker(runtime *knet.LoadedSite, processCtx context.C
 	recoveryStore := tenantHumanWaitRecoveryStore{requests: requestStore, workflows: executionStore}
 	services := runtime.RuntimeServiceSnapshot()
 	worker, err := workflow.NewHumanWaitRecoveryWorker(recoveryStore, tenant, 25, 15*time.Second, func(err error) {
+		if dbaccess.IsBackgroundBusy(err) {
+			return
+		}
 		slog.Warn("workflow human request recovery pass failed", "tenant_id", tenant, "error", err)
-	}, services.WorkAdmission)
+	}, services.WorkAdmission.Background())
 	if err != nil {
 		return fmt.Errorf("construct human request recovery worker: %w", err)
 	}

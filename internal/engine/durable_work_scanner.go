@@ -299,6 +299,16 @@ func (s *DurableWorkScanner) scanPage(ctx context.Context) (bool, error) {
 	return completed, nil
 }
 
+func tenantBackgroundAdmission(config *site.Config) (interface {
+	Acquire(context.Context) (func(), error)
+}, error) {
+	admission, err := site.ConnectionAdmission(config)
+	if err != nil {
+		return nil, err
+	}
+	return admission.Background(), nil
+}
+
 func (s *DurableWorkScanner) withWork(ctx context.Context, work func() error) error {
 	if err := ctx.Err(); err != nil {
 		return err

@@ -24,6 +24,10 @@ type TenantRuntimeAssemblyConfig struct {
 	DirectoryWorkAdmission interface {
 		Acquire(context.Context) (func(), error)
 	}
+	// DirectoryBackgroundAdmission is the same endpoint's background lane.
+	DirectoryBackgroundAdmission interface {
+		Acquire(context.Context) (func(), error)
+	}
 	TenantActivationWorkAdmission func(context.Context, *site.Config) (func(), error)
 	CellID                        string
 	RetirementLimit               uint16
@@ -115,7 +119,7 @@ func AssembleTenantRuntime(config TenantRuntimeAssemblyConfig) (*TenantRuntimeAs
 	consumer, err := NewTenantDirectoryConsumer(TenantDirectoryConfig{
 		Directory: config.Directory, Tenants: tenants, CellID: config.CellID,
 		ConsumerID: config.DirectoryConsumerID, InitialCursor: config.DirectoryRevision,
-		Coordinator: coordinator, WorkAdmission: config.DirectoryWorkAdmission,
+		Coordinator: coordinator, WorkAdmission: config.DirectoryBackgroundAdmission,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("configure tenant directory consumer: %w", err)
@@ -123,13 +127,9 @@ func AssembleTenantRuntime(config TenantRuntimeAssemblyConfig) (*TenantRuntimeAs
 	scanner, err := NewDurableWorkScanner(DurableWorkScannerConfig{
 		ParentContext: config.Services.ProcessContext, PlatformDB: config.Resources.PlatformDB,
 		PlatformDialect: config.Resources.PlatformDialect, Directory: config.Directory,
-		Tenants: tenants, Coordinator: coordinator, WorkAdmission: config.DirectoryWorkAdmission,
-		TenantWorkAdmission: func(config *site.Config) (interface {
-			Acquire(context.Context) (func(), error)
-		}, error) {
-			return site.ConnectionAdmission(config)
-		},
-		Common: config.Common, CellID: config.CellID,
+		Tenants: tenants, Coordinator: coordinator, WorkAdmission: config.DirectoryBackgroundAdmission,
+		TenantWorkAdmission: tenantBackgroundAdmission,
+		Common:              config.Common, CellID: config.CellID,
 		DirectoryConsumerID: config.DirectoryConsumerID,
 		ArchiveHorizon:      config.Services.ArchiveHorizon,
 	})
