@@ -47,7 +47,7 @@ func TestPackActionsChatAcrossDialects(t *testing.T) {
 				{tool: "run_action", args: func() string {
 					return fmt.Sprintf(`{"action":%q,"input":{"register":"REG-1","location":"LOC-1","opening_float":500}}`, packChatOpenTill)
 				}},
-				{content: "Open a till on REG-1 with a 500 float? Reply yes to confirm."},
+				{content: "Preview ready."},
 			})
 			if n := f.count("Till Session"); n != "0" {
 				t.Fatalf("till sessions before confirmation = %s, want 0", n)
@@ -69,7 +69,7 @@ func TestPackActionsChatAcrossDialects(t *testing.T) {
 				t.Fatalf("till sessions after confirm_write = %s, want 1", n)
 			}
 
-			// Turn 3: the model previews the sale with run_action and asks before it writes.
+			// Turn 3: the model previews the sale with run_action; the preview ends the turn before it writes.
 			saleInput := func() string {
 				till := f.one("SELECT name FROM " + f.tbl("Till Session"))
 				return fmt.Sprintf(`{"action":%q,"input":{"register":"REG-1","location":"LOC-1","till_session":%q,"currency":"KES","items":[{"item":"ITM-1","quantity":1,"unit_price":180,"amount":180}],"payments":[{"method":"Cash","amount":180,"currency":"KES","reference":%q}]}}`, packChatRecordSale, till, saleIntent)
@@ -77,7 +77,7 @@ func TestPackActionsChatAcrossDialects(t *testing.T) {
 			f.chatScripted("Sell one Maize, paid in cash.", []packChatStep{
 				{tool: "list_actions", args: func() string { return fmt.Sprintf(`{"action":%q}`, packChatRecordSale) }},
 				{tool: "run_action", args: saleInput},
-				{content: "Sell 1 Maize for 180 KES in cash? Reply yes to confirm."},
+				{content: "Preview ready."},
 			})
 			if n := f.count("Sale"); n != "0" {
 				t.Fatalf("sales before confirmation = %s, want 0", n)

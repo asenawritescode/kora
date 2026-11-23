@@ -103,3 +103,43 @@ func TestProviderBodyOffersToolsOnlyWhenThereAreTools(t *testing.T) {
 		})
 	}
 }
+
+// TestWindowTextEndsTheTurnWithItsCard: a model text reply while previews are open ends the turn with their card; the
+// text is not shown instead. Three previews give one card listing all three.
+func TestWindowTextEndsTheTurnWithItsCard(t *testing.T) {
+	turn := &answerTurn{}
+	for _, name := range []string{"Tea", "Milk", "Bread"} {
+		turn.previews = append(turn.previews, previewCard{WriteID: "w-" + name, Summary: "create Item (item_name " + name + ")"})
+	}
+	if !turn.windowOpen() {
+		t.Fatal("open previews must keep the window open, so a text reply ends the turn with the card")
+	}
+	got := previewsText(turn.previews)
+	if !strings.HasPrefix(got, "Ready to save 3 writes:") || !strings.HasSuffix(got, "Save all?") {
+		t.Fatalf("card = %q, want one card for three writes", got)
+	}
+}
+
+// TestWindowCapEndsTheTurnWithItsCard: at the round cap an open window ends with its card; with no preview the cap
+// keeps the stop reply.
+func TestWindowCapEndsTheTurnWithItsCard(t *testing.T) {
+	tests := []struct {
+		name     string
+		previews int
+		wantCard bool
+	}{
+		{name: "open window at the cap ends with its card", previews: 2, wantCard: true},
+		{name: "no window at the cap keeps the stop reply", previews: 0, wantCard: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			turn := &answerTurn{}
+			for i := 0; i < tc.previews; i++ {
+				turn.previews = append(turn.previews, previewCard{WriteID: "w", Summary: "s"})
+			}
+			if got := turn.windowOpen(); got != tc.wantCard {
+				t.Fatalf("windowOpen() at the cap = %v, want %v", got, tc.wantCard)
+			}
+		})
+	}
+}

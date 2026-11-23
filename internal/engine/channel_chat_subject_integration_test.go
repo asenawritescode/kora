@@ -238,12 +238,12 @@ func TestChannelChatSubjectUserAcrossDialects(t *testing.T) {
 			if err != nil {
 				t.Fatal("parse item count:", err)
 			}
-			// Turn 1: the model previews the Item and asks. Nothing is saved yet.
+			// Turn 1: the model previews the Item; the preview ends the turn. Nothing is saved yet.
 			out, reply := chat(session, "Add an item Tea at 50.", []packChatStep{
 				{tool: "create_record", args: func() string {
 					return `{"record_type":"Item","data":{"item_name":"Tea","uom":"Nos","price":50,"cost":30}}`
 				}},
-				{content: "Save Tea at 50 KES? Reply yes."},
+				{content: "Preview ready."},
 			})
 			if out.Code != http.StatusOK {
 				t.Fatalf("turn 1 = %d: %s", out.Code, out.Body)
@@ -257,8 +257,9 @@ func TestChannelChatSubjectUserAcrossDialects(t *testing.T) {
 			if n := ownedItems(channelChatSubject); n != before {
 				t.Fatalf("items owned by the subject before confirmation = %s, want %s", n, before)
 			}
+			// Two scripted calls: the preview round, then the closing text that ends the batch window.
 			if reply.Data.Usage.InputTokens != 20 || reply.Data.Usage.OutputTokens != 20 {
-				t.Fatalf("turn 1 usage = %+v, want the two scripted calls summed (20 input, 20 output)", reply.Data.Usage)
+				t.Fatalf("turn 1 usage = %+v, want the two scripted calls (20 input, 20 output)", reply.Data.Usage)
 			}
 
 			// Turn 2: after yes, the model confirms the preview by its write_id, and the Item is saved.
