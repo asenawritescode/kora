@@ -208,3 +208,39 @@ func TestDrillLineSumIsNotOpenable(t *testing.T) {
 		t.Fatal("a line sum drill is openable as a list, want not")
 	}
 }
+
+func TestDerivedDrillRefusalNamesItsParts(t *testing.T) {
+	cat := posCatalog(t)
+	net := parkedMetric(t, "net_sales")
+	cat.Metrics["net_sales"] = net
+	nairobi, err := tenanttime.ParseZone("Africa/Nairobi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	day := tenanttime.Date{Year: 2026, Month: 11, Day: 20}
+	clock := tenanttime.Clock{Location: nairobi}
+	cat.Metrics["unsourced_total"] = Metric{Name: "unsourced_total", Label: "Cash on hand", Type: KindBalance}
+	tests := []struct {
+		metric string
+		want   string
+	}{
+		{metric: "net_sales", want: "Net sales is Sales minus Refunds; open one of them to see records."},
+		{metric: "average_sale", want: "Average sale is Sales divided by Receipts; open one of them to see records."},
+		{metric: "average_plus_one", want: "Plus is calculated, so it has no records of its own."},
+		{metric: "balance_sales", want: "Balance is a running total, so it has no records of its own; open Sale to see what changed it."},
+		{metric: "receipts_to_date", want: "Receipts is a running total, so it has no records of its own; open Sale to see what changed it."},
+		{metric: "unsourced_total", want: "Cash on hand is a running total, so it has no records of its own."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.metric, func(t *testing.T) {
+			_, err := cat.Drill(DrillRequest{Metric: tt.metric, From: day, To: day}, clock)
+			var refusal DerivedDrillRefusal
+			if !errors.As(err, &refusal) {
+				t.Fatalf("Drill error = %v, want DerivedDrillRefusal", err)
+			}
+			if refusal.Message != tt.want {
+				t.Fatalf("message = %q, want %q", refusal.Message, tt.want)
+			}
+		})
+	}
+}

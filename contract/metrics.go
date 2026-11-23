@@ -14,6 +14,18 @@ type MetricSummary struct {
 	Good        string `json:"good,omitempty"`
 	Description string `json:"description,omitempty"`
 	Verified    bool   `json:"verified"`
+	// Parts are the metrics a derived or ratio metric is made of, in formula order. A simple metric has none.
+	Parts []MetricPart `json:"parts,omitempty"`
+}
+
+// MetricPart is one metric a derived or ratio metric is made of. Sign is "+" or "-" for a term of a sum or
+// difference; Role is "numerator" or "denominator" for a ratio.
+//
+//contract:wire
+type MetricPart struct {
+	Metric string `json:"metric"`
+	Sign   string `json:"sign,omitempty"`
+	Role   string `json:"role,omitempty"`
 }
 
 // MetricDefinition is one metric as declared: its computation and its filters.

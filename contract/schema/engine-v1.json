@@ -1608,6 +1608,24 @@
       ],
       "type": "object"
     },
+    "MetricPart": {
+      "additionalProperties": false,
+      "properties": {
+        "metric": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "sign": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric"
+      ],
+      "type": "object"
+    },
     "MetricPeriod": {
       "additionalProperties": false,
       "properties": {
@@ -1775,6 +1793,12 @@
         },
         "name": {
           "type": "string"
+        },
+        "parts": {
+          "items": {
+            "$ref": "#/$defs/MetricPart"
+          },
+          "type": "array"
         },
         "type": {
           "type": "string"
@@ -4653,6 +4677,24 @@
       ],
       "type": "object"
     },
+    "MetricPart": {
+      "additionalProperties": false,
+      "properties": {
+        "metric": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "sign": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric"
+      ],
+      "type": "object"
+    },
     "MetricPeriod": {
       "additionalProperties": false,
       "properties": {
@@ -4820,6 +4862,12 @@
         },
         "name": {
           "type": "string"
+        },
+        "parts": {
+          "items": {
+            "$ref": "#/$defs/MetricPart"
+          },
+          "type": "array"
         },
         "type": {
           "type": "string"

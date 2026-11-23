@@ -313,3 +313,74 @@ func TestQueryPeriodOfResolvesPresetsAndCustomDates(t *testing.T) {
 		})
 	}
 }
+
+func TestMetricSummariesNameTheirParts(t *testing.T) {
+	registry, api := metricsFixture(t, []*doctype.Permission{{Doctype: "Sale", Role: "Cashier", Read: true}})
+	rec := serveMetrics(t, registry, api, []string{"Cashier"}, "GET", "/api/v1/metrics", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", rec.Code, rec.Body)
+	}
+	var envelope struct {
+		Data []struct {
+			Name  string                `json:"name"`
+			Parts []contract.MetricPart `json:"parts"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatal("decode list:", err)
+	}
+	parts := map[string][]contract.MetricPart{}
+	for _, m := range envelope.Data {
+		parts[m.Name] = m.Parts
+	}
+	tests := []struct {
+		name string
+		want []contract.MetricPart
+	}{
+		{name: "average_sale", want: []contract.MetricPart{{Metric: "sales", Role: "numerator"}, {Metric: "receipts", Role: "denominator"}}},
+		{name: "sales", want: nil},
+	}
+	for _, tt := range tests {
+		if got := parts[tt.name]; !slices.Equal(got, tt.want) {
+			t.Fatalf("%s parts = %+v, want %+v", tt.name, got, tt.want)
+		}
+	}
+	if !strings.Contains(rec.Body.String(), `"parts":[{"metric":"sales","role":"numerator"}`) {
+		t.Fatalf("average_sale parts not encoded as the wire shape: %s", rec.Body)
+	}
+}
+
+func TestDerivedDrillRefusalIsStableCodeWithPartsMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name    string
+		message string
+	}{
+		{name: "derived with parts", message: "Net sales is Sales minus Refunds; open one of them to see records."},
+		{name: "ratio", message: "Average sale is Sales divided by Receipts; open one of them to see records."},
+		{name: "calculated without parts", message: "Plus is calculated, so it has no records of its own."},
+		{name: "running total", message: "Balance is a running total, so it has no records of its own; open Sale to see what changed it."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			drillError(c, metrics.DerivedDrillRefusal{Message: tt.message})
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status=%d, want 422", rec.Code)
+			}
+			var body struct {
+				Error struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatal("decode error:", err)
+			}
+			if body.Error.Code != "metric.derived_not_drillable" || body.Error.Message != tt.message {
+				t.Fatalf("error = %+v, want code metric.derived_not_drillable and message %q", body.Error, tt.message)
+			}
+		})
+	}
+}

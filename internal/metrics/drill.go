@@ -28,6 +28,68 @@ type Drill struct {
 	ListOpenable bool
 }
 
+// DerivedDrillRefusal is a drill on a metric that is not simple: a ratio or derived metric, or a running total.
+// Its message says what to open instead.
+type DerivedDrillRefusal struct{ Message string }
+
+func (r DerivedDrillRefusal) Error() string { return r.Message }
+
+// notDrillable is the refusal for a metric that is not simple. A ratio or derived metric names its parts
+// instead; a running total names the record type that changes it.
+func (c Catalog) notDrillable(m Metric) error {
+	switch m.Type {
+	case KindRatio, KindDerived:
+		return c.derivedRefusal(m)
+	case KindBalance, KindCumulative:
+		return runningRefusal(m)
+	case KindSimple:
+	}
+	return fmt.Errorf("metric %q of type %s does not drill to records", m.Name, m.Type)
+}
+
+// runningRefusal says a balance or cumulative metric is a running total. Its definition names the record type
+// it reads, and that record type is what changes the total, so the message points there when it is set.
+func runningRefusal(m Metric) DerivedDrillRefusal {
+	if m.Model == "" {
+		return DerivedDrillRefusal{Message: m.Label + " is a running total, so it has no records of its own."}
+	}
+	return DerivedDrillRefusal{Message: m.Label + " is a running total, so it has no records of its own; open " + m.Model + " to see what changed it."}
+}
+
+// derivedRefusal says what a ratio or derived metric is made of, so the caller opens one of its parts instead.
+// A metric with no parts is calculated and has no records of its own.
+func (c Catalog) derivedRefusal(m Metric) DerivedDrillRefusal {
+	parts := m.Parts()
+	if len(parts) == 0 {
+		return DerivedDrillRefusal{Message: fmt.Sprintf("%s is calculated, so it has no records of its own.", m.Label)}
+	}
+	return DerivedDrillRefusal{Message: fmt.Sprintf("%s is %s; open one of them to see records.", m.Label, c.partsInWords(parts))}
+}
+
+// partsInWords reads parts as a phrase: "Sales minus Refunds", or "Sales divided by Receipts" for a ratio.
+// A part names its metric by label, or by name when the catalog has no label for it.
+func (c Catalog) partsInWords(parts []Part) string {
+	label := func(p Part) string {
+		if l := c.Metrics[p.Metric].Label; l != "" {
+			return l
+		}
+		return p.Metric
+	}
+	if parts[0].Role != "" {
+		return label(parts[0]) + " divided by " + label(parts[1])
+	}
+	var b strings.Builder
+	b.WriteString(label(parts[0]))
+	for _, p := range parts[1:] {
+		word := " plus "
+		if p.Sign == "-" {
+			word = " minus "
+		}
+		b.WriteString(word + label(p))
+	}
+	return b.String()
+}
+
 // drillTimeLayout is the datetime text the list API compares the time field with: UTC, to the second.
 const drillTimeLayout = "2006-01-02 15:04:05"
 
@@ -42,7 +104,7 @@ func (c Catalog) Drill(req DrillRequest, clock tenanttime.Clock) (Drill, error) 
 		return Drill{}, fmt.Errorf("metric %q is not defined", req.Metric)
 	}
 	if m.Type != KindSimple {
-		return Drill{}, fmt.Errorf("metric %q is %s: only simple metrics drill to records", m.Name, m.Type)
+		return Drill{}, c.notDrillable(m)
 	}
 	dt := c.Models[m.Model]
 	if dt == nil || dt.Facts == nil {

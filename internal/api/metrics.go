@@ -656,15 +656,18 @@ func drillMetric(cat metrics.Catalog, req contract.MetricDrillRequest) (metrics.
 	return metrics.Catalog{}, "", errors.New("a drill names one metric or one measure")
 }
 
-// drillError answers a failed drill: a refused drill or group is 422, a forbidden path 403, a bad
-// cursor 400, a deadline a timeout, and anything else internal.
+// drillError answers a failed drill: a derived metric is 422 metric.derived_not_drillable, another refused drill
+// or group is 422, a forbidden path 403, a bad cursor 400, a deadline a timeout, and anything else internal.
 func drillError(c *gin.Context, err error) {
 	var refusal metrics.DrillRefusal
+	var derived metrics.DerivedDrillRefusal
 	switch {
 	case errors.Is(err, metrics.ErrForbidden):
 		writeError(c, http.StatusForbidden, "metrics.forbidden", err.Error(), nil)
 	case errors.Is(err, metrics.ErrBadCursor):
 		writeError(c, http.StatusBadRequest, "metrics.drill_invalid", err.Error(), nil)
+	case errors.As(err, &derived):
+		writeError(c, http.StatusUnprocessableEntity, "metric.derived_not_drillable", err.Error(), nil)
 	case errors.As(err, &refusal):
 		writeError(c, http.StatusUnprocessableEntity, "metrics.drill_invalid", err.Error(), nil)
 	default:
@@ -685,8 +688,20 @@ func metricsRunError(c *gin.Context, msg string, err error) {
 func summaryOf(def metrics.Metric) contract.MetricSummary {
 	return contract.MetricSummary{
 		Name: def.Name, Label: def.Label, Type: string(def.Type), Model: def.Model, Format: def.Format,
-		Good: def.Good, Description: def.Description, Verified: def.Verified,
+		Good: def.Good, Description: def.Description, Verified: def.Verified, Parts: partsOf(def.Parts()),
 	}
+}
+
+// partsOf is the wire form of a metric's parts. A simple metric has none, so the field is omitted.
+func partsOf(in []metrics.Part) []contract.MetricPart {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]contract.MetricPart, len(in))
+	for i, p := range in {
+		out[i] = contract.MetricPart{Metric: p.Metric, Sign: p.Sign, Role: p.Role}
+	}
+	return out
 }
 
 // definitionOf is the described form of a metric, filters included.
