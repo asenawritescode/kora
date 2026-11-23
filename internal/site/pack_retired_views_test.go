@@ -37,6 +37,7 @@ func TestParsePackRetiredViews(t *testing.T) {
 
 func TestValidatePackRejectsRetiredViewThePackStillShips(t *testing.T) {
 	view := PackFile{Path: "views/owner_dashboard.yaml", ContentType: "view", Content: "name: owner_dashboard\nroute: /dashboard\ntype: dashboard\n"}
+	displayView := PackFile{Path: "views/owner_dashboard.yaml", ContentType: "view", Content: "name: Owner Dashboard\nroute: /dashboard\ntype: dashboard\n"}
 	manifest := func(retires string) PackFile {
 		return PackFile{Path: "pack.yaml", ContentType: "pack", Content: "name: shop\nversion: \"1\"\n" + retires}
 	}
@@ -46,6 +47,8 @@ func TestValidatePackRejectsRetiredViewThePackStillShips(t *testing.T) {
 		wantCode string
 	}{
 		{name: "retired and shipped", files: []PackFile{view, manifest("retires:\n  views: [owner_dashboard]\n")}, wantCode: "retired_view_shipped"},
+		{name: "stored display name retired by snake case and shipped", files: []PackFile{displayView, manifest("retires:\n  views: [owner_dashboard]\n")}, wantCode: "retired_view_shipped"},
+		{name: "stored display name retired by its own name and shipped", files: []PackFile{displayView, manifest("retires:\n  views: [\"Owner Dashboard\"]\n")}, wantCode: "retired_view_shipped"},
 		{name: "retired and not shipped", files: []PackFile{manifest("retires:\n  views: [owner_dashboard]\n")}},
 		{name: "invalid retires", files: []PackFile{manifest("retires:\n  views: [\" \"]\n")}, wantCode: "retires_invalid"},
 	} {

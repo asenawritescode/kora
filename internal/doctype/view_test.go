@@ -1055,3 +1055,25 @@ func TestParseViewYAML_PreservesNestedComponentConfig(t *testing.T) {
 		requireInt(t, "span", metric.Span, 4)
 	})
 }
+
+func TestViewNameKey(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   ViewName
+		want string
+	}{
+		{name: "stored display name", in: "Owner Dashboard", want: "owner dashboard"},
+		{name: "snake case retire", in: "owner_dashboard", want: "owner dashboard"},
+		{name: "kebab case retire", in: "owner-dashboard", want: "owner dashboard"},
+		{name: "mixed separators and runs", in: "  Owner__-Dashboard ", want: "owner dashboard"},
+		{name: "single word", in: "Register", want: "register"},
+		{name: "different words stay different", in: "Owner Dashboards", want: "owner dashboards"},
+		{name: "empty", in: "", want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.in.Key(); got != tc.want {
+				t.Fatalf("ViewName(%q).Key() = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

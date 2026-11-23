@@ -25,6 +25,7 @@ func TestDropRetiredViewsRemovesOnlyUnshippedRetiredNames(t *testing.T) {
 		{name: "no retires keeps everything", views: []*doctype.View{dashboard, register}, wantKeep: []string{"owner_dashboard", "register"}},
 		{name: "retired view removed, others kept", views: []*doctype.View{dashboard, register, workshop}, retired: []string{"owner_dashboard"}, wantKeep: []string{"register", "workshop"}},
 		{name: "retired but still shipped is kept", views: []*doctype.View{dashboard, register}, retired: []string{"owner_dashboard"}, shipped: []*doctype.View{dashboard}, wantKeep: []string{"owner_dashboard", "register"}},
+		{name: "stored display name retired by snake case is removed", views: []*doctype.View{viewNamed("Owner Dashboard", "/dashboard", "dashboard"), register}, retired: []string{"owner_dashboard"}, wantKeep: []string{"register"}},
 		{name: "retired name not installed is a no-op", views: []*doctype.View{register}, retired: []string{"owner_dashboard"}, wantKeep: []string{"register"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
