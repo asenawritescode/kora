@@ -208,3 +208,34 @@ func TestDrillLineSumIsNotOpenable(t *testing.T) {
 		t.Fatal("a line sum drill is openable as a list, want not")
 	}
 }
+
+func TestDerivedDrillRefusalNamesItsParts(t *testing.T) {
+	cat := posCatalog(t)
+	net := parkedMetric(t, "net_sales")
+	cat.Metrics["net_sales"] = net
+	nairobi, err := tenanttime.ParseZone("Africa/Nairobi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	day := tenanttime.Date{Year: 2026, Month: 11, Day: 20}
+	clock := tenanttime.Clock{Location: nairobi}
+	tests := []struct {
+		metric string
+		want   string
+	}{
+		{metric: "net_sales", want: "Net sales is Sales minus Refunds; open one of them to see records."},
+		{metric: "average_plus_one", want: "Plus is a derived metric: only simple metrics drill to records."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.metric, func(t *testing.T) {
+			_, err := cat.Drill(DrillRequest{Metric: tt.metric, From: day, To: day}, clock)
+			var refusal DerivedDrillRefusal
+			if !errors.As(err, &refusal) {
+				t.Fatalf("Drill error = %v, want DerivedDrillRefusal", err)
+			}
+			if refusal.Message != tt.want {
+				t.Fatalf("message = %q, want %q", refusal.Message, tt.want)
+			}
+		})
+	}
+}
