@@ -72,7 +72,7 @@ func (s *turnStops) afterResults(results []map[string]any) (stopReason, bool) {
 		code, message := toolErrorOf(content)
 		if code == "" {
 			s.lastErrCode = ""
-			if isSavedOutcome(content) {
+			if toolResultText(content).savedOutcome() {
 				s.done = append(s.done, content)
 			}
 			continue
@@ -86,9 +86,12 @@ func (s *turnStops) afterResults(results []map[string]any) (stopReason, bool) {
 	return "", false
 }
 
-// isSavedOutcome reports whether a successful tool result is the outcome line of a confirmed write.
-func isSavedOutcome(content string) bool {
-	return strings.HasPrefix(content, "Created ") || strings.HasPrefix(content, "Updated ")
+// toolResultText is the content of one tool result as the model sees it.
+type toolResultText string
+
+// savedOutcome reports whether a successful tool result is the outcome line of a confirmed write.
+func (t toolResultText) savedOutcome() bool {
+	return strings.HasPrefix(string(t), "Created ") || strings.HasPrefix(string(t), "Updated ")
 }
 
 // toolErrorOf is the structured error code and message of a tool result, or "" for a result that is not a structured

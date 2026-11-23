@@ -36,16 +36,19 @@ func givenIn(value any, words string) bool {
 	if value == nil {
 		return true
 	}
-	want := normalizeWords(fmt.Sprint(value))
+	want := matchText(fmt.Sprint(value)).words()
 	if want == "" {
 		return true
 	}
-	return strings.Contains(" "+normalizeWords(words)+" ", " "+want+" ")
+	return strings.Contains(" "+matchText(words).words()+" ", " "+want+" ")
 }
 
-// normalizeWords lowercases text and splits it on every character that is not a letter or a digit.
-func normalizeWords(s string) string {
-	return strings.Join(strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+// matchText is text compared word by word: a value a preview holds, or what the person wrote.
+type matchText string
+
+// words lowercases the text and splits it on every character that is not a letter or a digit.
+func (t matchText) words() string {
+	return strings.Join(strings.FieldsFunc(strings.ToLower(string(t)), func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	}), " ")
 }
