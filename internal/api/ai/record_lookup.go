@@ -37,10 +37,11 @@ func recordTypesOf(functions []map[string]any) []string {
 	return nil
 }
 
-// namesRecordType reports whether a message names one of the record types by its last word, singular or plural:
-// "Supplier Bill" is named by "supplier bills" and by "bills".
-func namesRecordType(message string, types []string) bool {
-	words := textmatch.Words(message)
+// namedTypes returns the record types a text names by their last word, singular or plural: "Supplier Bill" is
+// named by "supplier bills" and by "bills".
+func namedTypes(text string, types []string) []string {
+	words := textmatch.Words(text)
+	var named []string
 	for _, recordType := range types {
 		name := textmatch.Words(recordType)
 		if len(name) == 0 {
@@ -48,11 +49,12 @@ func namesRecordType(message string, types []string) bool {
 		}
 		for _, word := range words {
 			if sameNoun(word, name[len(name)-1]) {
-				return true
+				named = append(named, recordType)
+				break
 			}
 		}
 	}
-	return false
+	return named
 }
 
 // sameNoun reports whether word is noun or its English plural.
@@ -63,10 +65,11 @@ func sameNoun(word, noun string) bool {
 	return strings.HasSuffix(noun, "y") && word == strings.TrimSuffix(noun, "y")+"ies"
 }
 
-// lookupFix returns the messages that send back a reply given without any tool call when the person named a record
-// type, once per turn. The next request then requires a tool call.
+// lookupFix returns the messages that send back a reply given without any tool call that talks about a record type
+// the person named, once per turn. The next request then requires a tool call. A reply about something else, such
+// as a refusal, may stand.
 func (t *answerTurn) lookupFix(reply, message string) []map[string]any {
-	if t.lookedUp || t.lookupSent || !namesRecordType(message, t.recordTypes) {
+	if t.lookedUp || t.lookupSent || len(namedTypes(reply, namedTypes(message, t.recordTypes))) == 0 {
 		return nil
 	}
 	t.lookupSent, t.forceTool = true, true
