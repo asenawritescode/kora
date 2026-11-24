@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/asenawritescode/kora/internal/textmatch"
@@ -69,7 +70,8 @@ func sameNoun(word, noun string) bool {
 // the person named, once per turn. The next request then requires a tool call. A reply about something else, such
 // as a refusal, may stand.
 func (t *answerTurn) lookupFix(reply, message string) []map[string]any {
-	if t.lookedUp || t.lookupSent || len(namedTypes(reply, namedTypes(message, t.recordTypes))) == 0 {
+	asked := pickedOption(message, t.lastReply)
+	if t.lookedUp || t.lookupSent || len(namedTypes(reply, namedTypes(asked, t.recordTypes))) == 0 {
 		return nil
 	}
 	t.lookupSent, t.forceTool = true, true
@@ -86,4 +88,41 @@ func (t *answerTurn) resend(body map[string]any, messages []map[string]any) {
 		body["tool_choice"] = "required"
 		t.forceTool = false
 	}
+}
+
+// lastReply returns the content of the last assistant message of a transcript.
+func lastReply(transcript []ChatMessage) string {
+	for i := len(transcript) - 1; i >= 0; i-- {
+		if transcript[i].Role == "assistant" {
+			return transcript[i].Content
+		}
+	}
+	return ""
+}
+
+// pickedOption returns what a message asks for. A message that is only an option number, such as "1" or
+// "option 2", stands for that numbered line of the previous reply ("1. List all supplier bills"); any other
+// message stands for itself.
+func pickedOption(message, previous string) string {
+	words := textmatch.Words(message)
+	if len(words) == 2 && words[0] == "option" {
+		words = words[1:]
+	}
+	if len(words) != 1 {
+		return message
+	}
+	n, err := strconv.Atoi(words[0])
+	if err != nil {
+		return message
+	}
+	for _, line := range strings.Split(previous, "\n") {
+		number, text, ok := strings.Cut(strings.TrimSpace(line), ".")
+		if !ok {
+			number, text, ok = strings.Cut(strings.TrimSpace(line), ")")
+		}
+		if ok && number == strconv.Itoa(n) {
+			return strings.TrimSpace(text)
+		}
+	}
+	return message
 }

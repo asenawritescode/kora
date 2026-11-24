@@ -40,8 +40,18 @@ func TestChatLooksUpRecordsBeforeAnswering(t *testing.T) {
 				t.Fatalf("reply = %q", reply)
 			}
 
-			if _, reply = f.chatScripted("Thanks", []packChatStep{textStep("You're welcome.")}); reply != "You're welcome." {
+			if _, reply = f.chatScripted("Thanks", []packChatStep{textStep("You're welcome.\n\n1. List all items\n2. Add an item")}); !strings.HasPrefix(reply, "You're welcome.") {
 				t.Fatalf("reply = %q", reply)
+			}
+
+			// "1" picks "List all items" from the reply before: an answer from memory is sent back too.
+			bodies, reply = f.chatScripted("1", []packChatStep{
+				textStep("None found: no items have been created yet."),
+				callStep("find_records", map[string]any{"record_type": "Item"}),
+				textStep("There are 2 items: Sugar 2kg and Salt 500g."),
+			})
+			if !strings.Contains(bodies[1], `"tool_choice":"required"`) || reply != "There are 2 items: Sugar 2kg and Salt 500g." {
+				t.Fatalf("the answer to a picked option was not looked up; reply %q", reply)
 			}
 		})
 	}
