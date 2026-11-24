@@ -11,6 +11,8 @@ import (
 
 	goyaml "github.com/goccy/go-yaml"
 	yamlv3 "gopkg.in/yaml.v3"
+
+	"github.com/asenawritescode/kora/internal/textmatch"
 )
 
 // ──────────────────────────────────────────────────────────────
@@ -957,7 +959,7 @@ func suggestField(unknown string, knownFields map[string]bool) string {
 	best := ""
 	bestDist := 999
 	for k := range knownFields {
-		d := levenshtein(unknown, k)
+		d := textmatch.Distance(unknown, k)
 		if d < bestDist && d <= 3 {
 			bestDist = d
 			best = k
@@ -981,53 +983,6 @@ func suggestionFor(unknown string, known map[string]bool) string {
 		return fmt.Sprintf("did you mean %q?", suggestion)
 	}
 	return ""
-}
-
-func levenshtein(a, b string) int {
-	if len(a) == 0 {
-		return len(b)
-	}
-	if len(b) == 0 {
-		return len(a)
-	}
-
-	// Use a single row for memory efficiency.
-	prev := make([]int, len(b)+1)
-	curr := make([]int, len(b)+1)
-
-	for i := 0; i <= len(b); i++ {
-		prev[i] = i
-	}
-
-	for i := 1; i <= len(a); i++ {
-		curr[0] = i
-		for j := 1; j <= len(b); j++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
-				cost = 0
-			}
-			curr[j] = min3(
-				prev[j]+1,      // deletion
-				curr[j-1]+1,    // insertion
-				prev[j-1]+cost, // substitution
-			)
-		}
-		prev, curr = curr, prev
-	}
-	return prev[len(b)]
-}
-
-func min3(a, b, c int) int {
-	if a < b {
-		if a < c {
-			return a
-		}
-		return c
-	}
-	if b < c {
-		return b
-	}
-	return c
 }
 
 // ──────────────────────────────────────────────────────────────
