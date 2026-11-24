@@ -89,7 +89,7 @@ func recordToolDescriptors(types []string) []ToolDescriptor {
 	}
 	return []ToolDescriptor{
 		recordTool(toolConfirmWrite, "Run a write that a preview returned. Call it only in a later message, after the person says yes, with the write_id from that preview.", objectSchema(map[string]any{"write_id": map[string]any{"type": "string", "description": "write_id from the latest preview."}}, "write_id"), "confirm"),
-		recordTool(toolFindRecords, "Find or list records of one type, recent first. Returns names, titles and summary fields.", objectSchema(findProps, "record_type"), recordToolOperation[toolFindRecords]),
+		recordTool(toolFindRecords, "Find or list records of one type, recent first. Returns names, titles and summary fields. Link filters accept a code or a name; names are matched.", objectSchema(findProps, "record_type"), recordToolOperation[toolFindRecords]),
 		recordTool(toolGetRecord, "Get one record by name.", objectSchema(map[string]any{"record_type": typeProp, "name": nameProp}, "record_type", "name"), recordToolOperation[toolGetRecord]),
 		recordTool(toolDescribeRecord, "Describe a record type: fields with type, required, default, options, link target, read-only and computed flags, child tables and pack commands. Call before a write.", objectSchema(map[string]any{"record_type": typeProp}, "record_type"), recordToolOperation[toolDescribeRecord]),
 		recordTool(toolCreateRecord, "Create one record of a type. Pack-owned types need their pack command instead; the error names it.", objectSchema(map[string]any{"record_type": typeProp, "data": dataProp}, "record_type", "data"), recordToolOperation[toolCreateRecord]),
@@ -155,7 +155,7 @@ func executeRecordTool(tx *orm.TxManager, reg *doctype.Registry, inv toolInvocat
 	}
 	switch operation {
 	case "find":
-		return findRecords(tx, dt, inv.Args, rowScope)
+		return findRecords(tx, dt, inv.Args, rowScope, inv.Execution)
 	case "get":
 		return getRecord(tx, dt, inv.Args, rowScope)
 	case "describe":
@@ -245,21 +245,22 @@ func recordDataArg(args map[string]any) (map[string]any, string) {
 	return fields, ""
 }
 
-// findRecords runs find and list in one: filters, an optional text search on the title,
-// recent first, capped by limit.
-func findRecords(tx *orm.TxManager, dt *doctype.DocType, args map[string]any, rowScope policy.RowScope) string {
+// findRecords runs find and list in one: filters, a text search on the title, recent first, capped by limit.
+// Link filters and the search match names and titles first (see resolveTitleFilters).
+func findRecords(tx *orm.TxManager, dt *doctype.DocType, args map[string]any, rowScope policy.RowScope, execution policy.Execution) string {
 	filters := []any{}
 	if existing, ok := args["filters"].([]any); ok {
 		filters = append(filters, existing...)
 	}
-	if search, _ := args["search"].(string); strings.TrimSpace(search) != "" {
-		field := dt.TitleField
-		if field == "" {
-			field = "name"
-		}
-		filters = append(filters, map[string]any{"field": field, "op": "like", "value": "%" + strings.TrimSpace(search) + "%"})
+	search, _ := args["search"].(string)
+	resolved, err := resolveTitleFilters(context.Background(), tx, dt, titleInput{filters: filters, search: strings.TrimSpace(search), rowScope: rowScope, execution: execution})
+	if err != nil {
+		return aiToolError{Code: errGuardFailed, Message: "Could not search " + dt.Name + "."}.text()
 	}
-	findArgs := map[string]any{"filters": filters}
+	if resolved.none != "" {
+		return strings.Join(append(resolved.notes, resolved.none), "\n")
+	}
+	findArgs := map[string]any{"filters": resolved.filters}
 	if limit, ok := args["limit"]; ok {
 		findArgs["limit"] = limit
 	}
@@ -272,7 +273,7 @@ func findRecords(tx *orm.TxManager, dt *doctype.DocType, args map[string]any, ro
 		return aiToolError{Code: errGuardFailed, Message: "Could not search " + dt.Name + "."}.text()
 	}
 	if total == 0 {
-		return fmt.Sprintf("No %s found.", dt.Name)
+		return noRowsText(context.Background(), tx, dt, rowScope, resolved)
 	}
 	if err := showLinkTitles(tx, dt, docs); err != nil {
 		return aiToolError{Code: errGuardFailed, Message: "Could not search " + dt.Name + "."}.text()
@@ -282,7 +283,7 @@ func findRecords(tx *orm.TxManager, dt *doctype.DocType, args map[string]any, ro
 		summaries = append(summaries, formatDocSummary(dt, doc, i+1))
 	}
 	header := fmt.Sprintf("Found %d %s, showing %d:", total, dt.Name, len(docs))
-	return header + "\n" + strings.Join(summaries, "\n")
+	return strings.Join(append(resolved.notes, header+"\n"+strings.Join(summaries, "\n")), "\n")
 }
 
 // showLinkTitles sets each document's title field to its display title, so a Link title shows the linked
