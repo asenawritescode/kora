@@ -467,7 +467,7 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 		_ = ReleaseBudget(requestCtx, tx.DB, reservation)
 	}()
 
-	answers := newAnswerTurn(turn, currency, userWords(transcript, req.Message), functions)
+	answers := newAnswerTurn(turn, currency, transcript, req.Message, functions)
 	end := chatEnd{ctx: requestCtx, tx: tx, answer: finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, Message: req.Message, SubjectKey: subjectKey, Model: model, Provider: providerKey}}
 
 	// --- Multi-Round Tool Execution Loop ---

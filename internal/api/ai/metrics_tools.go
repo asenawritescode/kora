@@ -93,6 +93,8 @@ type answerTurn struct {
 	// none, and forceTool asks the next request to require a tool call.
 	recordTypes                     []string
 	lookedUp, lookupSent, forceTool bool
+	// lastReply is the assistant's previous reply: a message that is only an option number picks a line of it.
+	lastReply string
 }
 
 // queryAnswer is one successful query: the question as the model sent it, the result, its meta and whether

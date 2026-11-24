@@ -74,3 +74,27 @@ func TestLookupFixSendsBackAnUncheckedAnswerOnce(t *testing.T) {
 		})
 	}
 }
+
+func TestPickedOption(t *testing.T) {
+	previous := "No supplier bills found for Mr. Ouma Son.\n\n1. List all supplier bills\n2) Show all suppliers"
+	tests := []struct{ message, want string }{
+		{"1", "List all supplier bills"},
+		{"option 2", "Show all suppliers"},
+		{" 2 ", "Show all suppliers"},
+		{"3", "3"},
+		{"List stock counts", "List stock counts"},
+		{"12 bags of sugar", "12 bags of sugar"},
+	}
+	for _, tt := range tests {
+		if got := pickedOption(tt.message, previous); got != tt.want {
+			t.Errorf("pickedOption(%q) = %q, want %q", tt.message, got, tt.want)
+		}
+	}
+}
+
+func TestLookupFixReadsAPickedOption(t *testing.T) {
+	turn := answerTurn{recordTypes: []string{"Supplier Bill"}, lastReply: "No supplier bills found.\n\n1. List all supplier bills\n2. Show all suppliers"}
+	if turn.correction("None found: no supplier bills have been created yet.", "1") == nil {
+		t.Fatal("an answer to a picked option was not sent back for a lookup")
+	}
+}
