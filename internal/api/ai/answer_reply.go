@@ -11,13 +11,15 @@ import (
 	"github.com/asenawritescode/kora/internal/orm"
 )
 
-// newAnswerTurn starts the answer state of one chat turn: what the person may see on a card, and the metrics
-// runner. Only the administrator may pin a question or share it with the shop.
-func newAnswerTurn(turn ChatTurn, currency, words string) *answerTurn {
+// newAnswerTurn starts the answer state of one chat turn: what the person may see on a card, the metrics runner,
+// and the record types the offered tools may read. Only the administrator may pin a question or share it with the
+// shop.
+func newAnswerTurn(turn ChatTurn, currency, words string, functions []map[string]any) *answerTurn {
 	return &answerTurn{
-		run:   turn.Metrics,
-		page:  cardPage{Currency: currency, CanShare: executionHasRole(turn.Execution, doctype.AdminRole)},
-		words: words,
+		run:         turn.Metrics,
+		page:        cardPage{Currency: currency, CanShare: executionHasRole(turn.Execution, doctype.AdminRole)},
+		words:       words,
+		recordTypes: recordTypesOf(functions),
 	}
 }
 
@@ -161,9 +163,13 @@ func endWithChoice(ctx context.Context, tx *orm.TxManager, choice *contract.Choi
 	return ChatResponse{Reply: choice.Question, RunID: a.RunID, Choices: choice}
 }
 
-// correction returns the messages that send a reply with a wrong number back to the model, once. It returns nil
-// when the reply may stand, or when the one correction was already sent.
+// correction returns the messages that send a reply back to the model: once for a reply about records given
+// without looking anything up, once for a wrong number. It returns nil when the reply may stand, or when the
+// correction was already sent.
 func (t *answerTurn) correction(reply, message string) []map[string]any {
+	if fix := t.lookupFix(reply, message); fix != nil {
+		return fix
+	}
 	bad := t.unbacked(reply, message)
 	if len(bad) == 0 || t.corrected {
 		return nil

@@ -63,8 +63,13 @@ func (t *answerTurn) closesRound(stops *turnStops, toolCalls []any) bool {
 	return stalled || t.windowClosedBy(toolCalls)
 }
 
-// narrowTools offers the window's tools to the next call while a window is open.
-func (t *answerTurn) narrowTools(body map[string]any, functions []map[string]any) {
+// afterToolRound prepares the next call after a round of tool calls: the turn has looked something up, the model
+// may answer again without a tool, and an open window offers only its tools.
+func (t *answerTurn) afterToolRound(body map[string]any, functions []map[string]any) {
+	t.lookedUp = true
+	if len(functions) > 0 {
+		body["tool_choice"] = "auto"
+	}
 	if t.windowOpen() {
 		body["tools"] = windowFunctions(functions)
 	}
