@@ -88,6 +88,11 @@ type answerTurn struct {
 	catalog  *metricsCatalog
 	// corrected is set once the reply was sent back for a wrong number; it is sent back at most once.
 	corrected bool
+	// recordTypes are the record types the person may read. A reply to a message naming one must follow a tool
+	// call in the turn: lookedUp is set once a tool round ran, lookupSent once a reply was sent back for having
+	// none, and forceTool asks the next request to require a tool call.
+	recordTypes                     []string
+	lookedUp, lookupSent, forceTool bool
 }
 
 // queryAnswer is one successful query: the question as the model sent it, the result, its meta and whether

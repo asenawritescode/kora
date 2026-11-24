@@ -467,7 +467,7 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 		_ = ReleaseBudget(requestCtx, tx.DB, reservation)
 	}()
 
-	answers := newAnswerTurn(turn, currency, userWords(transcript, req.Message))
+	answers := newAnswerTurn(turn, currency, userWords(transcript, req.Message), functions)
 	end := chatEnd{ctx: requestCtx, tx: tx, answer: finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, Message: req.Message, SubjectKey: subjectKey, Model: model, Provider: providerKey}}
 
 	// --- Multi-Round Tool Execution Loop ---
@@ -693,7 +693,7 @@ loop:
 			}
 			if fix := answers.correction(content, req.Message); fix != nil {
 				messages = append(messages, fix...)
-				aiBody["messages"] = messages
+				answers.resend(aiBody, messages)
 				continue
 			}
 			content = answers.finalReply(content, req.Message)
@@ -757,7 +757,7 @@ loop:
 
 			// --- Append assistant message + tool results for the next call ---
 			messages = appendRound(messages, msg["content"], toolCalls, toolResults, functions)
-			answers.narrowTools(aiBody, functions)
+			answers.afterToolRound(aiBody, functions)
 
 			// --- Context compaction ---
 			if totalTokens > int(float64(cfg.TokenBudget)*cfg.CompactionThreshold) {
