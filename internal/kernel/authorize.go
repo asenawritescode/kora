@@ -41,21 +41,46 @@ func authorize(reg *doctype.Registry, op Operation, def CommandDefinition) *cont
 			return contract.NewError(contract.CodeValidationFailed, "append-only records cannot be changed")
 		}
 	}
-	permission := def.AuthorizesWith
+	permission, err := bundleAuthorizationPermission(op, reg, doctypeName, def.AuthorizesWith)
+	if err != nil {
+		return err
+	}
+	target := reg.Get(doctypeName)
+	if op.lifecycleEffectAuthorized(target) {
+		return nil
+	}
+	_, err = decideOperationResource(op, reg, target, permission)
+	return err
+}
+
+// bundleAuthorizationPermission returns the permission a command is authorized by. A
+// record.mutate_bundle takes it from its first record, after a submit check when that
+// record also transitions; every other command keeps the command's own permission.
+func bundleAuthorizationPermission(op Operation, reg *doctype.Registry, doctypeName, permission string) (string, *contract.Error) {
 	var bundle RecordMutationBundlePayload
 	if op.Command == CommandRecordMutateBundle && json.Unmarshal(op.Payload, &bundle) == nil && len(bundle.Records) > 0 {
-		permission = bundle.Records[0].Operation
+		first := bundle.Records[0]
+		permission = first.Operation
 		if permission == "" {
 			permission = "create"
 		}
-		if permission == "update" && bundle.Records[0].TransitionAction != "" {
+		if permission == "update" && first.TransitionAction != "" {
 			if _, err := decideOperationResource(op, reg, reg.Get(doctypeName), "submit"); err != nil {
-				return err
+				return "", err
 			}
 		}
 	}
-	_, err := decideOperationResource(op, reg, reg.Get(doctypeName), permission)
-	return err
+	return permission, nil
+}
+
+// lifecycleEffectAuthorized reports whether a lifecycle script's create or update of target
+// is authorized by the source record's permission rather than the target's role matrix
+// (see OperationContext.lifecycleEffect). Entity-owned targets never get this elevation.
+func (op Operation) lifecycleEffectAuthorized(target *doctype.DocType) bool {
+	if !op.Context.lifecycleEffect || target == nil || target.BusinessScopePolicy == contract.ScopeEntityOwned {
+		return false
+	}
+	return op.Command == CommandRecordCreate || op.Command == CommandRecordUpdate
 }
 
 func decideOperationResource(op Operation, reg *doctype.Registry, dt *doctype.DocType, operation string) (policy.Decision, *contract.Error) {

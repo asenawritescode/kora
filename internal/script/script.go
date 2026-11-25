@@ -107,6 +107,11 @@ type MutationRequest struct {
 	Roles           []string        `json:"roles,omitempty"`
 	SkipHookScripts []string        `json:"skip_hook_scripts,omitempty"`
 	AllowReadOnly   bool            `json:"allow_read_only,omitempty"`
+	// Lifecycle marks a create or update requested by a document-event script.
+	// The kernel then authorizes that write by the source record's permission,
+	// not the target's role matrix. Only Go lifecycle wiring sets it; it is
+	// excluded from JSON so no payload can carry it.
+	Lifecycle bool `json:"-"`
 }
 
 // MutationExecutor executes a nested script write in the current operation

@@ -36,6 +36,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 			User: request.User, Owner: request.Owner, UserRole: request.UserRole,
 			Roles: append([]string(nil), request.Roles...), SkipHookScripts: append([]string(nil), request.SkipHookScripts...),
 			AllowReadOnlyFields: request.AllowReadOnly, Source: SourceIntegration,
+			lifecycleEffect: request.Lifecycle,
 		},
 		Command: request.Command, Payload: request.Payload,
 	}

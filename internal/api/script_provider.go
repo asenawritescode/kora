@@ -375,6 +375,7 @@ func (p *scriptProvider) executeRecordMutation(command, doctypeName, name string
 		PrincipalID: actor.PrincipalID, PrincipalType: string(actor.PrincipalType),
 		SubjectUserID: actor.SubjectUserID, UserRole: userRole, Roles: roles,
 		SkipHookScripts: append([]string(nil), p.activeHooks...), AllowReadOnly: true,
+		Lifecycle: len(p.activeHooks) > 0,
 	}
 	var resultData json.RawMessage
 	if p.mutationExecutor != nil {
