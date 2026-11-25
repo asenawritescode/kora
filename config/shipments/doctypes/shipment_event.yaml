@@ -33,6 +33,7 @@ fields:
       In transit
       Delivered
       Failed
+    description: "Moves the shipment to this status when that is not backwards. Leave empty for a note."
     in_list_view: true
     in_standard_filter: true
   - fieldname: note
