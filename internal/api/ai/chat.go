@@ -445,7 +445,7 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 	// Build function definitions from the canonical tool catalog projection.
 	functions := chatFunctions(turn, reg, req.DisableTools)
 
-	messages := turnMessages(transcript, cfg.HistoryLimit, financialDisplayContext(currency)+insightsNoteFor(turn.Insights), turnContext, req.Message)
+	messages := turnMessages(turn.modelHistory(transcript), cfg.HistoryLimit, financialDisplayContext(currency)+insightsNoteFor(turn.Insights), turnContext, req.Message)
 
 	// Build the initial AI request body. Tools and tool_choice persist across all rounds.
 	aiBody := providerBody(model, messages, functions, cfg.MaxTokensPerCall)
