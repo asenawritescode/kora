@@ -14,6 +14,7 @@ report: trips by status, fuel cost by vehicle, distance by vehicle.
 - The pack does not link to the People pack: a driver is its own record.
 - A trip's status moves Planned → On the road → Delivered, or Planned or On the road → Cancelled.
   A new trip starts Planned or On the road. Delivered and Cancelled trips cannot change status.
+  While a trip is On the road, its vehicle and driver cannot change, and it cannot be deleted.
 - Starting a trip sets its vehicle to On trip, and delivering or cancelling it sets the vehicle
   back to Available. A vehicle or driver cannot start a trip while another trip is On the road
   with it. A retired vehicle, a driver who has left, a driver who is not Active, and a licence

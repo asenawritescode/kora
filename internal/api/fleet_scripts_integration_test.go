@@ -119,4 +119,33 @@ func runFleetTripRules(f *packFixture) {
 			t.Fatalf("dispatcher vehicle write = %d, want 403 or 401", code)
 		}
 	})
+
+	f.t.Run("a trip on the road keeps its vehicle and driver until it is finished", func(t *testing.T) {
+		t7 := trip("T-7", vehicleA, otieno, "2026-12-20")
+		dispatcher.update("Trip", t7, `{"status":"On the road"}`)
+		f.expect("Vehicle", vehicleA, "status", "On trip")
+		dispatcher.refused(httpMethodPut, "Trip", t7, `{"vehicle":"`+vehicleB+`"}`, "Finish or cancel T-7 first.")
+		dispatcher.refused(httpMethodPut, "Trip", t7, `{"driver":"`+achieng+`"}`, "Finish or cancel T-7 first.")
+		f.expect("Vehicle", vehicleA, "status", "On trip")
+		f.expect("Vehicle", vehicleB, "status", "Available")
+		dispatcher.update("Trip", t7, `{"status":"Cancelled"}`)
+		f.expect("Vehicle", vehicleA, "status", "Available")
+	})
+
+	f.t.Run("a trip on the road cannot be deleted, a planned trip can", func(t *testing.T) {
+		t8 := trip("T-8", vehicleB, otieno, "2026-12-21")
+		dispatcher.update("Trip", t8, `{"status":"On the road"}`)
+		f.refused(httpMethodDelete, "Trip", t8, "", "Finish or cancel T-8 first.")
+		f.expect("Trip", t8, "status", "On the road")
+		f.expect("Vehicle", vehicleB, "status", "On trip")
+		t9 := trip("T-9", vehicleA, achieng, "2026-12-22")
+		if _, _, doc := f.send(httpMethodDelete, "Trip", t9, ""); doc == nil {
+			f.t.Fatalf("planned trip %s was not deleted", t9)
+		}
+		if rows := f.count("tabTrip", "name = ?", t9); rows != 0 {
+			f.t.Fatalf("planned trip %s still has %d rows", t9, rows)
+		}
+		dispatcher.update("Trip", t8, `{"status":"Cancelled"}`)
+		f.expect("Vehicle", vehicleB, "status", "Available")
+	})
 }

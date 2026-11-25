@@ -92,6 +92,10 @@ if (oldDoc && oldStatus !== newStatus) {
   }
 }
 
+if (oldDoc && oldStatus === "On the road" && (vehicleChanged || driverChanged)) {
+  throw new Error("Finish or cancel " + tripRef(doc) + " first.");
+}
+
 var vehicle = null;
 var driver = null;
 if (vehicleChanged) {
