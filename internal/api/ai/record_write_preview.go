@@ -200,7 +200,7 @@ func previewBody(tx *orm.TxManager, dt *doctype.DocType, w recordWrite, result *
 	before := aiReadableDocumentFields(dt, old.Fields)
 	changes := map[string]any{}
 	for key, value := range saved {
-		if !(fieldValue{v: before[key]}).same(fieldValue{v: value}) {
+		if !previewValue(dt, key, before[key]).same(previewValue(dt, key, value)) {
 			changes[key] = map[string]any{"old": before[key], "new": value}
 		}
 	}
