@@ -72,6 +72,7 @@ func TestLinkSearchFieldsReadsLinksNamedInSearchFields(t *testing.T) {
 		{Fieldname: "reference", Fieldtype: "Data"},
 		{Fieldname: "supplier", Fieldtype: "Link", Options: "Supplier"},
 		{Fieldname: "branch", Fieldtype: "Link", Options: "Branch"},
+		{Fieldname: "approver", Fieldtype: "Link", Options: "User", Hidden: true},
 	}
 	for _, tc := range []struct {
 		name         string
@@ -83,6 +84,7 @@ func TestLinkSearchFieldsReadsLinksNamedInSearchFields(t *testing.T) {
 		{"duplicates appear once, in declaration order", "branch, supplier, branch", []string{"supplier", "branch"}},
 		{"unknown names are skipped", "missing, supplier", []string{"supplier"}},
 		{"non-link names are skipped", "reference", nil},
+		{"hidden links are skipped", "approver, supplier", []string{"supplier"}},
 		{"empty search fields give none", "", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -33,7 +33,8 @@ type titleInput struct {
 
 // resolveTitleFilters turns names typed in find_records into record codes. A Link filter on = , like or in
 // whose target the person may read has each value matched by title (orm.MatchTitles) and becomes an in filter
-// on the codes. The search is matched the same way on the record's own title. A filter that cannot be
+// on the codes. The search is matched the same way on the record's own title, then on the Link fields named in
+// the search fields (see resolveSearch). A filter that cannot be
 // resolved is kept as the person wrote it, so the validator reports it.
 func resolveTitleFilters(ctx context.Context, tx *orm.TxManager, dt *doctype.DocType, in titleInput) (titleResolution, error) {
 	filters, execution := in.filters, in.execution
@@ -108,7 +109,7 @@ func searchThroughLinks(ctx context.Context, tx *orm.TxManager, dt *doctype.DocT
 }
 
 // linkSearchFields returns the Link fields of dt that its search fields name, in declaration order, each once.
-// Names that are not fields of dt, or are not Links, are skipped.
+// Names that are not fields of dt, are not Links or are hidden from the assistant are skipped.
 func linkSearchFields(dt *doctype.DocType) []doctype.Field {
 	named := map[string]bool{}
 	for _, name := range strings.Split(dt.SearchFields, ",") {
@@ -116,7 +117,7 @@ func linkSearchFields(dt *doctype.DocType) []doctype.Field {
 	}
 	var out []doctype.Field
 	for _, f := range dt.Fields {
-		if f.Fieldtype == "Link" && named[f.Fieldname] {
+		if f.Fieldtype == "Link" && named[f.Fieldname] && aiReadableField(f) {
 			out = append(out, f)
 		}
 	}
