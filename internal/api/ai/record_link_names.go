@@ -41,7 +41,7 @@ func (n linkNames) fieldTitles(fields []doctype.Field, doc *doctype.Document) ma
 }
 
 // linkCodes returns, per target record type, the distinct non-empty codes that the Link fields of docs hold,
-// in first-seen order. A Link without a target and a value that is not text are skipped. It does no I/O.
+// in first-seen order. A Link without a target is skipped. It does no I/O.
 func linkCodes(fields []doctype.Field, docs []*doctype.Document) map[string][]string {
 	out := map[string][]string{}
 	seen := map[string]map[string]bool{}
@@ -50,24 +50,34 @@ func linkCodes(fields []doctype.Field, docs []*doctype.Document) map[string][]st
 			continue
 		}
 		for _, doc := range docs {
-			if doc == nil {
-				continue
+			if code, ok := linkValue(doc, f.Fieldname); ok {
+				addLinkCode(out, seen, f.Options, code)
 			}
-			code, ok := doc.Fields[f.Fieldname].(string)
-			if !ok || strings.TrimSpace(code) == "" {
-				continue
-			}
-			if seen[f.Options] == nil {
-				seen[f.Options] = map[string]bool{}
-			}
-			if seen[f.Options][code] {
-				continue
-			}
-			seen[f.Options][code] = true
-			out[f.Options] = append(out[f.Options], code)
 		}
 	}
 	return out
+}
+
+// linkValue returns the code a Link field of doc holds. A missing document, an empty value or a value that is
+// not text reports false.
+func linkValue(doc *doctype.Document, fieldname string) (string, bool) {
+	if doc == nil {
+		return "", false
+	}
+	code, ok := doc.Fields[fieldname].(string)
+	return code, ok && strings.TrimSpace(code) != ""
+}
+
+// addLinkCode appends code to out[target] unless it is already there. seen records the codes added per target.
+func addLinkCode(out map[string][]string, seen map[string]map[string]bool, target, code string) {
+	if seen[target] == nil {
+		seen[target] = map[string]bool{}
+	}
+	if seen[target][code] {
+		return
+	}
+	seen[target][code] = true
+	out[target] = append(out[target], code)
 }
 
 // readableLinkFields returns the readable Link fields of dt.
