@@ -96,6 +96,26 @@ func TestPackScriptsRooms(t *testing.T) {
 			g.refused(httpMethodPut, "Booking", inHouse, `{"status":"Cancelled"}`, "Check the guest out instead.")
 		})
 
+		f.t.Run("room cannot change while checked in", func(t *testing.T) {
+			g := f.withT(t)
+			room := roomsRoom(g, "214", "4500", "")
+			other := roomsRoom(g, "215", "4500", "")
+			inHouse := g.create("Booking", stay(guest, room, "2026-12-01", "2026-12-04", `,"status":"Checked in"`))
+			g.refused(httpMethodPut, "Booking", inHouse, fmt.Sprintf(`{"room":%q}`, other), "Check the guest out first.")
+			g.expect("Booking", inHouse, "room", room)
+		})
+
+		f.t.Run("checked-in booking cannot be deleted, others can", func(t *testing.T) {
+			g := f.withT(t)
+			room := roomsRoom(g, "216", "4500", "")
+			inHouse := g.create("Booking", stay(guest, room, "2026-12-01", "2026-12-04", `,"status":"Checked in"`))
+			g.refused(httpMethodDelete, "Booking", inHouse, "", "Check the guest out first.")
+			booked := g.create("Booking", stay(guest, room, "2026-12-10", "2026-12-12", ""))
+			if _, _, doc := g.send(httpMethodDelete, "Booking", booked, ""); doc == nil {
+				t.Fatalf("delete of Booked booking %s was refused, want deleted", booked)
+			}
+		})
+
 		f.t.Run("other status moves refused", func(t *testing.T) {
 			g := f.withT(t)
 			room := roomsRoom(g, "212", "4500", "")

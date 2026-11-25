@@ -70,6 +70,11 @@ var room = loadRoom(doc.room);
 var was = oldDoc ? oldDoc.status : null;
 var status = doc.status;
 
+// The guest is in the room: it cannot change until they check out.
+if (oldDoc && was === "Checked in" && doc.room !== oldDoc.room) {
+  throw new Error("Check the guest out first.");
+}
+
 if (!oldDoc) {
   if (status !== "Booked" && status !== "Checked in") {
     throw new Error("A new booking must be Booked or Checked in, not " + status + ".");
