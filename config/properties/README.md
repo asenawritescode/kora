@@ -12,10 +12,16 @@ and leases by status).
 - Once a lease is Ended, its unit, tenant and start date are frozen. Other fields (rent,
   end date) can still be corrected.
 
-Limits: overlapping leases on one unit are not prevented, a unit's status is not changed by
-a lease (a person sets it), and there are no rent arrears or statements. Use Subscriptions
+- An Active lease occupies its unit. Two Active leases of one unit may not overlap (an empty end
+  date is open-ended). A new Active lease cannot be let on a unit under Maintenance. Ending a
+  lease sets an empty end date to today and vacates the unit unless another Active lease holds
+  it. An ended lease cannot be reopened; make a new lease.
+
+Limits: a unit's Maintenance status is set by a person, and ending a lease overwrites it with
+Vacant. Deleting a lease does not vacate its unit. There are no rent arrears or statements. Use Subscriptions
 for recurring rent invoices. The role is named Estate Manager because the legacy
 `config/v0/propertymgmt` template already defines a Property Manager role.
 
-Checks: `go test ./internal/site -run Properties`, `go test ./internal/analytics -run Properties`
-and `go test -tags integration ./internal/api -run Properties` (needs MySQL, set `KORA_TEST_DSN`).
+Checks: `go test ./internal/site -run Properties` and the lease rules on both dialects,
+`go test -tags integration ./internal/api -run TestPackScriptsLeases` (set
+`KORA_PACK_SCRIPTS_DISPOSABLE_MYSQL_DSN` and `KORA_PACK_SCRIPTS_DISPOSABLE_POSTGRES_DSN`).
