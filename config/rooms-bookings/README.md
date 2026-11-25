@@ -20,6 +20,8 @@ rooms by status).
   Occupied) or Cancelled (only from Booked); Checked in to Checked out (the room becomes
   Cleaning). A new booking starts as Booked or Checked in. Any other move is refused.
 - A new booking with a blank rate takes the room's rate per night.
+- A checked-in booking keeps its room until checkout, and a checked-in booking cannot be
+  deleted.
 
 Limits: rooms, guests and bookings only. Check-in and check-out set a room's status, but
 managers set the other changes by hand (Cleaning to Available, Out of service), there is no
