@@ -99,10 +99,25 @@ func TestFindRecordsMatchesNamesAcrossDialects(t *testing.T) {
 					[]string{"No Supplier Bill match these filters. 2 Supplier Bill exist in total."}},
 				{"no filters lists every bill with the supplier's name", `{"record_type":"Supplier Bill"}`,
 					[]string{"Found 2 Supplier Bill, showing 2:", "Supplier: Mr. Ouma Son (SUPP-0001)"}},
+				{"search matches the supplier name when the bill title does not", `{"record_type":"Supplier Bill","search":"oumas son"}`,
+					[]string{`Matched supplier "oumas son" → Mr. Ouma Son (SUPP-0001).`, "Found 2 Supplier Bill, showing 2:"}},
+				{"search of a shared word matches several suppliers", `{"record_type":"Supplier Bill","search":"Ouma"}`,
+					[]string{"→ 3 suppliers:", "Found 2 Supplier Bill, showing 2:"}},
+				{"search of a supplier with no bills gives the honest zero", `{"record_type":"Supplier Bill","search":"Granary"}`,
+					[]string{`Matched supplier "Granary" → Mr. Ouma Granary (SUPP-0002).`, "No Supplier Bill match these filters. 2 Supplier Bill exist in total."}},
+				{"search matches a supplier code without a name note", `{"record_type":"Supplier Bill","search":"SUPP-0001"}`,
+					[]string{"Found 2 Supplier Bill, showing 2:", "!Matched"}},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					got := find(tc.args)
 					for _, want := range tc.want {
+						// A "!" prefix asserts the text is absent.
+						if text, absent := strings.CutPrefix(want, "!"); absent {
+							if strings.Contains(got, text) {
+								t.Fatalf("find_records on %s = %q, want it not to contain %q", tc.name, got, text)
+							}
+							continue
+						}
 						if !strings.Contains(got, want) {
 							t.Fatalf("find_records on %s = %q, want it to contain %q", tc.name, got, want)
 						}
@@ -129,6 +144,18 @@ func TestFindRecordsMatchesNamesAcrossDialects(t *testing.T) {
 				got := run(clerk, toolGetRecord, `{"record_type":"Supplier Bill","name":"SB-0001"}`)
 				if strings.Contains(got, "link_titles") || strings.Contains(got, "Mr. Ouma Son") || !strings.Contains(got, `"supplier":"SUPP-0001"`) {
 					t.Fatalf("get_record as clerk = %q, want the code and no link_titles", got)
+				}
+			})
+
+			t.Run("a reader without Supplier read searches bills by the honest zero, not the supplier name", func(t *testing.T) {
+				registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Supplier Bill", Role: "Bill Clerk", Read: true})
+				clerk := testAIExecution(t, site, "clerk@example.test", []string{"Bill Clerk"})
+				got := run(clerk, toolFindRecords, `{"record_type":"Supplier Bill","search":"oumas son"}`)
+				if !strings.Contains(got, "No Supplier Bill match these filters. 2 Supplier Bill exist in total.") {
+					t.Fatalf("find_records search as clerk = %q, want the honest zero", got)
+				}
+				if strings.Contains(got, "Mr. Ouma Son") || strings.Contains(got, "Matched") {
+					t.Fatalf("find_records search as clerk = %q, want no supplier name", got)
 				}
 			})
 		})
