@@ -35,6 +35,7 @@ fields:
     fieldtype: Link
     options: Billing Schedule
     label: Billing schedule
+    description: Set it on a draft invoice. Moving a draft to another schedule returns the old one to Scheduled. Once issued, the schedule cannot change.
   - fieldname: issue_date
     fieldtype: Date
     label: Issue date

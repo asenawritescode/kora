@@ -25,14 +25,20 @@ What the engine enforces:
 
 What the pack scripts keep (`scripts/Subscription`, `scripts/Recurring Invoice`):
 - A new subscription takes its plan's currency, billing interval and interval count. A blank or 0
-  unit price takes the plan's price, and a subscription whose price is still blank or 0 is refused.
-  Later edits keep the price as saved; a blank price is refused.
+  unit price takes the plan's price, so a free plan gives a subscription at 0. A subscription is
+  refused only when its plan has no price at all. Later edits keep the price as saved; a blank
+  price is refused.
 - A new or re-planned subscription needs an Active plan. Draft and Retired plans are refused.
   Existing subscriptions on a retired plan keep working.
-- A new invoice takes its currency from its subscription. A subtotal left at 0 (the default) takes the
-  billing schedule's amount, or the subscription's amount per period. A subtotal still 0 is refused.
-- A billing schedule must belong to the invoice's subscription and be Scheduled. The new invoice
-  makes it Invoiced, and voiding the invoice makes it Scheduled again.
+- A new invoice takes its currency from its subscription. A subtotal left at 0 (the default) takes
+  the billing schedule's amount, or the subscription's amount per period; a 0 result is fine.
+- A new invoice that is not Void invoices its billing schedule: the schedule must belong to the
+  invoice's subscription and be Scheduled, and it becomes Invoiced. An invoice created as Void
+  leaves its schedule alone.
+- Voiding an invoice makes its schedule Scheduled again.
+- A Draft invoice can move to another schedule: the old one goes back to Scheduled, and the new one
+  must be Scheduled and is invoiced. Once an invoice is issued (or not Draft), its schedule cannot
+  change; void it and make a new one.
 - Tax, total and balance are worked out again from the copied subtotal, so they match the values
   the engine would derive.
 

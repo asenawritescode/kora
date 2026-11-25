@@ -13,9 +13,10 @@ const subscriptionsPack = "../../config/subscriptions"
 
 func TestPackScriptsSubscriptions(t *testing.T) {
 	eachPackDialect(t, []string{subscriptionsPack}, func(f *packFixture) {
-		// run gives each rule its own subtest, reporting failures under that subtest's name.
+		// run gives each rule its own subtest under this dialect's test (TestPackScriptsSubscriptions/mysql/<rule>),
+		// so -run 'TestPackScripts/postgres' selects every rule of that dialect.
 		run := func(name string, rule func(f *packFixture)) {
-			t.Run(name, func(t *testing.T) {
+			f.t.Run(name, func(t *testing.T) {
 				scoped := *f
 				scoped.t = t
 				rule(&scoped)
@@ -32,7 +33,7 @@ func TestPackScriptsSubscriptions(t *testing.T) {
 		subscription := func(plan, extra string) string {
 			return `{"subscriber":"` + subscriber + `","plan":"` + plan + `","quantity":2,"start_date":"2026-12-01","next_billing_date":"2026-12-01"` + extra + `}`
 		}
-		schedule := func(sub, reference, amount, status string) string {
+		schedule := func(f *packFixture, sub, reference, amount, status string) string {
 			return f.create("Billing Schedule", `{"reference":"`+reference+`","subscription":"`+sub+`","billing_date":"2026-12-01","period_start":"2026-12-01","period_end":"2026-12-31","amount":`+amount+`,"status":"`+status+`"}`)
 		}
 
@@ -70,11 +71,16 @@ func TestPackScriptsSubscriptions(t *testing.T) {
 			}
 		})
 
-		run("a plan without a price refuses a blank or zero price", func(f *packFixture) {
-			f.refused(httpMethodPost, "Subscription", "", subscription(free, ""), "Set a unit price or choose a plan with one.")
-			f.refused(httpMethodPost, "Subscription", "", subscription(free, `,"unit_price":0`), "Set a unit price or choose a plan with one.")
+		run("a free plan gives a subscription at price 0", func(f *packFixture) {
+			freeSub := f.create("Subscription", subscription(free, ""))
+			if got := f.amount("Subscription", freeSub, "unit_price"); got != 0 {
+				f.t.Fatalf("free plan unit price = %v, want 0", got)
+			}
+			if got := f.amount("Subscription", freeSub, "recurring_amount"); got != 0 {
+				f.t.Fatalf("free plan amount per period = %v, want 0", got)
+			}
+			f.create("Subscription", subscription(free, `,"unit_price":0`))
 		})
-
 		run("copied terms and price stay editable", func(f *packFixture) {
 			f.update("Subscription", termSub, `{"billing_interval":"Annually","interval_count":2,"currency":"EUR"}`)
 			f.expect("Subscription", termSub, "billing_interval", "Annually")
@@ -102,7 +108,7 @@ func TestPackScriptsSubscriptions(t *testing.T) {
 		run("invoice takes the schedule's amount and the plan's currency", func(f *packFixture) {
 			annualSub = f.create("Subscription", subscription(annual, `,"quantity":1`))
 			otherSub = f.create("Subscription", subscription(annual, `,"quantity":1`))
-			bill1 = schedule(annualSub, "B-1", "150", "Scheduled")
+			bill1 = schedule(f, annualSub, "B-1", "150", "Scheduled")
 			inv1 = f.create("Recurring Invoice", `{"invoice_number":"INV-1","subscription":"`+annualSub+`","billing_schedule":"`+bill1+`","issue_date":"2026-12-01","due_date":"2026-12-15"}`)
 			f.expect("Recurring Invoice", inv1, "currency", "USD")
 			expectAmount(f, "Recurring Invoice", inv1, "subtotal", 150)
@@ -121,7 +127,7 @@ func TestPackScriptsSubscriptions(t *testing.T) {
 		})
 
 		run("typed subtotal stays and tax is worked out", func(f *packFixture) {
-			bill2 = schedule(otherSub, "B-2", "150", "Scheduled")
+			bill2 = schedule(f, otherSub, "B-2", "150", "Scheduled")
 			inv3 := f.create("Recurring Invoice", `{"invoice_number":"INV-3","subscription":"`+otherSub+`","billing_schedule":"`+bill2+`","issue_date":"2026-12-01","due_date":"2026-12-15","subtotal":90,"tax_rate":16}`)
 			if got := f.amount("Recurring Invoice", inv3, "subtotal"); got != 90 {
 				f.t.Fatalf("subtotal = %v, want the typed 90", got)
@@ -143,21 +149,21 @@ func TestPackScriptsSubscriptions(t *testing.T) {
 		})
 
 		run("only a scheduled billing can be invoiced", func(f *packFixture) {
-			bill3 = schedule(annualSub, "B-3", "80", "Skipped")
+			bill3 = schedule(f, annualSub, "B-3", "80", "Skipped")
 			f.refused(httpMethodPost, "Recurring Invoice", "", `{"invoice_number":"INV-5","subscription":"`+annualSub+`","billing_schedule":"`+bill3+`","issue_date":"2026-12-01","due_date":"2026-12-15"}`, "Billing B-3 is Skipped; only a scheduled billing can be invoiced.")
 		})
 
 		run("a schedule must belong to the invoice's subscription", func(f *packFixture) {
-			bill4 = schedule(otherSub, "B-4", "60", "Scheduled")
+			bill4 = schedule(f, otherSub, "B-4", "60", "Scheduled")
 			f.refused(httpMethodPost, "Recurring Invoice", "", `{"invoice_number":"INV-6","subscription":"`+annualSub+`","billing_schedule":"`+bill4+`","issue_date":"2026-12-01","due_date":"2026-12-15"}`, "Billing B-4 belongs to another subscription.")
 		})
 
-		run("a blank subtotal with nothing to copy is refused and the schedule is left alone", func(f *packFixture) {
-			bill5 = schedule(annualSub, "B-5", "0", "Scheduled")
-			f.refused(httpMethodPost, "Recurring Invoice", "", `{"invoice_number":"INV-7","subscription":"`+annualSub+`","billing_schedule":"`+bill5+`","issue_date":"2026-12-01","due_date":"2026-12-15"}`, "Set a subtotal, or choose a billing schedule or subscription with an amount.")
-			f.expect("Billing Schedule", bill5, "status", "Scheduled")
+		run("a zero schedule amount gives a subtotal of 0 and invoices the schedule", func(f *packFixture) {
+			bill5 = schedule(f, annualSub, "B-5", "0", "Scheduled")
+			inv := f.create("Recurring Invoice", `{"invoice_number":"INV-7","subscription":"`+annualSub+`","billing_schedule":"`+bill5+`","issue_date":"2026-12-01","due_date":"2026-12-15"}`)
+			expectAmount(f, "Recurring Invoice", inv, "subtotal", 0)
+			f.expect("Billing Schedule", bill5, "status", "Invoiced")
 		})
-
 		run("voiding an invoice returns its schedule to Scheduled", func(f *packFixture) {
 			f.update("Recurring Invoice", inv1, `{"status":"Void"}`)
 			f.expect("Billing Schedule", bill1, "status", "Scheduled")
@@ -170,6 +176,38 @@ func TestPackScriptsSubscriptions(t *testing.T) {
 			f.refused(httpMethodPut, "Recurring Invoice", inv2, `{"subtotal":null}`, "subtotal")
 		})
 
+		run("an invoice created as Void leaves its schedule alone", func(f *packFixture) {
+			invoiced := schedule(f, annualSub, "B-6", "40", "Invoiced")
+			f.create("Recurring Invoice", `{"invoice_number":"INV-10","subscription":"`+annualSub+`","billing_schedule":"`+invoiced+`","issue_date":"2026-12-01","due_date":"2026-12-15","status":"Void"}`)
+			f.expect("Billing Schedule", invoiced, "status", "Invoiced")
+			scheduled := schedule(f, annualSub, "B-7", "40", "Scheduled")
+			f.create("Recurring Invoice", `{"invoice_number":"INV-11","subscription":"`+annualSub+`","billing_schedule":"`+scheduled+`","issue_date":"2026-12-01","due_date":"2026-12-15","status":"Void"}`)
+			f.expect("Billing Schedule", scheduled, "status", "Scheduled")
+		})
+
+		run("a draft invoice moves to another schedule", func(f *packFixture) {
+			from := schedule(f, otherSub, "B-8", "30", "Scheduled")
+			inv := f.create("Recurring Invoice", `{"invoice_number":"INV-12","subscription":"`+otherSub+`","billing_schedule":"`+from+`","issue_date":"2026-12-01","due_date":"2026-12-15"}`)
+			f.expect("Billing Schedule", from, "status", "Invoiced")
+			to := schedule(f, otherSub, "B-9", "30", "Scheduled")
+			f.update("Recurring Invoice", inv, `{"billing_schedule":"`+to+`"}`)
+			f.expect("Billing Schedule", from, "status", "Scheduled")
+			f.expect("Billing Schedule", to, "status", "Invoiced")
+			f.expect("Recurring Invoice", inv, "billing_schedule", to)
+			f.refused(httpMethodPut, "Recurring Invoice", inv, `{"billing_schedule":"`+bill2+`"}`, "Billing B-2 is already Invoiced.")
+			f.expect("Billing Schedule", to, "status", "Invoiced")
+			f.expect("Recurring Invoice", inv, "billing_schedule", to)
+		})
+
+		run("an issued invoice cannot change its schedule", func(f *packFixture) {
+			from := schedule(f, otherSub, "B-10", "20", "Scheduled")
+			issued := f.create("Recurring Invoice", `{"invoice_number":"INV-13","subscription":"`+otherSub+`","billing_schedule":"`+from+`","issue_date":"2026-12-01","due_date":"2026-12-15","status":"Issued"}`)
+			to := schedule(f, otherSub, "B-11", "20", "Scheduled")
+			f.refused(httpMethodPut, "Recurring Invoice", issued, `{"billing_schedule":"`+to+`"}`, "The billing schedule of an invoice cannot be changed; void it and make a new one.")
+			f.expect("Billing Schedule", from, "status", "Invoiced")
+			f.expect("Billing Schedule", to, "status", "Scheduled")
+		})
+
 		run("front-line Subscriptions Clerk creates a subscription and an invoice from a schedule", func(f *packFixture) {
 			clerk := f.as("Subscriptions Clerk")
 			clerkSub := clerk.create("Subscription", subscription(annual, `,"quantity":1`))
@@ -177,7 +215,7 @@ func TestPackScriptsSubscriptions(t *testing.T) {
 			if got := clerk.amount("Subscription", clerkSub, "recurring_amount"); got != 500 {
 				clerk.t.Fatalf("clerk subscription amount per period = %v, want 500", got)
 			}
-			clerkBill := schedule(clerkSub, "B-9", "150", "Scheduled")
+			clerkBill := schedule(clerk, clerkSub, "B-12", "150", "Scheduled")
 			clerkInvoice := clerk.create("Recurring Invoice", `{"invoice_number":"INV-9","subscription":"`+clerkSub+`","billing_schedule":"`+clerkBill+`","issue_date":"2027-02-01","due_date":"2027-02-15"}`)
 			expectAmount(clerk, "Recurring Invoice", clerkInvoice, "subtotal", 150)
 			clerk.expect("Billing Schedule", clerkBill, "status", "Invoiced")

@@ -1,7 +1,7 @@
 // A subscription follows its plan. A new subscription takes the plan's currency, billing
-// interval, interval count and (when its price is blank or 0) unit price. A new or re-planned
-// subscription needs an Active plan. The amount per period is worked out here because the
-// Engine derives computed fields before this script runs.
+// interval and interval count, and its unit price when that is blank or 0 (a free plan's 0
+// is a price). A new or re-planned subscription needs an Active plan. The amount per period
+// is worked out here because the Engine derives computed fields before this script runs.
 var doc = __kora_event__.doc;
 var oldDoc = __kora_event__.oldDoc;
 
@@ -29,11 +29,11 @@ if (!oldDoc) {
   doc.currency = plan.currency;
   doc.billing_interval = plan.billing_interval;
   doc.interval_count = Number(plan.interval_count);
-  if (money(doc.unit_price) === 0) {
+  if (blank(doc.unit_price) || money(doc.unit_price) === 0) {
+    if (blank(plan.unit_price)) {
+      throw new Error("Set a unit price or choose a plan with one.");
+    }
     doc.unit_price = money(plan.unit_price);
-  }
-  if (money(doc.unit_price) === 0) {
-    throw new Error("Set a unit price or choose a plan with one.");
   }
   doc.recurring_amount = money(Number(doc.quantity || 0) * money(doc.unit_price) + money(doc.lines_total));
 } else if (blank(doc.unit_price)) {
