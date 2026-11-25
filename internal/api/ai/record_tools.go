@@ -182,6 +182,9 @@ func executeRecordCreate(tx *orm.TxManager, reg *doctype.Registry, inv toolInvoc
 	if unknown := unknownFields(fields, dt); len(unknown) > 0 {
 		return unknownFieldError(dt, unknown).text()
 	}
+	if refusal := readOnlyDataError(dt, fields); refusal != nil {
+		return refusal.text()
+	}
 	w := recordWrite{Command: kernel.CommandRecordCreate, Doctype: dt.Name, Fields: fields}
 	if inv.PreviewWrites {
 		return previewRecordWrite(tx, reg, inv, w, rowScope)

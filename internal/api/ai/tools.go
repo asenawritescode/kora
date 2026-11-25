@@ -954,6 +954,9 @@ func updateChanges(dt *doctype.DocType, args map[string]any) (string, map[string
 	if unknown := unknownFieldsExcept(args, dt, map[string]bool{"name": true}); len(unknown) > 0 {
 		return "", nil, unknownFieldError(dt, unknown)
 	}
+	if refusal := readOnlyDataError(dt, args); refusal != nil {
+		return "", nil, refusal
+	}
 	changes := map[string]any{}
 	for key, value := range args {
 		if key == "name" || strings.TrimSpace(key) == "" {
@@ -963,7 +966,7 @@ func updateChanges(dt *doctype.DocType, args map[string]any) (string, map[string
 		if field == nil {
 			continue
 		}
-		if field.Fieldtype == "Table" || field.ReadOnly || field.Computed != "" {
+		if field.Fieldtype == "Table" || field.Computed != "" {
 			return "", nil, &aiToolError{Code: errInvalidValue, Message: "Field " + key + " is not writable.", Field: key, Fix: "Remove " + key + " from data."}
 		}
 		changes[key] = value
@@ -983,6 +986,39 @@ func unknownFieldError(dt *doctype.DocType, unknown []string) *aiToolError {
 		Fix:         "Use only the field names listed for " + dt.Name + ".",
 		ValidValues: limitValues(strings.Split(availableFieldNames(dt), ", ")),
 	}
+}
+
+// readOnlyDataError refuses data that names a read-only field, with one sentence per field in
+// field order. The name key is the update target, not data, so it is never checked.
+func readOnlyDataError(dt *doctype.DocType, args map[string]any) *aiToolError {
+	var sentences, named []string
+	for _, field := range dt.DataFields() {
+		if !field.ReadOnly || field.Fieldname == "name" {
+			continue
+		}
+		if _, ok := args[field.Fieldname]; !ok {
+			continue
+		}
+		sentences = append(sentences, readOnlyReason(dt, field))
+		named = append(named, field.Fieldname)
+	}
+	if len(named) == 0 {
+		return nil
+	}
+	return &aiToolError{Code: errInvalidValue, Message: strings.Join(sentences, " "), Field: named[0], Fix: "Leave " + strings.Join(named, ", ") + " out of data."}
+}
+
+// readOnlyReason is the sentence that tells the model why one field cannot be written.
+func readOnlyReason(dt *doctype.DocType, field doctype.Field) string {
+	label := field.Label
+	if label == "" {
+		label = field.Fieldname
+	}
+	why := "it is set by the system"
+	if description := strings.TrimSuffix(strings.TrimSpace(field.Description), "."); description != "" {
+		why = description
+	}
+	return label + " is read-only on " + dt.Name + ": " + why + "."
 }
 
 // recordMutation is one kernel record command issued on behalf of an AI tool.

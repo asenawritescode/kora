@@ -14,6 +14,7 @@ import (
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/kernel"
 	"github.com/asenawritescode/kora/internal/orm"
+	"github.com/asenawritescode/kora/internal/policy"
 )
 
 // recordToolsRegistry holds a plain type, a type only Administrator reads, a child table, a crud
@@ -269,6 +270,84 @@ func TestTypedNameNearCodes(t *testing.T) {
 			got := typedName(tt.typed).nearCodes(codes)
 			if !slices.Equal(got, tt.want) {
 				t.Fatalf("nearCodes(%q) = %v, want %v", tt.typed, got, tt.want)
+			}
+		})
+	}
+}
+
+// readOnlyBill is a Supplier Bill with two read-only fields: one with a description, one without.
+func readOnlyBill() *doctype.DocType {
+	return &doctype.DocType{Name: "Supplier Bill", Fields: []doctype.Field{
+		{Fieldname: "reference", Fieldtype: "Data", Label: "Reference"},
+		{Fieldname: "base_amount", Fieldtype: "Currency", Label: "Amount in base currency", ReadOnly: true},
+		{Fieldname: "status", Fieldtype: "Select", Label: "Status", ReadOnly: true, Description: "Follows payments."},
+		{Fieldname: "notes", Fieldtype: "Data", Label: "Notes"},
+	}}
+}
+
+func TestUpdateRefusesReadOnlyFieldsWithReason(t *testing.T) {
+	dt := readOnlyBill()
+	for _, tc := range []struct {
+		name   string
+		args   map[string]any
+		want   []string
+		absent []string
+	}{
+		{name: "read-only field without description", args: map[string]any{"name": "SB-1", "base_amount": 5},
+			want: []string{"Amount in base currency is read-only on Supplier Bill: it is set by the system.", `"field":"base_amount"`, "Leave base_amount out of data."}},
+		{name: "read-only field with description", args: map[string]any{"name": "SB-1", "status": "Paid"},
+			want: []string{"Status is read-only on Supplier Bill: Follows payments.", "Leave status out of data."}},
+		{name: "two read-only fields are both named", args: map[string]any{"name": "SB-1", "status": "Paid", "base_amount": 5},
+			want: []string{"Amount in base currency is read-only on Supplier Bill", "Status is read-only on Supplier Bill", "Leave base_amount, status out of data."}},
+		{name: "writable fields only are not refused", args: map[string]any{"name": "SB-1", "reference": "R", "notes": "n"},
+			absent: []string{"read-only"}},
+		{name: "name is the target, not data", args: map[string]any{"name": "base_amount", "notes": "n"},
+			absent: []string{"read-only"}},
+		{name: "unknown field keeps the unknown error", args: map[string]any{"name": "SB-1", "missing": 1, "base_amount": 5},
+			want: []string{"Unknown fields: missing."}, absent: []string{"read-only"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, refusal := updateChanges(dt, tc.args)
+			got := ""
+			if refusal != nil {
+				got = refusal.text()
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("update refusal = %q, want it to contain %q", got, want)
+				}
+			}
+			for _, absent := range tc.absent {
+				if strings.Contains(got, absent) {
+					t.Fatalf("update refusal = %q, want it not to contain %q", got, absent)
+				}
+			}
+		})
+	}
+}
+
+func TestCreateRefusesReadOnlyFieldsBeforeWrite(t *testing.T) {
+	reg := doctype.NewRegistry()
+	reg.LoadFull([]*doctype.DocType{readOnlyBill()}, nil, nil)
+	dt := reg.Get("Supplier Bill")
+	for _, tc := range []struct {
+		name   string
+		data   map[string]any
+		want   string
+		absent string
+	}{
+		{name: "read-only field is refused", data: map[string]any{"reference": "R", "base_amount": 5},
+			want: "Amount in base currency is read-only on Supplier Bill: it is set by the system."},
+		{name: "writable fields are not refused", data: map[string]any{"reference": "R"}, absent: "read-only"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// A nil transaction proves the refusal happens before any write or preview is attempted.
+			got := executeRecordCreate(nil, reg, toolInvocation{Args: map[string]any{"data": tc.data}}, dt, policy.RowScope{})
+			if tc.want != "" && !strings.Contains(got, tc.want) {
+				t.Fatalf("create result = %q, want it to contain %q", got, tc.want)
+			}
+			if tc.absent != "" && strings.Contains(got, tc.absent) {
+				t.Fatalf("create result = %q, want it not to contain %q", got, tc.absent)
 			}
 		})
 	}
