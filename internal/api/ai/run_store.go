@@ -1089,7 +1089,7 @@ LIMIT 1`, runID).Scan(&stepSummary)
 	})
 }
 
-// CleanupExpired removes expired conversations, runs, messages, and steps in one transaction.
+// CleanupExpired removes expired conversations, runs, messages, steps, and the audit rows of those runs in one transaction.
 func CleanupExpired(ctx context.Context, db *sql.DB, now time.Time) (removed int64, err error) {
 	if db == nil {
 		return 0, nil
@@ -1112,6 +1112,23 @@ func CleanupExpired(ctx context.Context, db *sql.DB, now time.Time) (removed int
 		return nil
 	}
 
+	if err = execDelete(`
+DELETE FROM _kora_ai_audit
+WHERE run_id IN (
+	SELECT id FROM _kora_ai_run
+	WHERE retention_expires_at IS NOT NULL AND retention_expires_at <= ?
+	OR conversation_id IN (
+		SELECT id FROM _kora_ai_conversation
+		WHERE retention_expires_at IS NOT NULL AND retention_expires_at <= ?
+	)
+)
+OR conversation_id IN (
+	SELECT id FROM _kora_ai_conversation
+	WHERE retention_expires_at IS NOT NULL AND retention_expires_at <= ?
+)`, now, now, now); err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
 	if err = execDelete(`
 DELETE FROM _kora_ai_message
 WHERE conversation_id IN (

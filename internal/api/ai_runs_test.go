@@ -260,6 +260,8 @@ func TestHandleAIRetentionCleanupRemovesExpiredGraph(t *testing.T) {
 	handler := NewHandler(reg, &orm.TxManager{DB: mockDB, Registry: reg, Dialect: db.Resolve("mysql")})
 
 	mock.ExpectBegin()
+	mock.ExpectExec("DELETE FROM _kora_ai_audit").
+		WillReturnResult(sqlmock.NewResult(0, 4))
 	mock.ExpectExec("DELETE FROM _kora_ai_message").
 		WillReturnResult(sqlmock.NewResult(0, 3))
 	mock.ExpectExec("DELETE FROM _kora_ai_step").
@@ -281,7 +283,7 @@ func TestHandleAIRetentionCleanupRemovesExpiredGraph(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), `"removed":8`) {
+	if !strings.Contains(w.Body.String(), `"removed":12`) {
 		t.Fatalf("expected removal count, body=%s", w.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
