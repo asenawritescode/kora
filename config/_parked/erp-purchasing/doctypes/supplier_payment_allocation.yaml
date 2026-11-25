@@ -1,0 +1,23 @@
+name: Supplier Payment Allocation
+module: Payables
+is_child_table: true
+title_field: supplier_bill
+sort_field: modified
+sort_order: DESC
+description: How much of one supplier bill a payment pays.
+
+fields:
+  - fieldname: supplier_bill
+    fieldtype: Link
+    label: Supplier bill
+    options: Supplier Bill
+    reqd: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount paid on this bill
+    description: In the payment's currency.
+    reqd: true
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The amount must be more than zero."
