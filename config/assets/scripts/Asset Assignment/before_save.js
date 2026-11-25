@@ -17,7 +17,10 @@ var asset = kora.getDoc("Asset", String(doc.asset || ""));
 if (!asset) {
   throw new Error("Cannot check asset " + doc.asset + ".");
 }
-if (asset.status === "Retired") {
+// Only a new assignment, or one moved to another asset, is refused: closing an old
+// assignment of an asset retired since then must still work.
+var newHolder = !oldDoc || String(oldDoc.asset || "") !== String(doc.asset || "");
+if (newHolder && asset.status === "Retired") {
   throw new Error((asset.asset_name || asset.name) + " is retired and cannot be assigned.");
 }
 
