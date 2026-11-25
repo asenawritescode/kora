@@ -36,7 +36,7 @@ type titleInput struct {
 // on the codes. The search is matched the same way on the record's own title. A filter that cannot be
 // resolved is kept as the person wrote it, so the validator reports it.
 func resolveTitleFilters(ctx context.Context, tx *orm.TxManager, dt *doctype.DocType, in titleInput) (titleResolution, error) {
-	filters, search, rowScope, execution := in.filters, in.search, in.rowScope, in.execution
+	filters, execution := in.filters, in.execution
 	out := titleResolution{filters: make([]any, 0, len(filters)+1)}
 	for _, raw := range filters {
 		filter, ok := raw.(map[string]any)
@@ -55,19 +55,72 @@ func resolveTitleFilters(ctx context.Context, tx *orm.TxManager, dt *doctype.Doc
 			return out, nil
 		}
 	}
-	if search == "" {
+	if in.search == "" {
 		return out, nil
 	}
-	matches, err := tx.MatchTitles(ctx, dt, search, rowScope)
+	return resolveSearch(ctx, tx, dt, in, out)
+}
+
+// resolveSearch matches the search on the record's own title first. When no title matches, it tries each Link
+// field named in the search fields of dt, and the first whose target matches the search becomes the filter. When
+// neither matches, the reply is the honest zero.
+func resolveSearch(ctx context.Context, tx *orm.TxManager, dt *doctype.DocType, in titleInput, out titleResolution) (titleResolution, error) {
+	matches, err := tx.MatchTitles(ctx, dt, in.search, in.rowScope)
 	if err != nil {
 		return titleResolution{}, err
 	}
-	if matches.Kind == "" {
-		out.none, err = noMatchingRowsText(ctx, tx, dt, rowScope)
-		return out, err
+	if matches.Kind != "" {
+		out.filters = append(out.filters, map[string]any{"field": "name", "op": "in", "value": codesOf(matches.Matches)})
+		return out, nil
 	}
-	out.filters = append(out.filters, map[string]any{"field": "name", "op": "in", "value": codesOf(matches.Matches)})
-	return out, nil
+	linked, notes, err := searchThroughLinks(ctx, tx, dt, in)
+	if err != nil {
+		return titleResolution{}, err
+	}
+	if linked != nil {
+		out.filters = append(out.filters, linked)
+		out.notes = append(out.notes, notes...)
+		return out, nil
+	}
+	out.none, err = noMatchingRowsText(ctx, tx, dt, in.rowScope)
+	return out, err
+}
+
+// searchThroughLinks matches the search by the title of each readable Link field named in the search fields of
+// dt. The first Link whose target matches wins: it returns an in filter on the codes and the notes for them. It
+// returns a nil filter when no Link matches.
+func searchThroughLinks(ctx context.Context, tx *orm.TxManager, dt *doctype.DocType, in titleInput) (map[string]any, []string, error) {
+	fields := linkSearchFields(dt)
+	for i := range fields {
+		lt, ok := readableLinkTarget(tx, &fields[i], in.execution)
+		if !ok {
+			continue
+		}
+		m, err := matchLinkValues(ctx, tx, lt, []string{in.search})
+		if err != nil {
+			return nil, nil, err
+		}
+		if m.none == "" && len(m.codes) > 0 {
+			return map[string]any{"field": lt.field, "op": "in", "value": m.codes}, m.notes, nil
+		}
+	}
+	return nil, nil, nil
+}
+
+// linkSearchFields returns the Link fields of dt that its search fields name, in declaration order, each once.
+// Names that are not fields of dt, or are not Links, are skipped.
+func linkSearchFields(dt *doctype.DocType) []doctype.Field {
+	named := map[string]bool{}
+	for _, name := range strings.Split(dt.SearchFields, ",") {
+		named[strings.TrimSpace(name)] = true
+	}
+	var out []doctype.Field
+	for _, f := range dt.Fields {
+		if f.Fieldtype == "Link" && named[f.Fieldname] {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // linkTarget is a Link field of the record type, the target record type it names and the rows the person may

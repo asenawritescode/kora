@@ -1,8 +1,10 @@
 package ai
 
 import (
+	"slices"
 	"testing"
 
+	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/orm"
 )
 
@@ -60,6 +62,37 @@ func TestNoTargetMatchTextOmitsClosestWhenNone(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := noTargetMatchText("Supplier", "zzz", tc.closest); got != tc.want {
 				t.Errorf("noTargetMatchText = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLinkSearchFieldsReadsLinksNamedInSearchFields(t *testing.T) {
+	fields := []doctype.Field{
+		{Fieldname: "reference", Fieldtype: "Data"},
+		{Fieldname: "supplier", Fieldtype: "Link", Options: "Supplier"},
+		{Fieldname: "branch", Fieldtype: "Link", Options: "Branch"},
+	}
+	for _, tc := range []struct {
+		name         string
+		searchFields string
+		want         []string
+	}{
+		{"one link", "reference, supplier", []string{"supplier"}},
+		{"spaces are trimmed", "  supplier ,branch  ", []string{"supplier", "branch"}},
+		{"duplicates appear once, in declaration order", "branch, supplier, branch", []string{"supplier", "branch"}},
+		{"unknown names are skipped", "missing, supplier", []string{"supplier"}},
+		{"non-link names are skipped", "reference", nil},
+		{"empty search fields give none", "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dt := &doctype.DocType{Name: "Supplier Bill", SearchFields: tc.searchFields, Fields: fields}
+			var got []string
+			for _, f := range linkSearchFields(dt) {
+				got = append(got, f.Fieldname)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("linkSearchFields(%q) = %q, want %q", tc.searchFields, got, tc.want)
 			}
 		})
 	}
