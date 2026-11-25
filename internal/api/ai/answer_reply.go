@@ -110,7 +110,7 @@ func completeAnswer(ctx context.Context, tx *orm.TxManager, a finalAnswer) {
 		ID:             a.RunID,
 		Site:           a.Site,
 		ConversationID: a.ConversationID,
-		Channel:        "chat",
+		Channel:        a.Channel,
 		Status:         "completed",
 		InputMessage:   a.Message,
 		OutputMessage:  a.Content,
@@ -121,7 +121,7 @@ func completeAnswer(ctx context.Context, tx *orm.TxManager, a finalAnswer) {
 	_ = UpsertConversation(ctx, tx.DB, ConversationRecord{
 		ID:            a.ConversationID,
 		Site:          a.Site,
-		Channel:       "chat",
+		Channel:       a.Channel,
 		SubjectKey:    a.SubjectKey,
 		Title:         truncateScript(a.Message, 240),
 		Summary:       a.Content,
@@ -139,10 +139,10 @@ func completeAnswer(ctx context.Context, tx *orm.TxManager, a finalAnswer) {
 
 // finalAnswer is a reply that ends a turn, with the run it belongs to.
 type finalAnswer struct {
-	Site, ConversationID, RunID, StepID, Message, SubjectKey, Model, Provider, Content string
-	Messages                                                                           []map[string]any
-	Cards                                                                              []contract.AnswerCard
-	Question                                                                           json.RawMessage
+	Site, Channel, ConversationID, RunID, StepID, Message, SubjectKey, Model, Provider, Content string
+	Messages                                                                                    []map[string]any
+	Cards                                                                                       []contract.AnswerCard
+	Question                                                                                    json.RawMessage
 }
 
 // completeChoice ends a turn with a clarifying question. The person's pick is the next turn.
@@ -154,7 +154,7 @@ func completeChoice(ctx context.Context, tx *orm.TxManager, a finalAnswer, choic
 	_ = AppendConversationMessage(ctx, tx.DB, MessageRecord{Site: a.Site, ConversationID: a.ConversationID, RunID: a.RunID, Role: "assistant", Content: choice.Question, Kind: "summary", StepID: a.StepID})
 	_ = UpdateStepStatus(ctx, tx.DB, a.StepID, StepUpdate{Status: "completed", Summary: choice.Question, OutputJSON: choice.Question})
 	_ = MarkTaskStatus(ctx, tx.DB, a.StepID, "done", choice.Question)
-	_ = UpsertRun(ctx, tx.DB, RunRecord{ID: a.RunID, Site: a.Site, ConversationID: a.ConversationID, Channel: "chat", Status: "completed", InputMessage: a.Message, OutputMessage: choice.Question, Summary: choice.Question, Model: a.Model, Provider: a.Provider})
+	_ = UpsertRun(ctx, tx.DB, RunRecord{ID: a.RunID, Site: a.Site, ConversationID: a.ConversationID, Channel: a.Channel, Status: "completed", InputMessage: a.Message, OutputMessage: choice.Question, Summary: choice.Question, Model: a.Model, Provider: a.Provider})
 	_ = SummarizeRun(ctx, tx.DB, a.RunID)
 }
 

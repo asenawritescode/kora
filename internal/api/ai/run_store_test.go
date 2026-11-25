@@ -83,6 +83,9 @@ func TestCleanupExpiredRemovesRunGraph(t *testing.T) {
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 
 	mock.ExpectBegin()
+	mock.ExpectExec("DELETE FROM _kora_ai_audit").
+		WithArgs(now, now, now).
+		WillReturnResult(sqlmock.NewResult(0, 3))
 	mock.ExpectExec("DELETE FROM _kora_ai_message").
 		WithArgs(now, now).
 		WillReturnResult(sqlmock.NewResult(0, 2))
@@ -101,8 +104,8 @@ func TestCleanupExpiredRemovesRunGraph(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CleanupExpired: %v", err)
 	}
-	if removed != 7 {
-		t.Fatalf("removed = %d, want 7", removed)
+	if removed != 10 {
+		t.Fatalf("removed = %d, want 10", removed)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

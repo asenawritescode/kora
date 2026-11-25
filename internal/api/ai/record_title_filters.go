@@ -252,7 +252,7 @@ func matchNote(field, text, recordType string, matches []orm.TitleMatch) string 
 
 // noTargetMatchText says that a Link value names no record, with the nearest titles when there are any.
 func noTargetMatchText(recordType, text string, closest []orm.TitleMatch) string {
-	out := fmt.Sprintf("No %s matches %q.", recordType, text)
+	out := fmt.Sprintf("No %s%s%q.", recordType, noTargetMatch, text)
 	if len(closest) == 0 {
 		return out
 	}
@@ -273,18 +273,42 @@ func noMatchingRowsText(ctx context.Context, tx *orm.TxManager, dt *doctype.DocT
 	if n > maxCountedRows {
 		total = fmt.Sprintf("more than %d", maxCountedRows)
 	}
-	return fmt.Sprintf("No %s match these filters. %s %s exist in total.", dt.Name, total, dt.Name), nil
+	return fmt.Sprintf("No %s%s%s %s exist in total.", dt.Name, noFilterMatch, total, dt.Name), nil
 }
+
+// The sentence endings of the zero-row replies. The writers in this file build them with these constants and
+// findReply.empty reads them back, so the two cannot drift apart.
+const (
+	noneFoundEnding = " found."                // "No <type> found."
+	noFilterMatch   = " match these filters. " // "No <type> match these filters. ..."
+	noTargetMatch   = " matches "              // `No <type> matches "<text>".`
+)
 
 // noRowsText is the reply of find_records when no row is returned: a plain none when nothing was asked, else
 // the filter reply with the record type's total.
 func noRowsText(ctx context.Context, tx *orm.TxManager, dt *doctype.DocType, rowScope policy.RowScope, resolved titleResolution) string {
 	if len(resolved.filters) == 0 {
-		return fmt.Sprintf("No %s found.", dt.Name)
+		return "No " + dt.Name + noneFoundEnding
 	}
 	text, err := noMatchingRowsText(ctx, tx, dt, rowScope)
 	if err != nil {
 		return aiToolError{Code: errGuardFailed, Message: "Could not search " + dt.Name + "."}.text()
 	}
 	return strings.Join(append(resolved.notes, text), "\n")
+}
+
+// findReply is the text a find_records call returns.
+type findReply string
+
+// empty says that the reply is one of the zero-row replies above, on any of its lines.
+func (r findReply) empty() bool {
+	for _, line := range strings.Split(string(r), "\n") {
+		if !strings.HasPrefix(line, "No ") {
+			continue
+		}
+		if strings.HasSuffix(line, noneFoundEnding) || strings.Contains(line, noFilterMatch) || strings.Contains(line, noTargetMatch) {
+			return true
+		}
+	}
+	return false
 }

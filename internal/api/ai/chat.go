@@ -269,7 +269,18 @@ type openedConversation struct {
 
 // conversationKey names the conversation of one turn: its site, its subject and the run that opens it.
 type conversationKey struct {
-	Site, SubjectKey, RunID, Message string
+	Site, SubjectKey, RunID, Message, Channel string
+}
+
+// chatChannel is the channel of a workspace turn; a turn on another channel records that channel instead.
+const chatChannel = "chat"
+
+// channel is the channel a turn records on: its own channel, else the workspace's.
+func (t ChatTurn) channel() string {
+	if t.Channel != "" {
+		return t.Channel
+	}
+	return chatChannel
 }
 
 // openConversation loads the conversation of the subject, or creates it for this run. It answers the status and
@@ -292,7 +303,7 @@ func openConversation(ctx context.Context, tx *orm.TxManager, key conversationKe
 		if err := UpsertConversation(ctx, tx.DB, ConversationRecord{
 			ID:         runID,
 			Site:       siteName,
-			Channel:    "chat",
+			Channel:    key.Channel,
 			SubjectKey: subjectKey,
 			Title:      truncateScript(key.Message, 240),
 			Status:     "active",
@@ -417,7 +428,7 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 		out = failOutcome(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "Unable to initialize AI run storage."}})
 		return
 	}
-	conv, convStatus, convMessage := openConversation(requestCtx, tx, conversationKey{Site: siteName, SubjectKey: subjectKey, RunID: runID, Message: req.Message})
+	conv, convStatus, convMessage := openConversation(requestCtx, tx, conversationKey{Site: siteName, SubjectKey: subjectKey, RunID: runID, Message: req.Message, Channel: turn.channel()})
 	if convStatus != http.StatusOK {
 		out = failOutcome(convStatus, gin.H{"error": gin.H{"message": convMessage}})
 		return
@@ -428,7 +439,7 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 		ID:             runID,
 		Site:           siteName,
 		ConversationID: conversationID,
-		Channel:        "chat",
+		Channel:        turn.channel(),
 		Status:         "planning",
 		InputMessage:   req.Message,
 		Model:          model,
@@ -468,7 +479,7 @@ func HandleChat(ctx context.Context, turn ChatTurn, req ChatRequest) (out ChatOu
 	}()
 
 	answers := newAnswerTurn(turn, currency, transcript, req.Message, functions)
-	end := chatEnd{ctx: requestCtx, tx: tx, answer: finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, Message: req.Message, SubjectKey: subjectKey, Model: model, Provider: providerKey}}
+	end := chatEnd{ctx: requestCtx, tx: tx, answer: finalAnswer{Site: siteName, Channel: turn.channel(), ConversationID: conversationID, RunID: runID, Message: req.Message, SubjectKey: subjectKey, Model: model, Provider: providerKey}}
 
 	// --- Multi-Round Tool Execution Loop ---
 	var (
@@ -506,7 +517,7 @@ loop:
 			ID:             runID,
 			Site:           siteName,
 			ConversationID: conversationID,
-			Channel:        "chat",
+			Channel:        turn.channel(),
 			Status:         "planning",
 			Model:          model,
 			Provider:       providerKey,
@@ -525,6 +536,7 @@ loop:
 					tokens[contract.UsageClassPartial] = 0
 				}
 				_ = RecordUsage(auditCtx, tx.DB, contract.UsageEvent{
+					Channel:     turn.channel(),
 					RunID:       runID,
 					Site:        siteName,
 					Model:       model,
@@ -546,7 +558,7 @@ loop:
 				ID:             runID,
 				Site:           siteName,
 				ConversationID: conversationID,
-				Channel:        "chat",
+				Channel:        turn.channel(),
 				Status:         "failed",
 				InputMessage:   req.Message,
 				ErrorMessage:   err.Error(),
@@ -592,7 +604,7 @@ loop:
 				ID:             runID,
 				Site:           siteName,
 				ConversationID: conversationID,
-				Channel:        "chat",
+				Channel:        turn.channel(),
 				Status:         "partial",
 				InputMessage:   req.Message,
 				OutputMessage:  fallbackReply,
@@ -697,7 +709,7 @@ loop:
 				continue
 			}
 			content = answers.finalReply(content, req.Message)
-			completeAnswer(requestCtx, tx, finalAnswer{Site: siteName, ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, SubjectKey: subjectKey, Model: model, Provider: providerKey, Content: content, Messages: messages, Cards: answers.cards(), Question: answers.lastQuestion()})
+			completeAnswer(requestCtx, tx, finalAnswer{Site: siteName, Channel: turn.channel(), ConversationID: conversationID, RunID: runID, StepID: stepID, Message: req.Message, SubjectKey: subjectKey, Model: model, Provider: providerKey, Content: content, Messages: messages, Cards: answers.cards(), Question: answers.lastQuestion()})
 			out = replyOutcome(ChatResponse{Reply: content, RunID: runID, Cards: answers.cards()})
 			return
 
@@ -794,7 +806,7 @@ loop:
 				ID:             runID,
 				Site:           siteName,
 				ConversationID: conversationID,
-				Channel:        "chat",
+				Channel:        turn.channel(),
 				Status:         "failed",
 				InputMessage:   req.Message,
 				OutputMessage:  content,
@@ -816,7 +828,7 @@ loop:
 				ID:             runID,
 				Site:           siteName,
 				ConversationID: conversationID,
-				Channel:        "chat",
+				Channel:        turn.channel(),
 				Status:         "failed",
 				InputMessage:   req.Message,
 				ErrorMessage:   "content_filter",
@@ -837,7 +849,7 @@ loop:
 					ID:             runID,
 					Site:           siteName,
 					ConversationID: conversationID,
-					Channel:        "chat",
+					Channel:        turn.channel(),
 					Status:         "completed",
 					InputMessage:   req.Message,
 					OutputMessage:  content,
@@ -873,7 +885,7 @@ loop:
 		ID:             runID,
 		Site:           siteName,
 		ConversationID: conversationID,
-		Channel:        "chat",
+		Channel:        turn.channel(),
 		Status:         "failed",
 		InputMessage:   req.Message,
 		ErrorMessage:   string(stop),

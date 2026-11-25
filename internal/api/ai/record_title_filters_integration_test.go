@@ -48,6 +48,9 @@ func TestFindRecordsMatchesNamesAcrossDialects(t *testing.T) {
 			if err = ksite.BootstrapSystemTables(ctx, database, dialect); err != nil {
 				t.Fatalf("bootstrap %s system tables: %v", tc.name, err)
 			}
+			if err = EnsureAIRunTables(ctx, database, dialect); err != nil {
+				t.Fatalf("bootstrap %s AI tables: %v", tc.name, err)
+			}
 			registry := loadPackRegistry(t, "_parked/erp-purchasing")
 			for _, dt := range registry.All() {
 				for _, statement := range dialect.CreateTable(dt) {
@@ -124,6 +127,33 @@ func TestFindRecordsMatchesNamesAcrossDialects(t *testing.T) {
 					}
 				})
 			}
+
+			t.Run("audit rows keep each find's status and result", func(t *testing.T) {
+				rows, err := database.QueryContext(ctx, kdb.Rebind(dialect, `SELECT status, details FROM _kora_ai_audit WHERE site = ? AND name = ? ORDER BY id`), site, toolFindRecords)
+				if err != nil {
+					t.Fatalf("list find_records audit rows: %v", err)
+				}
+				defer rows.Close()
+				var statuses, details []string
+				for rows.Next() {
+					var status, detail string
+					if err = rows.Scan(&status, &detail); err != nil {
+						t.Fatalf("scan find_records audit row: %v", err)
+					}
+					statuses, details = append(statuses, status), append(details, detail)
+				}
+				if err = rows.Err(); err != nil {
+					t.Fatalf("read find_records audit rows: %v", err)
+				}
+				// One row per table case above, in order: the honest zeros are "empty", the rest "completed".
+				want := []string{"completed", "completed", "completed", "empty", "empty", "completed", "empty", "completed", "completed", "completed", "empty", "completed"}
+				if fmt.Sprint(statuses) != fmt.Sprint(want) {
+					t.Fatalf("find_records audit statuses = %v, want %v", statuses, want)
+				}
+				if !strings.Contains(details[0], "Found 2 Supplier Bill") {
+					t.Fatalf("find_records audit details = %s, want the result text", details[0])
+				}
+			})
 
 			t.Run("get_record gives the Link name beside the code", func(t *testing.T) {
 				got := run(execution, toolGetRecord, `{"record_type":"Supplier Bill","name":"SB-0001"}`)
