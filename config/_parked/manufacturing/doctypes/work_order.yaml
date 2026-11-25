@@ -47,6 +47,13 @@ fields:
     default: Planned
     in_list_view: true
     in_standard_filter: true
+  - fieldname: quantity_produced
+    fieldtype: Float
+    label: Quantity made
+    default: "0"
+    read_only: true
+    in_list_view: true
+    description: Kept by production runs.
   - fieldname: notes
     fieldtype: Text
     label: Notes

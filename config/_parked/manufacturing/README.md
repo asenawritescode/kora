@@ -20,13 +20,20 @@ quantity made by product).
   type). It is append-only too.
 - Observed on MySQL: stock never goes below zero. An issue for more than is in stock is
   refused and nothing is saved.
+- A work order's recipe must be Active when the order is created or its recipe changes.
+  A production run or material issue needs its work order Planned or In progress; a
+  planned order becomes In progress. A Done or Cancelled order cannot change status.
+- A production run must make the recipe's product. Each run adds its quantity to the work
+  order's **Quantity made** (`quantity_produced`), which only runs set.
+- A work order can be marked Done only once Quantity made reaches its quantity.
+- A recipe cannot list its own product as a material, and each material needs a quantity
+  above zero.
 
-Limits: no scheduling, no automatic material consumption, no cost roll-up. A work order
-marked Done is not checked against a production run (the Engine cannot enforce that), and
-nothing compares issued materials with the recipe. The minimum on a material's quantity is
-declared, but the Engine does not check constraints on child table rows, so it is not
-enforced. The roles carry no `Product` permission because a pack cannot grant on another
-pack's record type; give operators read access to Product through the Selling/Stock roles.
+Limits: no scheduling, no automatic material consumption, no cost roll-up. Nothing compares
+issued materials with the recipe. The roles carry no `Product` permission because a pack
+cannot grant on another pack's record type; give operators read access to Product through
+the Selling/Stock roles.
 
-Checks: `go test ./internal/site ./internal/analytics -run Manufacturing` and
-`go test -tags integration ./internal/api -run Manufacturing` (needs MySQL, set `KORA_TEST_DSN`).
+Checks: `go test -count=1 ./internal/site -run Manufacturing` and
+`go test -tags integration -count=1 ./internal/api -run 'TestPackScriptsManufacturing|TestManufacturing'`
+(needs MySQL and Postgres; see `KORA_PACK_SCRIPTS_DISPOSABLE_*_DSN`).
