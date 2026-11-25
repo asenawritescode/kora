@@ -39,17 +39,6 @@ func expectQuantity(f *packFixture, batch, column string, want float64) {
 	}
 }
 
-// run starts one case as a subtest of the current dialect, with the fixture's failures
-// reported on that subtest.
-func (f *packFixture) run(name string, scenario func(f *packFixture)) {
-	f.t.Helper()
-	f.t.Run(name, func(t *testing.T) {
-		g := *f
-		g.t = t
-		scenario(&g)
-	})
-}
-
 func TestPackScriptsBatchExpiry(t *testing.T) {
 	eachPackDialect(t, []string{erpSellingPack, batchExpiryPack}, func(f *packFixture) {
 		medicine := f.create("Product", `{"product_name":"Amoxicillin 500mg","selling_price":300,"stock_qty":0,"status":"Active"}`)

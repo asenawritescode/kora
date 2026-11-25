@@ -190,6 +190,18 @@ func installPackScripts(t *testing.T, store *script.Store, site, root string) {
 	}
 }
 
+// run starts one case as a subtest of the current dialect, with the fixture's failures
+// reported on that subtest. Use it for every case so CI's
+// -run 'TestPackScripts/postgres' runs the case.
+func (f *packFixture) run(name string, scenario func(f *packFixture)) {
+	f.t.Helper()
+	f.t.Run(name, func(t *testing.T) {
+		g := *f
+		g.t = t
+		scenario(&g)
+	})
+}
+
 // as returns the same fixture acting with the given roles instead of Administrator.
 func (f *packFixture) as(roles ...string) *packFixture {
 	other := *f
