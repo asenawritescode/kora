@@ -15,6 +15,8 @@ func TestNamedTypes(t *testing.T) {
 		{"Hello I want to create a site", 0},
 		{"Frut", 0},
 		{"billing is fine, thanks", 0},
+		{"supp", 1},
+		{"show supp-001", 1},
 	}
 	for _, tt := range tests {
 		if got := namedTypes(tt.text, types); len(got) != tt.want {
@@ -51,6 +53,10 @@ func TestLookupFixSendsBackAnUncheckedAnswerOnce(t *testing.T) {
 		{name: "already sent back once", turn: answerTurn{recordTypes: []string{"Supplier Bill"}, lookupSent: true}, message: "List all supplier bills"},
 		{name: "no record type named", turn: answerTurn{recordTypes: []string{"Supplier Bill"}}, message: "Hello"},
 		{name: "reply about something else", turn: answerTurn{recordTypes: []string{"Supplier Bill"}}, message: "List all supplier bills", reply: "Insights is not available for your role."},
+		{name: "a prefix of a type names it", turn: answerTurn{recordTypes: []string{"Supplier", "Supplier Bill"}}, message: "Show supp-001", reply: "My supplier list came back empty.", wantFix: true},
+		{name: "a code names no type, reply names one", turn: answerTurn{recordTypes: []string{"Supplier Bill"}}, message: "SB-0001?", reply: "Supplier Bill SB-0001 is paid.", wantFix: true},
+		{name: "a code and a reply with no record", turn: answerTurn{recordTypes: []string{"Supplier Bill"}}, message: "SB-0001?", reply: "Hi"},
+		{name: "a code and a reply that quotes a code", turn: answerTurn{recordTypes: []string{"Supplier Bill"}}, message: "bill-001", reply: "It is SB-0003.", wantFix: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -96,5 +102,51 @@ func TestLookupFixReadsAPickedOption(t *testing.T) {
 	turn := answerTurn{recordTypes: []string{"Supplier Bill"}, lastReply: "No supplier bills found.\n\n1. List all supplier bills\n2. Show all suppliers"}
 	if turn.correction("None found: no supplier bills have been created yet.", "1") == nil {
 		t.Fatal("an answer to a picked option was not sent back for a lookup")
+	}
+}
+
+func TestRecordCodeShape(t *testing.T) {
+	tests := []struct {
+		text string
+		want bool
+	}{
+		{"SB-0001", true},
+		{"supp-001", true},
+		{"BILL-001", true},
+		{"hello", false},
+		{"12", false},
+		{"1-2", false},
+		{"a-b", false},
+		{"SB0001", false},
+		{"SB-0001-2", false},
+	}
+	for _, tt := range tests {
+		if got := recordCode(tt.text).shaped(); got != tt.want {
+			t.Errorf("recordCode(%q).shaped() = %v, want %v", tt.text, got, tt.want)
+		}
+	}
+}
+
+func TestCodesInSplitsOnWhitespaceAndTrimsPunctuation(t *testing.T) {
+	tests := []struct {
+		message string
+		want    []recordCode
+	}{
+		{"Show supp-001 please", []recordCode{"supp-001"}},
+		{"SB-0001?", []recordCode{"SB-0001"}},
+		{"(BILL-001), and SB-0002.", []recordCode{"BILL-001", "SB-0002"}},
+		{"List all bills", nil},
+	}
+	for _, tt := range tests {
+		got := codesIn(tt.message)
+		if len(got) != len(tt.want) {
+			t.Errorf("codesIn(%q) = %v, want %v", tt.message, got, tt.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Errorf("codesIn(%q) = %v, want %v", tt.message, got, tt.want)
+			}
+		}
 	}
 }
