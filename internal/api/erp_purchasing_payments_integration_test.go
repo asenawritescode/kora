@@ -407,4 +407,88 @@ func (f *erpPaymentsFixture) runScenario() {
 			t.Fatalf("status = %q, want Cancelled", got)
 		}
 	})
+	t.Run("payments in parts add up exactly", func(t *testing.T) {
+		b11 := bill("BILL-11", supplier, "1000", "")
+		first := payment("PAY-11A", "300", alloc(b11, "300"), "")
+		if f.refused(httpMethodPut, "Supplier Payment", first, `{"status":"Paid"}`) {
+			t.Fatal("first payment was refused")
+		}
+		second := payment("PAY-11B", "200", alloc(b11, "200"), "")
+		if f.refused(httpMethodPut, "Supplier Payment", second, `{"status":"Paid"}`) {
+			t.Fatal("second payment was refused")
+		}
+		f.expectBill(b11, "Partly Paid", 500, 500)
+	})
+	t.Run("a paid payment cannot be deleted; a draft one can", func(t *testing.T) {
+		b12 := bill("BILL-12", supplier, "100", "")
+		paid := payment("PAY-12A", "100", alloc(b12, "100"), "")
+		if f.refused(httpMethodPut, "Supplier Payment", paid, `{"status":"Paid"}`) {
+			t.Fatal("payment was refused")
+		}
+		if !f.refused(httpMethodDelete, "Supplier Payment", paid, "") {
+			t.Fatal("a paid payment was deleted")
+		}
+		if got := f.value("Supplier Payment", paid, "status"); got != "Paid" {
+			t.Fatalf("status after refused delete = %q, want Paid", got)
+		}
+		f.expectBill(b12, "Paid", 100, 0)
+		draft := payment("PAY-12B", "50", alloc(b12, "50"), "")
+		if f.refused(httpMethodDelete, "Supplier Payment", draft, "") {
+			t.Fatal("a draft payment could not be deleted")
+		}
+	})
+	t.Run("a voided payment can be deleted", func(t *testing.T) {
+		b13 := bill("BILL-13", supplier, "100", "")
+		p := payment("PAY-13", "100", alloc(b13, "100"), "")
+		if f.refused(httpMethodPut, "Supplier Payment", p, `{"status":"Paid"}`) {
+			t.Fatal("payment was refused")
+		}
+		if f.refused(httpMethodPut, "Supplier Payment", p, `{"status":"Voided"}`) {
+			t.Fatal("voiding was refused")
+		}
+		if f.refused(httpMethodDelete, "Supplier Payment", p, "") {
+			t.Fatal("a voided payment could not be deleted")
+		}
+	})
+	t.Run("a bill with payments cannot be deleted; an unpaid one can", func(t *testing.T) {
+		if !f.refused(httpMethodDelete, "Supplier Bill", b1, "") {
+			t.Fatal("bill with payments was deleted")
+		}
+		f.expectBill(b1, "Partly Paid", 300, 700)
+		b14 := bill("BILL-14", supplier, "100", "")
+		if f.refused(httpMethodDelete, "Supplier Bill", b14, "") {
+			t.Fatal("unpaid bill could not be deleted")
+		}
+	})
+	t.Run("a payment created as paid applies at once", func(t *testing.T) {
+		b15 := bill("BILL-15", supplier, "100", "")
+		body := `{"reference":"PAY-15","payment_date":"2026-11-14","supplier":"` + supplier + `","amount":100,"status":"Paid","allocations":[` + alloc(b15, "100") + `]}`
+		created := f.create("Supplier Payment", body)
+		f.expectBill(b15, "Paid", 100, 0)
+		if got := f.value("Supplier Payment", created, "status"); got != "Paid" {
+			t.Fatalf("status = %q, want Paid", got)
+		}
+	})
+	t.Run("a payment created as paid with a bad row changes no bill", func(t *testing.T) {
+		good := bill("BILL-16", supplier, "100", "")
+		badBill := bill("BILL-17", otherSupplier, "100", "")
+		body := `{"reference":"PAY-16","payment_date":"2026-11-14","supplier":"` + supplier + `","amount":60,"status":"Paid","allocations":[` +
+			alloc(good, "50") + `,` + alloc(badBill, "10") + `]}`
+		if !f.refused(httpMethodPost, "Supplier Payment", "", body) {
+			t.Fatal("payment with a bill of another supplier was accepted")
+		}
+		f.expectBill(good, "Open", 0, 100)
+		var rows int
+		if err := f.db.QueryRow(kdb.Rebind(kdb.Resolve(f.dialect), "SELECT COUNT(*) FROM "+kdb.Resolve(f.dialect).QuoteIdent("tabSupplier Payment")+" WHERE reference = ?"), "PAY-16").Scan(&rows); err != nil || rows != 0 {
+			t.Fatalf("refused payment left %d rows (%v)", rows, err)
+		}
+	})
+	t.Run("a payment cannot be created as voided", func(t *testing.T) {
+		b18 := bill("BILL-18", supplier, "100", "")
+		body := `{"reference":"PAY-18","payment_date":"2026-11-14","supplier":"` + supplier + `","amount":100,"status":"Voided","allocations":[` + alloc(b18, "100") + `]}`
+		if !f.refused(httpMethodPost, "Supplier Payment", "", body) {
+			t.Fatal("payment created as voided was accepted")
+		}
+		f.expectBill(b18, "Open", 0, 100)
+	})
 }
