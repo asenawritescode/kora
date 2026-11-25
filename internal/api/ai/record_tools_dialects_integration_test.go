@@ -187,3 +187,101 @@ func installActiveModules(t *testing.T, database *sql.DB, dialect kdb.Dialect, s
 		t.Fatal("persist module snapshot:", err)
 	}
 }
+
+// TestUpdatePreviewListsOnlyChangedFieldsAcrossDialects previews an update that changes only a
+// Select field of a Stock Entry. Its changes and its summary line must name that one field: the
+// Float quantity and the empty remarks are read back unchanged and are not part of the change.
+func TestUpdatePreviewListsOnlyChangedFieldsAcrossDialects(t *testing.T) {
+	for _, tc := range []struct{ name, dsn string }{
+		{name: "mysql", dsn: "KORA_AI_RECORD_TOOLS_MYSQL_DSN"},
+		{name: "postgres", dsn: "KORA_AI_RECORD_TOOLS_POSTGRES_DSN"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dsn := os.Getenv(tc.dsn)
+			if dsn == "" {
+				t.Skipf("set %s to a disposable %s database", tc.dsn, tc.name)
+			}
+			database := isolatedAIDatabase(t, tc.name, dsn)
+			dialect := kdb.Resolve(tc.name)
+			ctx := WithDialect(context.Background(), dialect)
+			if err := ksite.BootstrapSystemTables(ctx, database, dialect); err != nil {
+				t.Fatalf("bootstrap %s system tables: %v", tc.name, err)
+			}
+			registry := loadPackRegistry(t, "inventory")
+			for _, dt := range registry.All() {
+				for _, statement := range dialect.CreateTable(dt) {
+					if _, err := database.Exec(statement); err != nil {
+						t.Fatalf("create %s table %s: %v", tc.name, dt.Name, err)
+					}
+				}
+			}
+			suffix := fmt.Sprintf("%x", time.Now().UnixNano())
+			site := "ai-update-preview-" + tc.name + "-" + suffix
+			installActiveModules(t, database, dialect, site, "inventory.core")
+			execution := testAIExecution(t, site, "alice@example.test", []string{doctype.AdminRole})
+			tx := &orm.TxManager{
+				DB: database, Registry: registry, Dialect: dialect, SiteName: site,
+				Context: ctx, CurrentUser: "alice@example.test", CurrentUserRole: doctype.AdminRole,
+				CurrentUserRoles: []string{doctype.AdminRole}, Outbox: outbox.NewSQLWriter(dialect), Execution: execution,
+			}
+			tx.Context = WithDialect(tx.Context, dialect)
+
+			dbTx, err := database.Begin()
+			if err != nil {
+				t.Fatalf("begin stock insert: %v", err)
+			}
+			location := doctype.NewDocument("Location")
+			location.Fields = map[string]any{"location_name": "Shop floor"}
+			item := doctype.NewDocument("Item")
+			item.Fields = map[string]any{"item_name": "Sugar 2kg", "uom": "Each", "price": 250}
+			entry := doctype.NewDocument("Stock Entry")
+			entry.Fields = map[string]any{"quantity": 2.5, "entry_type": "Receipt"}
+			for _, step := range []struct {
+				dt  string
+				doc *doctype.Document
+			}{{"Location", location}, {"Item", item}} {
+				if err = tx.InsertInTx(dbTx, registry.Get(step.dt), step.doc, "alice@example.test", "alice@example.test"); err != nil {
+					_ = dbTx.Rollback()
+					t.Fatalf("insert %s on %s: %v", step.dt, tc.name, err)
+				}
+			}
+			entry.Fields["item"], entry.Fields["location"] = item.Name, location.Name
+			if err = tx.InsertInTx(dbTx, registry.Get("Stock Entry"), entry, "alice@example.test", "alice@example.test"); err != nil {
+				_ = dbTx.Rollback()
+				t.Fatalf("insert Stock Entry on %s: %v", tc.name, err)
+			}
+			if err = dbTx.Commit(); err != nil {
+				t.Fatalf("commit Stock Entry on %s: %v", tc.name, err)
+			}
+
+			args := `{"record_type":"Stock Entry","name":"` + entry.Name + `","data":{"entry_type":"Issue"}}`
+			calls := []any{map[string]any{"id": "call-update", "type": "function", "function": map[string]any{"name": toolUpdateRecord, "arguments": args}}}
+			results := RunToolTurn(tx.Context, tx, registry, toolCallBatch{
+				Calls: calls, Owner: "alice@example.test", Site: site, RunID: "run-update", StepID: "step-update",
+				ConversationID: "conversation-" + suffix, Execution: execution,
+			})
+			if len(results) != 1 {
+				t.Fatalf("update preview on %s returned %d results, want one", tc.name, len(results))
+			}
+			preview, _ := results[0]["content"].(string)
+			var reply struct {
+				Preview map[string]json.RawMessage `json:"preview"`
+			}
+			if err := json.Unmarshal([]byte(preview), &reply); err != nil {
+				t.Fatalf("update preview on %s = %q, want a preview: %v", tc.name, preview, err)
+			}
+			var changes map[string]json.RawMessage
+			if err := json.Unmarshal(reply.Preview["changes"], &changes); err != nil {
+				t.Fatalf("decode changes on %s: %v", tc.name, err)
+			}
+			if len(changes) != 1 || changes["entry_type"] == nil {
+				t.Fatalf("changes on %s = %s, want only entry_type", tc.name, reply.Preview["changes"])
+			}
+			summary := pendingWrite{ToolName: toolUpdateRecord, PreviewJSON: preview}.summary()
+			want := "update Stock Entry " + entry.Name + " (entry_type Receipt -> Issue)"
+			if summary != want {
+				t.Fatalf("summary on %s = %q, want %q", tc.name, summary, want)
+			}
+		})
+	}
+}
