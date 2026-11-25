@@ -360,7 +360,7 @@ func TestExecuteUpdateToolRejectsInvalidArgumentsBeforeMutation(t *testing.T) {
 	}{
 		{name: "missing record name", args: map[string]any{"title": "Updated"}, want: `"code":"missing_fields"`},
 		{name: "unknown field", args: map[string]any{"name": "TASK-1", "missing": "value"}, want: "Unknown fields: missing"},
-		{name: "read-only field", args: map[string]any{"name": "TASK-1", "calculated": "forged"}, want: "Field calculated is not writable"},
+		{name: "read-only field", args: map[string]any{"name": "TASK-1", "calculated": "forged"}, want: "Calculated is read-only on Task: it is set by the system."},
 		{name: "empty change set", args: map[string]any{"name": "TASK-1"}, want: "at least one writable field"},
 	}
 	for _, test := range tests {
