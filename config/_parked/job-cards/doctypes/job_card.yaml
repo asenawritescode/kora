@@ -11,7 +11,7 @@ quantity_effect:
   source_record_field: product
   delta_field: quantity
   direction: decrease
-description: Work on one customer vehicle. Saving a new job card takes the parts listed on it off the stock of each product in the same step. Changing the parts of a job card later does not change stock; correct that with a Stock Adjustment.
+description: Work on one customer vehicle. Saving a new job card takes the parts listed on it off the stock of each product in the same step. Changing its parts later moves stock by the difference, and deleting the card gives the parts back.
 
 fields:
   - fieldname: reference
