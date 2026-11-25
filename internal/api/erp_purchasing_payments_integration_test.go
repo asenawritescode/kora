@@ -111,7 +111,7 @@ func openERPPaymentsFixture(t *testing.T, dialect, dsn string) *erpPaymentsFixtu
 	installPackScripts(t, store, site, filepath.Join(erpPurchasingPack, "scripts"))
 
 	for _, currency := range []string{"KES", "USD"} {
-		if _, err := database.Exec(kdb.Rebind(dl, "INSERT INTO "+dl.QuoteIdent("tabCurrency")+" (name, code, currency_name, rate_to_base, enabled) VALUES (?, ?, ?, 1, 1)"), currency, currency, currency); err != nil {
+		if _, err := database.Exec(kdb.Rebind(dl, "INSERT INTO "+dl.QuoteIdent("tabCurrency")+" (name, code, currency_name, rate_to_base, enabled) VALUES (?, ?, ?, 1, ?)"), currency, currency, currency, true); err != nil {
 			t.Fatalf("seed currency %s: %v", currency, err)
 		}
 	}
