@@ -71,6 +71,7 @@ fields:
       Delivered
       Failed
     default: Booked
+    description: "Moves forward only: Booked, Collected, In transit, then Delivered or Failed. A tracking event with a status sets it too. Delivered and Failed are final."
     in_list_view: true
     in_standard_filter: true
 doc_constraints:
