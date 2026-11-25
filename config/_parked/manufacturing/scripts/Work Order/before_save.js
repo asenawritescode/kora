@@ -17,7 +17,7 @@ if (!oldDoc || String(doc.bom || "") !== String(oldDoc.bom || "")) {
     throw new Error("Cannot check bill of materials " + doc.bom + ".");
   }
   if (recipe.status !== "Active") {
-    throw new Error((recipe.reference || recipe.name) + " is " + recipe.status + "; activate it first.");
+    throw new Error((recipe.reference || recipe.name) + " is " + recipe.status + "; " + (recipe.status === "Draft" ? "activate it first." : "choose an active bill of materials."));
   }
 }
 
