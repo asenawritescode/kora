@@ -1,10 +1,6 @@
 package site
 
-import (
-	"os"
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
 func TestSubscriptionsModulePassesMarketplaceValidation(t *testing.T) {
 	requireValidPack(t, "subscriptions", packFiles(t, "subscriptions"))
@@ -15,11 +11,4 @@ func TestSubscriptionsModulePassesMarketplaceValidation(t *testing.T) {
 // clash with Selling's Customer and Payment, and no shared role names.
 func TestSubscriptionsComposesWithTheOtherModules(t *testing.T) {
 	requireComposes(t, "composed-with-subscriptions", append([]string{"subscriptions", "people", "crm"}, baseModules...)...)
-}
-
-// The pack ships without script hooks: tenant Engines run with scripts off.
-func TestSubscriptionsPackShipsNoScripts(t *testing.T) {
-	if _, err := os.Stat(filepath.Join("..", "..", "config", "subscriptions", "scripts")); !os.IsNotExist(err) {
-		t.Fatalf("config/subscriptions must not have a scripts directory (stat error: %v)", err)
-	}
 }

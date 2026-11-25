@@ -5,7 +5,7 @@ title_field: invoice_number
 search_fields: invoice_number, status
 sort_field: due_date
 sort_order: DESC
-description: An invoice for one billing period of a subscription. Type the subtotal (usually the subscription's amount per period); tax, total, balance and the payment state are worked out. Once issued, the subscription, subtotal, tax rate and currency are frozen. Payments update the amount paid when they are saved; the invoice refuses a payment above the balance, and payments on a draft or void invoice. The invoice is a record; it is not charged to anyone.
+description: An invoice for one billing period of a subscription. Leave the subtotal blank to take the billing schedule's amount, or the subscription's amount per period; tax, total, balance and the payment state are worked out. Once issued, the subscription, subtotal, tax rate and currency are frozen. Payments update the amount paid when they are saved; the invoice refuses a payment above the balance, and payments on a draft or void invoice. The invoice is a record; it is not charged to anyone.
 
 fields:
   - fieldname: invoice_number
@@ -35,6 +35,7 @@ fields:
     fieldtype: Link
     options: Billing Schedule
     label: Billing schedule
+    description: Set it on a draft invoice. Moving a draft to another schedule returns the old one to Scheduled. Once issued, the schedule cannot change.
   - fieldname: issue_date
     fieldtype: Date
     label: Issue date
@@ -57,7 +58,8 @@ fields:
   - fieldname: subtotal
     fieldtype: Currency
     label: Subtotal
-    reqd: true
+    default: "0"
+    description: Left at 0 on a new invoice, it takes the billing schedule's amount or the subscription's amount per period.
     constraints:
       - type: min
         value: 0

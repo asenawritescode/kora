@@ -5,7 +5,7 @@ title_field: reference
 search_fields: reference, status
 sort_field: next_billing_date
 sort_order: ASC
-description: A subscriber's agreement to pay for a plan again and again. The agreed price is typed in (the plan price, or a negotiated one) and stays as typed; extra priced items go on the lines and add to the amount per period.
+description: A subscriber's agreement to pay for a plan again and again. A new subscription takes the plan's currency, billing interval, interval count and price (a blank or zero price is filled from the plan); the price can then be changed and stays as saved. Extra priced items go on the lines and add to the amount per period.
 
 fields:
   - fieldname: reference
@@ -42,8 +42,7 @@ fields:
   - fieldname: unit_price
     fieldtype: Currency
     label: Agreed unit price
-    description: The plan price, or the negotiated price when it differs.
-    reqd: true
+    description: Left blank on a new subscription, it takes the plan's price. Type a negotiated price when it differs.
     constraints:
       - type: min
         value: 0
