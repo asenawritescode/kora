@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"strings"
 
 	"github.com/asenawritescode/kora/contract"
@@ -201,7 +200,7 @@ func previewBody(tx *orm.TxManager, dt *doctype.DocType, w recordWrite, result *
 	before := aiReadableDocumentFields(dt, old.Fields)
 	changes := map[string]any{}
 	for key, value := range saved {
-		if oldValue, ok := before[key]; !ok || !reflect.DeepEqual(oldValue, value) {
+		if !(fieldValue{v: before[key]}).same(fieldValue{v: value}) {
 			changes[key] = map[string]any{"old": before[key], "new": value}
 		}
 	}

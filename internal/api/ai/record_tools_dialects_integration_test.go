@@ -265,19 +265,21 @@ func TestUpdatePreviewListsOnlyChangedFieldsAcrossDialects(t *testing.T) {
 			}
 			preview, _ := results[0]["content"].(string)
 			var reply struct {
-				Preview map[string]json.RawMessage `json:"preview"`
+				Preview json.RawMessage `json:"preview"`
 			}
 			if err := json.Unmarshal([]byte(preview), &reply); err != nil {
 				t.Fatalf("update preview on %s = %q, want a preview: %v", tc.name, preview, err)
 			}
-			var changes map[string]json.RawMessage
-			if err := json.Unmarshal(reply.Preview["changes"], &changes); err != nil {
-				t.Fatalf("decode changes on %s: %v", tc.name, err)
+			var body struct {
+				Changes map[string]json.RawMessage `json:"changes"`
 			}
-			if len(changes) != 1 || changes["entry_type"] == nil {
-				t.Fatalf("changes on %s = %s, want only entry_type", tc.name, reply.Preview["changes"])
+			if err := json.Unmarshal(reply.Preview, &body); err != nil {
+				t.Fatalf("decode update preview on %s: %v", tc.name, err)
 			}
-			summary := pendingWrite{ToolName: toolUpdateRecord, PreviewJSON: preview}.summary()
+			if len(body.Changes) != 1 || body.Changes["entry_type"] == nil {
+				t.Fatalf("changes on %s = %s, want only entry_type", tc.name, reply.Preview)
+			}
+			summary := pendingWrite{ToolName: toolUpdateRecord, PreviewJSON: string(reply.Preview)}.summary()
 			want := "update Stock Entry " + entry.Name + " (entry_type Receipt -> Issue)"
 			if summary != want {
 				t.Fatalf("summary on %s = %q, want %q", tc.name, summary, want)
