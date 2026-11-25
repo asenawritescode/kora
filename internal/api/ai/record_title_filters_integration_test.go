@@ -16,6 +16,7 @@ import (
 	"github.com/asenawritescode/kora/internal/kernel"
 	"github.com/asenawritescode/kora/internal/orm"
 	"github.com/asenawritescode/kora/internal/outbox"
+	"github.com/asenawritescode/kora/internal/policy"
 	ksite "github.com/asenawritescode/kora/internal/site"
 )
 
@@ -65,9 +66,9 @@ func TestFindRecordsMatchesNamesAcrossDialects(t *testing.T) {
 			seedPurchasing(t, tx, database, registry)
 
 			turn := 0
-			find := func(args string) string {
+			run := func(execution policy.Execution, tool, args string) string {
 				turn++
-				call := map[string]any{"id": fmt.Sprintf("call-%d", turn), "type": "function", "function": map[string]any{"name": toolFindRecords, "arguments": args}}
+				call := map[string]any{"id": fmt.Sprintf("call-%d", turn), "type": "function", "function": map[string]any{"name": tool, "arguments": args}}
 				results := RunToolTurn(tx.Context, tx, registry, toolCallBatch{
 					Calls: []any{call}, Owner: "alice@example.test", Site: site, RunID: fmt.Sprintf("run-%d", turn),
 					StepID: "step", ConversationID: "conversation-" + site, Execution: execution, Commands: kernel.NewCommandRegistry(),
@@ -75,6 +76,7 @@ func TestFindRecordsMatchesNamesAcrossDialects(t *testing.T) {
 				content, _ := results[0]["content"].(string)
 				return content
 			}
+			find := func(args string) string { return run(execution, toolFindRecords, args) }
 
 			for _, tc := range []struct {
 				name string
@@ -95,8 +97,8 @@ func TestFindRecordsMatchesNamesAcrossDialects(t *testing.T) {
 					[]string{"Found 1 Supplier Bill, showing 1:"}},
 				{"search with no match gives the total", `{"record_type":"Supplier Bill","search":"zzz"}`,
 					[]string{"No Supplier Bill match these filters. 2 Supplier Bill exist in total."}},
-				{"no filters lists every bill", `{"record_type":"Supplier Bill"}`,
-					[]string{"Found 2 Supplier Bill, showing 2:"}},
+				{"no filters lists every bill with the supplier's name", `{"record_type":"Supplier Bill"}`,
+					[]string{"Found 2 Supplier Bill, showing 2:", "Supplier: Mr. Ouma Son (SUPP-0001)"}},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					got := find(tc.args)
@@ -107,6 +109,28 @@ func TestFindRecordsMatchesNamesAcrossDialects(t *testing.T) {
 					}
 				})
 			}
+
+			t.Run("get_record gives the Link name beside the code", func(t *testing.T) {
+				got := run(execution, toolGetRecord, `{"record_type":"Supplier Bill","name":"SB-0001"}`)
+				for _, want := range []string{`"link_titles":{"supplier":"Mr. Ouma Son"}`, `"supplier":"SUPP-0001"`} {
+					if !strings.Contains(got, want) {
+						t.Fatalf("get_record = %q, want it to contain %q", got, want)
+					}
+				}
+			})
+
+			t.Run("a reader without Supplier read sees the codes alone", func(t *testing.T) {
+				registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Supplier Bill", Role: "Bill Clerk", Read: true})
+				clerk := testAIExecution(t, site, "clerk@example.test", []string{"Bill Clerk"})
+				found := run(clerk, toolFindRecords, `{"record_type":"Supplier Bill"}`)
+				if !strings.Contains(found, "Supplier: SUPP-0001") || strings.Contains(found, "Mr. Ouma Son") {
+					t.Fatalf("find_records as clerk = %q, want the code alone", found)
+				}
+				got := run(clerk, toolGetRecord, `{"record_type":"Supplier Bill","name":"SB-0001"}`)
+				if strings.Contains(got, "link_titles") || strings.Contains(got, "Mr. Ouma Son") || !strings.Contains(got, `"supplier":"SUPP-0001"`) {
+					t.Fatalf("get_record as clerk = %q, want the code and no link_titles", got)
+				}
+			})
 		})
 	}
 }

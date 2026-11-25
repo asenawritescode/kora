@@ -210,7 +210,7 @@ func TestAIReadAndToolProjectionsExcludeHiddenAndPasswordFields(t *testing.T) {
 	}
 	if summary := formatDocSummary(dt, &doctype.Document{Name: "ACC-1", Fields: map[string]any{
 		"display_name": "Public name", "private_note": "secret note", "credential": "secret password",
-	}}, 1); strings.Contains(summary, "secret") {
+	}}, 1, nil); strings.Contains(summary, "secret") {
 		t.Fatalf("AI summary exposed a hidden or password value: %q", summary)
 	}
 	for _, field := range describeFields(doctype.NewRegistry(), dt) {
@@ -450,7 +450,7 @@ func TestListFormattingUsesSchemaSummary(t *testing.T) {
 		"priority": "Medium",
 		"creation": "2026-07-13 20:49:53 +0000 UTC",
 	}
-	out := formatDocSummary(dt, doc, 1)
+	out := formatDocSummary(dt, doc, 1, nil)
 
 	if strings.Contains(out, "map[") || strings.Contains(out, "+0000 UTC") || strings.Contains(out, "Creation") {
 		t.Fatalf("expected clean schema summary, got %q", out)
