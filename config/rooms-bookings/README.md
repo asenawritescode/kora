@@ -13,10 +13,20 @@ rooms by status).
   times the rate; both are calculated and read only.
 - Rates cannot be negative.
 - Once a booking is Checked out or Cancelled, its guest, room and dates are frozen.
+- A booking is active while Booked or Checked in. An active booking cannot overlap another
+  active booking of the same room (back-to-back stays are fine); a cancelled or checked-out
+  booking is ignored.
+- Booking status moves: Booked to Checked in (the room must be Available; it becomes
+  Occupied) or Cancelled (only from Booked); Checked in to Checked out (the room becomes
+  Cleaning). A new booking starts as Booked or Checked in. Any other move is refused.
+- A new booking with a blank rate takes the room's rate per night.
+- A checked-in booking keeps its room until checkout, and a checked-in booking cannot be
+  deleted.
 
-Limits: rooms, guests and bookings only. Double-booking a room is not prevented (there is
-no overlap check), a booking does not change the room's status (set by hand), there is no
+Limits: rooms, guests and bookings only. Check-in and check-out set a room's status, but
+managers set the other changes by hand (Cleaning to Available, Out of service), there is no
 housekeeping schedule, and no channel manager or online booking.
 
-Checks: `go test ./internal/site -run Rooms`, `go test ./internal/analytics -run Rooms`
-and `go test -tags integration ./internal/api -run Rooms` (needs MySQL, set `KORA_TEST_DSN`).
+Checks: `go test ./internal/site -run Rooms` and `go test -tags integration ./internal/api
+-run 'TestPackScriptsRooms|TestRoomsBookingWorkflowOnMySQL'` (needs the MySQL and Postgres
+`KORA_PACK_SCRIPTS_DISPOSABLE_*_DSN` variables).
