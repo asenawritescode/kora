@@ -70,44 +70,85 @@ func resolveTitleFilters(ctx context.Context, tx *orm.TxManager, dt *doctype.Doc
 	return out, nil
 }
 
+// linkTarget is a Link field of the record type, the target record type it names and the rows the person may
+// read there.
+type linkTarget struct {
+	field string
+	doc   *doctype.DocType
+	scope policy.RowScope
+}
+
+// linkMatch is what matching typed names against one Link target gives: the codes, one note per name that
+// matched by title, and the reply when a name matches nothing ("" when every name matched).
+type linkMatch struct {
+	codes []any
+	notes []string
+	none  string
+}
+
 // resolveLinkFilter matches the values of one Link filter by title. It returns the filter unchanged when it is
 // not a Link filter, its target is unknown or unreadable, or its value is not text.
 func resolveLinkFilter(ctx context.Context, tx *orm.TxManager, dt *doctype.DocType, filter map[string]any, execution policy.Execution) (any, []string, string, error) {
 	field, _ := filter["field"].(string)
 	op := strings.ToLower(fmt.Sprint(filter["op"]))
 	f := dt.GetField(field)
-	if f == nil || f.Fieldtype != "Link" || (op != "=" && op != "like" && op != "in") || tx.Registry == nil {
+	if f == nil || (op != "=" && op != "like" && op != "in") {
 		return filter, nil, "", nil
 	}
-	target := recordTypeNamed(tx.Registry, f.Options)
-	if target == nil {
-		return filter, nil, "", nil
-	}
-	targetScope, denied := authorizeRecordOperation(tx, tx.Registry, target, "read", execution)
-	if denied != "" {
+	lt, ok := readableLinkTarget(tx, f, execution)
+	if !ok {
 		return filter, nil, "", nil
 	}
 	values := linkValues(op, filter["value"])
 	if len(values) == 0 {
 		return filter, nil, "", nil
 	}
-	var codes []any
-	var notes []string
-	for _, value := range values {
+	m, err := matchLinkValues(ctx, tx, lt, values)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if m.none != "" {
+		return nil, nil, m.none, nil
+	}
+	return map[string]any{"field": field, "op": "in", "value": m.codes}, m.notes, "", nil
+}
+
+// readableLinkTarget returns the target of a Link field, with the rows the person may read there. It reports
+// false when the field is not a Link, its target is unknown or the person may not read the target.
+func readableLinkTarget(tx *orm.TxManager, f *doctype.Field, execution policy.Execution) (linkTarget, bool) {
+	if f.Fieldtype != "Link" || tx.Registry == nil {
+		return linkTarget{}, false
+	}
+	target := recordTypeNamed(tx.Registry, f.Options)
+	if target == nil {
+		return linkTarget{}, false
+	}
+	scope, denied := authorizeRecordOperation(tx, tx.Registry, target, "read", execution)
+	if denied != "" {
+		return linkTarget{}, false
+	}
+	return linkTarget{field: f.Fieldname, doc: target, scope: scope}, true
+}
+
+// matchLinkValues matches each typed text by title in the Link target. A text that matches no record stops the
+// match and sets the reply that says so.
+func matchLinkValues(ctx context.Context, tx *orm.TxManager, lt linkTarget, texts []string) (linkMatch, error) {
+	var out linkMatch
+	for _, value := range texts {
 		text := strings.Trim(value, "%")
-		matches, err := tx.MatchTitles(ctx, target, text, targetScope)
+		matches, err := tx.MatchTitles(ctx, lt.doc, text, lt.scope)
 		if err != nil {
-			return nil, nil, "", err
+			return linkMatch{}, err
 		}
 		if matches.Kind == "" {
-			return nil, nil, noTargetMatchText(target.Name, text, matches.Closest), nil
+			return linkMatch{none: noTargetMatchText(lt.doc.Name, text, matches.Closest)}, nil
 		}
-		codes = append(codes, codesOf(matches.Matches)...)
+		out.codes = append(out.codes, codesOf(matches.Matches)...)
 		if matches.Kind != orm.TitleKindCode {
-			notes = append(notes, matchNote(field, text, target.Name, matches.Matches))
+			out.notes = append(out.notes, matchNote(lt.field, text, lt.doc.Name, matches.Matches))
 		}
 	}
-	return map[string]any{"field": field, "op": "in", "value": codes}, notes, "", nil
+	return out, nil
 }
 
 // linkValues returns the text values of a Link filter's value, or nil when it is not text.
