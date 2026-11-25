@@ -177,6 +177,11 @@ type OperationContext struct {
 	// effectAverages holds the moving average move of each effect target, keyed
 	// by target name. Only prepareQuantityEffect sets this.
 	effectAverages map[string]averageMove
+	// lifecycleEffect marks a create or update that a document-event script
+	// requested while its source operation runs. authorize then skips only the
+	// target's role-matrix decision; append-only and every other check still
+	// apply. Only executeScriptMutationInTx sets it, from MutationRequest.Lifecycle.
+	lifecycleEffect bool
 }
 
 func (c OperationContext) isEffectItem(key string) bool {
