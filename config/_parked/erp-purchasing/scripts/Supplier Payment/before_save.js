@@ -39,7 +39,7 @@ function planAllocations(payment) {
   var rows = rowsOf(payment);
   if (rows.length === 0 && payment.supplier_bill) {
     var shortcut = loadBill(payment.supplier_bill);
-    var owed = money(shortcut.amount - shortcut.amount_paid);
+    var owed = money(money(shortcut.amount) - money(shortcut.amount_paid));
     var pays = Math.min(money(payment.amount), owed);
     rows.push({ supplier_bill: String(payment.supplier_bill), amount: money(pays) });
   }
@@ -61,7 +61,7 @@ function planAllocations(payment) {
       throw new Error("An allocation to " + bill.name + " must be more than zero.");
     }
     pending[bill.name] = money((pending[bill.name] || 0) + row.amount);
-    var owedNow = money(bill.amount - bill.amount_paid);
+    var owedNow = money(money(bill.amount) - money(bill.amount_paid));
     if (pending[bill.name] > owedNow) {
       throw new Error(bill.name + " has only " + owedNow + " still owed.");
     }
@@ -91,7 +91,7 @@ function applyPaid() {
   var plan = planAllocations(doc);
   for (var name in plan.sums) {
     var bill = loadBill(name);
-    kora.saveDoc("Supplier Bill", { name: name, amount_paid: money(bill.amount_paid + plan.sums[name]) });
+    kora.saveDoc("Supplier Bill", { name: name, amount_paid: money(money(bill.amount_paid) + plan.sums[name]) });
   }
   doc.allocations = plan.rows;
   doc.unallocated_amount = money(money(doc.amount) - plan.total);
@@ -101,15 +101,18 @@ function reverseAllocations() {
   var sums = sumByBill(rowsOf(oldDoc));
   for (var name in sums) {
     var bill = loadBill(name);
-    var left = money(bill.amount_paid - sums[name]);
+    var left = money(money(bill.amount_paid) - sums[name]);
     kora.saveDoc("Supplier Bill", { name: name, amount_paid: left < 0 ? 0 : left });
   }
   doc.unallocated_amount = 0;
 }
 
 if (!oldDoc) {
-  if (doc.status !== "Draft") {
-    throw new Error("A payment is recorded as Draft, then marked Paid.");
+  // Recorded as Draft, or straight to Paid with its allocations applied in the same save.
+  if (doc.status === "Paid") {
+    applyPaid();
+  } else if (doc.status !== "Draft") {
+    throw new Error("A payment is recorded as Draft or Paid, not " + doc.status + ".");
   }
   return { doc: doc };
 }
