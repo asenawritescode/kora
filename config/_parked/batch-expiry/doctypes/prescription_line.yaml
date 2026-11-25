@@ -10,6 +10,11 @@ fields:
     options: Product
     label: Medicine
     reqd: true
+  - fieldname: batch
+    fieldtype: Link
+    options: Medicine Batch
+    label: Batch
+    description: Chosen when the prescription is dispensed; the batch gives up this quantity.
   - fieldname: dosage
     fieldtype: Data
     label: Dosage
