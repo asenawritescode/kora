@@ -3,6 +3,8 @@ package ai
 import (
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/asenawritescode/kora/internal/textmatch"
 )
@@ -39,7 +41,8 @@ func recordTypesOf(functions []map[string]any) []string {
 }
 
 // namedTypes returns the record types a text names by their last word, singular or plural: "Supplier Bill" is
-// named by "supplier bills" and by "bills".
+// named by "supplier bills", by "bills" and by "bill". A word of three or more letters that starts the last word
+// also names it, so "supp" names Supplier.
 func namedTypes(text string, types []string) []string {
 	words := textmatch.Words(text)
 	var named []string
@@ -49,7 +52,7 @@ func namedTypes(text string, types []string) []string {
 			continue
 		}
 		for _, word := range words {
-			if sameNoun(word, name[len(name)-1]) {
+			if sameNoun(word, name[len(name)-1]) || namesPrefix(word, name[len(name)-1]) {
 				named = append(named, recordType)
 				break
 			}
@@ -66,12 +69,63 @@ func sameNoun(word, noun string) bool {
 	return strings.HasSuffix(noun, "y") && word == strings.TrimSuffix(noun, "y")+"ies"
 }
 
+// namesPrefix reports whether word has at least three letters and starts noun.
+func namesPrefix(word, noun string) bool {
+	return utf8.RuneCountInString(word) >= 3 && strings.HasPrefix(noun, word)
+}
+
+// recordCode is a word shaped like a record code: letters, one dash and digits, such as "SB-0001" or "supp-001".
+type recordCode string
+
+// shaped reports whether the code is letters, one dash and digits, in any case.
+func (c recordCode) shaped() bool {
+	prefix, digits, ok := strings.Cut(string(c), "-")
+	if !ok || prefix == "" || digits == "" || strings.Contains(digits, "-") {
+		return false
+	}
+	for _, r := range prefix {
+		if !unicode.IsLetter(r) {
+			return false
+		}
+	}
+	for _, r := range digits {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// codesIn returns the code-shaped words of a message. Words are the message split on whitespace, with surrounding
+// punctuation trimmed, so "SB-0001?" and "(BILL-001)," both count.
+func codesIn(message string) []recordCode {
+	var codes []recordCode
+	for _, field := range strings.Fields(message) {
+		if code := recordCode(strings.Trim(field, `.,;:!?()[]{}"'`)); code.shaped() {
+			codes = append(codes, code)
+		}
+	}
+	return codes
+}
+
+// talksAboutRecords reports whether a reply is about records the message asked about: it names a type the message
+// named, or, when the message holds a record code, it names any type or quotes a code.
+func (t *answerTurn) talksAboutRecords(reply, asked string) bool {
+	if len(namedTypes(reply, namedTypes(asked, t.recordTypes))) > 0 {
+		return true
+	}
+	if len(codesIn(asked)) == 0 {
+		return false
+	}
+	return len(namedTypes(reply, t.recordTypes)) > 0 || len(codesIn(reply)) > 0
+}
+
 // lookupFix returns the messages that send back a reply given without any tool call that talks about a record type
 // the person named, once per turn. The next request then requires a tool call. A reply about something else, such
 // as a refusal, may stand.
 func (t *answerTurn) lookupFix(reply, message string) []map[string]any {
 	asked := pickedOption(message, t.lastReply)
-	if t.lookedUp || t.lookupSent || len(namedTypes(reply, namedTypes(asked, t.recordTypes))) == 0 {
+	if t.lookedUp || t.lookupSent || !t.talksAboutRecords(reply, asked) {
 		return nil
 	}
 	t.lookupSent, t.forceTool = true, true

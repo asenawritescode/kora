@@ -226,3 +226,50 @@ func TestRecordToolExecutionRefusesChildAndUnknownTypes(t *testing.T) {
 		})
 	}
 }
+
+func TestTypedNameOpensOneTitle(t *testing.T) {
+	tests := []struct {
+		name    string
+		typed   string
+		matches orm.TitleMatches
+		want    string
+		ok      bool
+	}{
+		{name: "a code match of one record", typed: "sb-0001", matches: orm.TitleMatches{Kind: orm.TitleKindCode, Matches: []orm.TitleMatch{{Name: "SB-0001", Title: "SB-0001"}}}, want: "SB-0001", ok: true},
+		{name: "one title equal ignoring case", typed: "bill-001", matches: orm.TitleMatches{Kind: orm.TitleKindWords, Matches: []orm.TitleMatch{{Name: "SB-0003", Title: "BILL-001"}}}, want: "SB-0003", ok: true},
+		{name: "a title that only holds the words", typed: "bill-001", matches: orm.TitleMatches{Kind: orm.TitleKindWords, Matches: []orm.TitleMatch{{Name: "SB-0003", Title: "BILL-0010 spare"}}}},
+		{name: "two titles equal to the text", typed: "bill-001", matches: orm.TitleMatches{Kind: orm.TitleKindWords, Matches: []orm.TitleMatch{{Name: "SB-0003", Title: "BILL-001"}, {Name: "SB-0004", Title: "bill-001"}}}},
+		{name: "a typo match is not opened", typed: "bil-001", matches: orm.TitleMatches{Kind: orm.TitleKindTypo, Matches: []orm.TitleMatch{{Name: "SB-0003", Title: "BILL-001"}}}},
+		{name: "no match", typed: "zzz"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := typedName(tt.typed).openTitle(tt.matches)
+			if got != tt.want || ok != tt.ok {
+				t.Fatalf("openTitle(%q) = %q, %v; want %q, %v", tt.typed, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+func TestTypedNameNearCodes(t *testing.T) {
+	codes := []string{"SUPP-0001", "SB-0001", "SUPP-0002", "SUPP-0003", "CUST-0009"}
+	tests := []struct {
+		name  string
+		typed string
+		want  []string
+	}{
+		{name: "a code one digit short gives only the nearest", typed: "supp-001", want: []string{"SUPP-0001"}},
+		{name: "equally near codes all show, by code", typed: "SUPP-0004", want: []string{"SUPP-0001", "SUPP-0002", "SUPP-0003"}},
+		{name: "a word with no near code", typed: "zzz"},
+		{name: "a short word is too far from every code", typed: "sup-0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := typedName(tt.typed).nearCodes(codes)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("nearCodes(%q) = %v, want %v", tt.typed, got, tt.want)
+			}
+		})
+	}
+}

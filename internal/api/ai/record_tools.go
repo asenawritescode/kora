@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/asenawritescode/kora/internal/kernel"
 	"github.com/asenawritescode/kora/internal/orm"
 	"github.com/asenawritescode/kora/internal/policy"
+	"github.com/asenawritescode/kora/internal/textmatch"
 )
 
 // The fixed record tools. One set serves every record type the person may read,
@@ -311,18 +313,21 @@ func showLinkTitles(tx *orm.TxManager, dt *doctype.DocType, docs []*doctype.Docu
 }
 
 // getRecord returns one record. Link fields keep their codes; link_titles adds the names of the codes the person
-// may see named (see readLinkNames).
+// may see named (see readLinkNames). A name that is not a code may be a title, which opens its record with a note.
 func getRecord(tx *orm.TxManager, dt *doctype.DocType, args map[string]any, rowScope policy.RowScope, execution policy.Execution) string {
 	name, _ := args["name"].(string)
-	doc, err := tx.GetDocWithScope(dt, name, rowScope)
+	doc, note, err := openRecord(tx, dt, name, rowScope)
 	if err != nil {
-		return (&aiToolError{Code: errNotFound, Message: fmt.Sprintf("%s %q was not found.", dt.Name, name), Field: "name", Fix: "Find the record with find_records and use its name."}).text()
+		return recordNotFound(tx, dt, name, rowScope)
 	}
 	payload := map[string]any{
 		"doctype":  dt.Name,
 		"name":     doc.Name,
 		"revision": doc.Revision,
 		"fields":   aiReadableDocumentFields(dt, doc.Fields),
+	}
+	if note != "" {
+		payload["note"] = note
 	}
 	names := readLinkNames(context.Background(), tx, dt, []*doctype.Document{doc}, execution)
 	if titles := names.fieldTitles(readableLinkFields(dt), doc); len(titles) > 0 {
@@ -333,6 +338,108 @@ func getRecord(tx *orm.TxManager, dt *doctype.DocType, args map[string]any, rowS
 		return aiToolError{Code: errInvalidValue, Message: fmt.Sprintf("%s %q could not be read.", dt.Name, name)}.text()
 	}
 	return string(result)
+}
+
+// openRecord returns the record a name opens. A name that is not a code of the type opens the record whose title
+// it names, and the note says which code that is. The error is the code lookup's when no title matches either.
+func openRecord(tx *orm.TxManager, dt *doctype.DocType, name string, scope policy.RowScope) (*doctype.Document, string, error) {
+	doc, err := tx.GetDocWithScope(dt, name, scope)
+	if err == nil {
+		return doc, "", nil
+	}
+	typed := typedName(strings.TrimSpace(name))
+	matches, matchErr := tx.MatchTitles(context.Background(), dt, string(typed), scope)
+	if matchErr != nil {
+		return nil, "", err
+	}
+	code, ok := typed.openTitle(matches)
+	if !ok {
+		return nil, "", err
+	}
+	doc, err = tx.GetDocWithScope(dt, code, scope)
+	if err != nil {
+		return nil, "", err
+	}
+	return doc, fmt.Sprintf("%s is %s.", typed, code), nil
+}
+
+// recordNotFound is the not-found error of get_record. When codes near the typed name exist, it suggests them.
+func recordNotFound(tx *orm.TxManager, dt *doctype.DocType, name string, scope policy.RowScope) string {
+	message := fmt.Sprintf("%s %q was not found.", dt.Name, name)
+	if near := typedName(strings.TrimSpace(name)).nearCodes(recentRecordNames(tx, dt, scope)); len(near) > 0 {
+		message += " Did you mean " + strings.Join(near, ", ") + "?"
+	}
+	return aiToolError{Code: errNotFound, Message: message, Field: "name", Fix: "Find the record with find_records and use its name."}.text()
+}
+
+// recentRecordNames returns the names of the most recent records the scope allows, for suggestions.
+func recentRecordNames(tx *orm.TxManager, dt *doctype.DocType, scope policy.RowScope) []string {
+	docs, _, err := tx.GetListWithScope(dt, "", "name DESC", maxRecentNames, 0, scope, nil, "")
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(docs))
+	for _, doc := range docs {
+		names = append(names, doc.Name)
+	}
+	return names
+}
+
+// Limits of get_record's suggestions: the codes within two edits of a typed name, at most three of them, read from
+// the most recent fifty records.
+const (
+	maxNearCodeDistance = 2
+	maxSuggestedCodes   = 3
+	maxRecentNames      = 50
+)
+
+// typedName is a record name the person typed. It may be a code in another case or a title, such as "bill-001"
+// for the bill with the code SB-0001 and the title "BILL-001".
+type typedName string
+
+// openTitle returns the code of the record the typed name names: the one code match, or the one match whose title
+// equals the text ignoring case. It returns false when no single record is named.
+func (n typedName) openTitle(matches orm.TitleMatches) (string, bool) {
+	if matches.Kind == orm.TitleKindCode && len(matches.Matches) == 1 {
+		return matches.Matches[0].Name, true
+	}
+	var equal []string
+	for _, match := range matches.Matches {
+		if strings.EqualFold(match.Title, string(n)) {
+			equal = append(equal, match.Name)
+		}
+	}
+	if len(equal) != 1 {
+		return "", false
+	}
+	return equal[0], true
+}
+
+// nearCodes returns up to maxSuggestedCodes codes within maxNearCodeDistance edits of the typed name, ignoring case.
+// Only the nearest codes are kept, ordered by code: a farther code would invite the model to pick the wrong record.
+func (n typedName) nearCodes(codes []string) []string {
+	type near struct {
+		code string
+		dist int
+	}
+	typed := strings.ToLower(string(n))
+	var found []near
+	for _, code := range codes {
+		if dist := textmatch.Distance(strings.ToLower(code), typed); dist <= maxNearCodeDistance {
+			found = append(found, near{code: code, dist: dist})
+		}
+	}
+	slices.SortFunc(found, func(a, b near) int {
+		if a.dist != b.dist {
+			return a.dist - b.dist
+		}
+		return strings.Compare(a.code, b.code)
+	})
+	var out []string
+	for i := 0; i < len(found) && i < maxSuggestedCodes && found[i].dist == found[0].dist; i++ {
+		out = append(out, found[i].code)
+	}
+	return out
 }
 
 // describedField is one field of describe_record_type.
