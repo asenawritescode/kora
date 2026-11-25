@@ -1057,7 +1057,8 @@ func channelToolMutationIdempotencyKey(site, clientKey string) string {
 	return "channel-tool-" + hex.EncodeToString(digest[:])
 }
 
-func formatDocSummary(dt *doctype.DocType, doc *doctype.Document, index int) string {
+// formatDocSummary is one find_records line. A Link field shows its name with the code (see linkNames.show).
+func formatDocSummary(dt *doctype.DocType, doc *doctype.Document, index int, names linkNames) string {
 	fields := map[string]any{}
 	if doc != nil && doc.Fields != nil {
 		fields = aiReadableDocumentFields(dt, doc.Fields)
@@ -1078,7 +1079,11 @@ func formatDocSummary(dt *doctype.DocType, doc *doctype.Document, index int) str
 			}
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%s: %s", fieldDisplayLabel(f), formatDocValue(f.Fieldname, f.Fieldtype, value)))
+		text := formatDocValue(f.Fieldname, f.Fieldtype, value)
+		if code, isText := value.(string); isText && f.Fieldtype == "Link" {
+			text = names.show(f.Fieldname, code)
+		}
+		parts = append(parts, fmt.Sprintf("%s: %s", fieldDisplayLabel(f), text))
 	}
 	return strings.Join(parts, " - ")
 }

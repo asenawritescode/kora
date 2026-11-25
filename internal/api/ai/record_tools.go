@@ -157,7 +157,7 @@ func executeRecordTool(tx *orm.TxManager, reg *doctype.Registry, inv toolInvocat
 	case "find":
 		return findRecords(tx, dt, inv.Args, rowScope, inv.Execution)
 	case "get":
-		return getRecord(tx, dt, inv.Args, rowScope)
+		return getRecord(tx, dt, inv.Args, rowScope, inv.Execution)
 	case "describe":
 		return describeRecordType(reg, dt, inv.Commands)
 	case "create":
@@ -275,12 +275,14 @@ func findRecords(tx *orm.TxManager, dt *doctype.DocType, args map[string]any, ro
 	if total == 0 {
 		return noRowsText(context.Background(), tx, dt, rowScope, resolved)
 	}
+	// Names are read before showLinkTitles, which replaces the title field's code with its title.
+	names := readLinkNames(context.Background(), tx, dt, docs, execution)
 	if err := showLinkTitles(tx, dt, docs); err != nil {
 		return aiToolError{Code: errGuardFailed, Message: "Could not search " + dt.Name + "."}.text()
 	}
 	summaries := make([]string, 0, len(docs))
 	for i, doc := range docs {
-		summaries = append(summaries, formatDocSummary(dt, doc, i+1))
+		summaries = append(summaries, formatDocSummary(dt, doc, i+1, names))
 	}
 	header := fmt.Sprintf("Found %d %s, showing %d:", total, dt.Name, len(docs))
 	return strings.Join(append(resolved.notes, header+"\n"+strings.Join(summaries, "\n")), "\n")
@@ -308,18 +310,25 @@ func showLinkTitles(tx *orm.TxManager, dt *doctype.DocType, docs []*doctype.Docu
 	return nil
 }
 
-func getRecord(tx *orm.TxManager, dt *doctype.DocType, args map[string]any, rowScope policy.RowScope) string {
+// getRecord returns one record. Link fields keep their codes; link_titles adds the names of the codes the person
+// may see named (see readLinkNames).
+func getRecord(tx *orm.TxManager, dt *doctype.DocType, args map[string]any, rowScope policy.RowScope, execution policy.Execution) string {
 	name, _ := args["name"].(string)
 	doc, err := tx.GetDocWithScope(dt, name, rowScope)
 	if err != nil {
 		return (&aiToolError{Code: errNotFound, Message: fmt.Sprintf("%s %q was not found.", dt.Name, name), Field: "name", Fix: "Find the record with find_records and use its name."}).text()
 	}
-	result, marshalErr := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"doctype":  dt.Name,
 		"name":     doc.Name,
 		"revision": doc.Revision,
 		"fields":   aiReadableDocumentFields(dt, doc.Fields),
-	})
+	}
+	names := readLinkNames(context.Background(), tx, dt, []*doctype.Document{doc}, execution)
+	if titles := names.fieldTitles(readableLinkFields(dt), doc); len(titles) > 0 {
+		payload["link_titles"] = titles
+	}
+	result, marshalErr := json.Marshal(payload)
 	if marshalErr != nil {
 		return aiToolError{Code: errInvalidValue, Message: fmt.Sprintf("%s %q could not be read.", dt.Name, name)}.text()
 	}
