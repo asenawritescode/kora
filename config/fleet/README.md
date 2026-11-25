@@ -12,11 +12,19 @@ report: trips by status, fuel cost by vehicle, distance by vehicle.
 - Distance, litres and odometer readings cannot be negative.
 - Fuel logs and service records get a readable label (vehicle and date).
 - The pack does not link to the People pack: a driver is its own record.
+- A trip's status moves Planned → On the road → Delivered, or Planned or On the road → Cancelled.
+  A new trip starts Planned or On the road. Delivered and Cancelled trips cannot change status.
+  While a trip is On the road, its vehicle and driver cannot change, and it cannot be deleted.
+- Starting a trip sets its vehicle to On trip, and delivering or cancelling it sets the vehicle
+  back to Available. A vehicle or driver cannot start a trip while another trip is On the road
+  with it. A retired vehicle, a driver who has left, a driver who is not Active, and a licence
+  that expired before the start date all block starting (a retired vehicle or a driver who has
+  left also blocks planning). Several planned trips may share a vehicle.
 
 Limits: vehicles, drivers, trips and fuel only. No live GPS tracking, no route planning.
-Vehicle status (On trip, In service) is set by a person, not by trips. Nothing stops a
-vehicle or driver being on two trips at once, and a licence past its expiry date does not
-block a trip. Fuel economy and service reminders are not calculated.
+In service is set by a person. Fuel economy and service reminders are not calculated.
 
-Checks: `go test ./internal/site -run TestFleet`, `go test ./internal/analytics -run TestFleet`
-and `go test -tags integration ./internal/api -run TestFleet` (needs MySQL, set `KORA_TEST_DSN`).
+Checks: `go test -tags integration ./internal/api -run TestFleet` (needs MySQL, set `KORA_TEST_DSN`),
+`go test -tags integration ./internal/api -run TestPackScriptsFleet` (MySQL and PostgreSQL DSNs
+`KORA_PACK_SCRIPTS_DISPOSABLE_MYSQL_DSN` and `KORA_PACK_SCRIPTS_DISPOSABLE_POSTGRES_DSN`) and
+`go test ./internal/site -run Fleet`.
