@@ -131,7 +131,7 @@ jobs:
           KORA_DB_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_ASK_ZANA_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_MCP_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_ERP_PURCHASING_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
+          KORA_PACK_SCRIPTS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
         run: >-
           go test -tags=integration -p 1
           ./internal/db ./internal/dbaccess ./internal/api ./internal/tenanttime ./internal/projection ./internal/outbox ./internal/site ./internal/requests/sqlstore ./internal/workflow/sqlstore ./internal/metrics
@@ -172,10 +172,10 @@ jobs:
           echo "libSQL did not open port 8080" >&2
           exit 1
 
-      - name: Test purchasing payments on disposable PostgreSQL
+      - name: Test pack scripts on disposable PostgreSQL
         env:
-          KORA_ERP_PURCHASING_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/api -run TestERPPurchasingPaymentsFollowBillsAcrossDialects/postgres -count=1 -timeout=10m
+          KORA_PACK_SCRIPTS_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
+        run: go test -tags=integration ./internal/api -run 'TestPackScripts/postgres' -count=1 -timeout=10m
 
       - name: Test fact tables on disposable PostgreSQL
         env:
