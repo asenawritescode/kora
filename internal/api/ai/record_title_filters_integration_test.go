@@ -210,6 +210,24 @@ func TestFindRecordsMatchesNamesAcrossDialects(t *testing.T) {
 					t.Fatalf("get_record by title as an owner-only reader = %q, want not found and no leak", got)
 				}
 			})
+
+			t.Run("update_record refuses a read-only bill amount and leaves the bill unchanged", func(t *testing.T) {
+				before := run(execution, toolGetRecord, `{"record_type":"Supplier Bill","name":"SB-0001"}`)
+				got := run(execution, toolUpdateRecord, `{"record_type":"Supplier Bill","name":"SB-0001","data":{"base_amount":5}}`)
+				if !strings.Contains(got, "Amount in base currency is read-only on Supplier Bill: it is set by the system.") {
+					t.Fatalf("update_record of base_amount = %q, want the read-only refusal", got)
+				}
+				if after := run(execution, toolGetRecord, `{"record_type":"Supplier Bill","name":"SB-0001"}`); after != before {
+					t.Fatalf("get_record after refused update = %q, want unchanged %q", after, before)
+				}
+			})
+
+			t.Run("update_record of a writable note still previews", func(t *testing.T) {
+				got := run(execution, toolUpdateRecord, `{"record_type":"Supplier Bill","name":"SB-0001","data":{"notes":"x"}}`)
+				if strings.Contains(got, "read-only") || strings.Contains(got, `"error"`) {
+					t.Fatalf("update_record of notes = %q, want a normal preview", got)
+				}
+			})
 		})
 	}
 }
