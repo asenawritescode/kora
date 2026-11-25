@@ -39,9 +39,11 @@ function overlaps(start, end, other) {
   return (!otherEnd || start <= otherEnd) && (!end || otherStart <= end);
 }
 
-// releaseUnit marks a unit Vacant when no other Active lease holds it.
+// releaseUnit marks an Occupied unit Vacant when no other Active lease holds it. A unit
+// under Maintenance stays under Maintenance.
 function releaseUnit(unitName, self) {
-  if (otherActiveLeases(unitName, self).length === 0) {
+  var current = kora.getDoc("Unit", unitName);
+  if (current && current.status === "Occupied" && otherActiveLeases(unitName, self).length === 0) {
     kora.saveDoc("Unit", {name: unitName, status: "Vacant"});
   }
 }
