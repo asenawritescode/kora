@@ -120,6 +120,20 @@ func TestPackScriptsLeases(t *testing.T) {
 			manager.expect("Lease", l, "status", "Ended")
 		})
 
+		f.t.Run("an active lease cannot be deleted, an ended one can", func(t *testing.T) {
+			u := unitNo("4N")
+			active := lease(manager, "L-DEL-ACTIVE", u, tenant, "2020-01-01", "", "Active")
+			manager.refused(httpMethodDelete, "Lease", active, "", "End L-DEL-ACTIVE first.")
+			manager.expect("Unit", u, "status", "Occupied")
+			ended := lease(manager, "L-DEL-ENDED", u, tenant, "2019-01-01", "2019-06-30", "Ended")
+			if _, _, doc := manager.send(httpMethodDelete, "Lease", ended, ""); doc == nil {
+				t.Fatal("deleting an ended lease was refused")
+			}
+			if rows := f.count("tabLease", "name = ?", ended); rows != 0 {
+				t.Fatalf("ended lease still has %d rows after delete", rows)
+			}
+		})
+
 		f.t.Run("moving an active lease to another unit frees the old one", func(t *testing.T) {
 			from, to := unitNo("4J"), unitNo("4K")
 			l := lease(manager, "L-J", from, tenant, "2020-01-01", "", "Active")
