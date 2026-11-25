@@ -5,7 +5,7 @@ title_field: member_name
 search_fields: member_no, member_name, phone
 sort_field: modified
 sort_order: DESC
-description: A person who belongs to the society or lender. This is a register entry only; the member's savings balance and loan balance are not calculated anywhere.
+description: A person who belongs to the society or lender. The savings balance is kept by savings entries; loan balances are on each loan.
 
 fields:
   - fieldname: member_no
@@ -41,3 +41,9 @@ fields:
     default: Active
     in_list_view: true
     in_standard_filter: true
+  - fieldname: savings_balance
+    fieldtype: Currency
+    label: Savings balance
+    read_only: true
+    default: "0"
+    description: Deposits less withdrawals, kept by savings entries.

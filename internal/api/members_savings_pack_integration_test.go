@@ -77,20 +77,13 @@ func TestMembersSavingsAndLoanWorkflowOnMySQL(t *testing.T) {
 		t.Fatal("a repayment was edited after saving")
 	}
 
-	// Repaid and Rejected loans are frozen.
-	if c.refused(httpMethodPut, "Loan", loan, `{"status":"Repaid"}`) {
-		t.Fatal("marking a loan Repaid was refused")
-	}
-	if !c.refused(httpMethodPut, "Loan", loan, `{"amount":1}`) {
-		t.Fatal("the amount of a repaid loan was changed")
-	}
-	if !c.refused(httpMethodPut, "Loan", loan, `{"term_months":99}`) {
-		t.Fatal("the term of a repaid loan was changed")
-	}
-	if got := c.value("Loan", loan, "term_months"); got != "12" {
-		t.Fatalf("term after a refused change = %q, want 12", got)
+	// A repayment is append-only: it cannot be deleted either.
+	if !c.refused(httpMethodDelete, "Loan Repayment", repayment, "") {
+		t.Fatal("a repayment was deleted after saving")
 	}
 
+	// Repaid loans (set by repayments) and Rejected loans are frozen; the Repaid path runs
+	// the loan and repayment scripts and is covered by TestPackScriptsSavings.
 	rejected := c.create("Loan", `{"reference":"L-REJ","member":"`+member+`","amount":500,"term_months":3,"applied_on":"2026-12-06","status":"Rejected"}`)
 	if !c.refused(httpMethodPut, "Loan", rejected, `{"interest_rate":5.0}`) {
 		t.Fatal("the interest rate of a rejected loan was changed")

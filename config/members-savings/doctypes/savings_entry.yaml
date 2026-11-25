@@ -5,7 +5,7 @@ title_field: entry_type
 search_fields: entry_type
 sort_field: entry_date
 sort_order: DESC
-description: One deposit or withdrawal recorded for a member. It is a record only. No balance is calculated, a withdrawal is not checked against what the member has saved, and nothing posts to the books. It cannot be edited afterwards; record an opposite entry to correct a mistake.
+description: One deposit or withdrawal for a member. It adds to or takes from the member's savings balance; a withdrawal above the savings is refused. Nothing posts to the books. It cannot be edited or deleted afterwards; record an opposite entry to correct a mistake.
 
 fields:
   - fieldname: member

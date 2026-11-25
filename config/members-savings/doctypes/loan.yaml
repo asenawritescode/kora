@@ -5,7 +5,7 @@ title_field: reference
 search_fields: reference, status
 sort_field: modified
 sort_order: DESC
-description: A loan applied for by a member and the decision on it. It records the terms only. Interest is not calculated, no repayment schedule is produced, the outstanding balance is not tracked and nothing posts to the books. Once Repaid or Rejected the terms are frozen.
+description: A loan applied for by a member and the decision on it. It is Repaid when repayments against it cover the amount. Interest is not calculated, no repayment schedule is produced and nothing posts to the books. Once Repaid or Rejected the terms are frozen.
 
 fields:
   - fieldname: reference
@@ -65,6 +65,18 @@ fields:
     default: Applied
     in_list_view: true
     in_standard_filter: true
+  - fieldname: amount_repaid
+    fieldtype: Currency
+    label: Repaid so far
+    read_only: true
+    default: "0"
+    description: Kept by loan repayments.
+  - fieldname: outstanding
+    fieldtype: Currency
+    label: Outstanding
+    read_only: true
+    computed: "ROUND(amount - amount_repaid, 2)"
+    description: The amount less the repaid so far.
 doc_constraints:
   - type: immutable_after
     status_field: status
