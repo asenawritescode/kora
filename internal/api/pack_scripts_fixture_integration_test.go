@@ -5,6 +5,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"net/http"
@@ -320,4 +321,14 @@ func (f *packFixture) count(table, where string, args ...any) int {
 		f.t.Fatalf("count %s: %v", table, err)
 	}
 	return rows
+}
+
+// jsonBody encodes a request body for the pack fixture's calls.
+func jsonBody(t testing.TB, value any) string {
+	t.Helper()
+	out, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("encode body: %v", err)
+	}
+	return string(out)
 }

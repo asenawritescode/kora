@@ -3,7 +3,6 @@
 package api
 
 import (
-	"encoding/json"
 	"testing"
 )
 
@@ -11,16 +10,6 @@ import (
 // provides Product. Dispensing takes quantities from batches; the front-line role
 // (Dispensing Assistant) may only read batches and still dispenses through the script.
 const batchExpiryPack = "../../config/_parked/batch-expiry"
-
-// jsonBody encodes a request body for the fixture.
-func jsonBody(t *testing.T, value any) string {
-	t.Helper()
-	out, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("encode body: %v", err)
-	}
-	return string(out)
-}
 
 // rxLine is one prescription line; batch may be empty.
 func rxLine(product, batch string, quantity float64) map[string]any {
