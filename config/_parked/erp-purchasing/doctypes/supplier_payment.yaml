@@ -30,6 +30,7 @@ fields:
   - fieldname: supplier_bill
     fieldtype: Link
     label: Supplier bill
+    description: "A one-bill shortcut: pays this bill up to what it still owes."
     options: Supplier Bill
     in_standard_filter: true
   - fieldname: method
@@ -83,6 +84,16 @@ fields:
     computed: "(round (* (round amount 9) (round exchange_rate 9)) 2)"
     read_only: true
     in_list_view: true
+  - fieldname: allocations
+    fieldtype: Table
+    label: Bills paid
+    options: Supplier Payment Allocation
+    description: "Which of this supplier's bills the payment pays, and how much of each. Ask the person each time."
+  - fieldname: unallocated_amount
+    fieldtype: Currency
+    label: Supplier credit
+    read_only: true
+    description: "Paid beyond the listed bills; kept as credit with the supplier."
   - fieldname: note
     fieldtype: Text
     label: Note

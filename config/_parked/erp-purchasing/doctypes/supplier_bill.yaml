@@ -55,6 +55,7 @@ fields:
       Cancelled
     default: "Draft"
     in_list_view: true
+    description: "Draft, Open and Cancelled are set by a person; Partly Paid and Paid follow recorded payments."
     in_standard_filter: true
   - fieldname: currency
     fieldtype: Link
@@ -85,6 +86,18 @@ fields:
     fieldtype: Currency
     label: Amount in base currency
     computed: "(round (* (round amount 9) (round exchange_rate 9)) 2)"
+    read_only: true
+    in_list_view: true
+  - fieldname: amount_paid
+    fieldtype: Currency
+    label: Amount paid
+    default: "0"
+    read_only: true
+    description: "Set by recorded payments."
+  - fieldname: outstanding
+    fieldtype: Currency
+    label: Still owed
+    computed: "(round (- (round amount 9) (round amount_paid 9)) 2)"
     read_only: true
     in_list_view: true
   - fieldname: notes
