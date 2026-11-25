@@ -314,7 +314,7 @@ func UpsertConversation(ctx context.Context, db *sql.DB, rec ConversationRecord)
 		rec.ID = ulid.Make().String()
 	}
 	if rec.Channel == "" {
-		rec.Channel = "chat"
+		rec.Channel = chatChannel
 	}
 	_, err := (aiSQL{db}).ExecContext(ctx, `
 INSERT INTO _kora_ai_conversation (
@@ -393,7 +393,7 @@ func UpsertRun(ctx context.Context, db *sql.DB, rec RunRecord) error {
 		rec.ID = ulid.Make().String()
 	}
 	if rec.Channel == "" {
-		rec.Channel = "chat"
+		rec.Channel = chatChannel
 	}
 	_, err := (aiSQL{db}).ExecContext(ctx, `
 INSERT INTO _kora_ai_run (
