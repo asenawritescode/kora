@@ -277,7 +277,7 @@ func noMatchingRowsText(ctx context.Context, tx *orm.TxManager, dt *doctype.DocT
 }
 
 // The sentence endings of the zero-row replies. The writers in this file build them with these constants and
-// isEmptyFindReply reads them back, so the two cannot drift apart.
+// findReply.empty reads them back, so the two cannot drift apart.
 const (
 	noneFoundEnding = " found."                // "No <type> found."
 	noFilterMatch   = " match these filters. " // "No <type> match these filters. ..."
@@ -297,9 +297,12 @@ func noRowsText(ctx context.Context, tx *orm.TxManager, dt *doctype.DocType, row
 	return strings.Join(append(resolved.notes, text), "\n")
 }
 
-// isEmptyFindReply says that a find_records reply is one of the zero-row replies above, on any of its lines.
-func isEmptyFindReply(reply string) bool {
-	for _, line := range strings.Split(reply, "\n") {
+// findReply is the text a find_records call returns.
+type findReply string
+
+// empty says that the reply is one of the zero-row replies above, on any of its lines.
+func (r findReply) empty() bool {
+	for _, line := range strings.Split(string(r), "\n") {
 		if !strings.HasPrefix(line, "No ") {
 			continue
 		}

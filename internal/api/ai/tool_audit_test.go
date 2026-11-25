@@ -30,8 +30,8 @@ func TestIsEmptyFindReplyRecognisesWriterOutput(t *testing.T) {
 		{"empty", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := isEmptyFindReply(tc.reply); got != tc.want {
-				t.Fatalf("isEmptyFindReply(%q) = %v, want %v", tc.reply, got, tc.want)
+			if got := findReply(tc.reply).empty(); got != tc.want {
+				t.Fatalf("findReply(%q).empty() = %v, want %v", tc.reply, got, tc.want)
 			}
 		})
 	}

@@ -759,7 +759,7 @@ func toolAuditStatus(name, result string) string {
 	switch {
 	case isToolError(result):
 		return "failed"
-	case name == toolFindRecords && isEmptyFindReply(result):
+	case name == toolFindRecords && findReply(result).empty():
 		return "empty"
 	default:
 		return "completed"
