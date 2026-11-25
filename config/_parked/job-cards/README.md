@@ -15,18 +15,25 @@ What is enforced (each point is tested on real MySQL):
 - If any part would take stock below zero, the whole job card is refused: no job card is saved and
   no stock changes.
 - A Collected job card cannot change its vehicle or opened date.
+- A part quantity must be above zero. A new card starts as Booked or In progress.
+- Status moves: Booked to In progress; In progress to Waiting for parts or Done; Waiting for parts back to
+  In progress; Done to Collected or back to In progress (rework). Collected is final. Other moves are refused
+  with the moves allowed.
+- A Collected job card cannot change its parts or labour charge, and cannot be deleted.
 
-What was observed about stock (Engine `internal/kernel/quantity_effect.go`):
+How stock moves (Engine `internal/kernel/quantity_effect.go` on create, `scripts/Job Card/` after that):
 
-- Effects apply on **create only**. Editing a saved job card (changing, adding or removing parts)
-  saves the new parts but does not move stock. Deleting a job card does not return the parts.
-  Fix stock with a Stock Adjustment from the Stock module.
-- The Engine does not enforce constraints on child-table rows, so the `min` on part quantity is
-  documentation only. A negative part quantity is accepted and **adds** stock back.
+- Saving a **new** job card takes its parts off stock (the card's `quantity_effect`). No stock movement row is written.
+- Editing a saved job card moves each product's stock by the change in its quantity: more parts take stock
+  off, fewer put it back. A change that would take any product below zero is refused, and nothing changes.
+- Deleting a job card gives all its parts back to stock.
+- The Engine does not enforce constraints on child-table rows, so the job card script refuses a part
+  quantity of zero or less. Stock is changed only through the Product record, so a Stock Adjustment is still
+  needed for counts that are not job cards.
 
 Limits: customer vehicles and job cards that take parts from stock. No quotes or invoices from the
-job card, no service reminders. Freezing a Collected card does not freeze its parts or charge, and
-status moves (Booked to Collected) are set by a person, not checked.
+job card, no service reminders. Changing a saved card's parts needs the Product read permission
+(the Cashier role of the selling pack); a Mechanic without it cannot change a saved card's parts.
 
-Checks: `go test ./internal/site -run Workshop`, `go test ./internal/analytics -run Workshop` and
-`go test -tags integration ./internal/api -run Workshop` (needs MySQL, set `KORA_TEST_DSN`).
+Checks: `go test ./internal/site -run Workshop`, and `go test -tags integration ./internal/api -run TestPackScriptsJobCards`
+(MySQL and PostgreSQL through `KORA_PACK_SCRIPTS_DISPOSABLE_MYSQL_DSN` and `KORA_PACK_SCRIPTS_DISPOSABLE_POSTGRES_DSN`).
