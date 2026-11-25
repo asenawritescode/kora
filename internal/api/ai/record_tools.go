@@ -83,7 +83,7 @@ func recordToolDescriptors(types []string) []ToolDescriptor {
 	dataProp := map[string]any{"type": "object", "description": "Field values by fieldname. Call describe_record_type first to see fields."}
 	findProps := map[string]any{
 		"record_type": typeProp,
-		"search":      map[string]any{"type": "string", "description": "Text to match in the record title or name."},
+		"search":      map[string]any{"type": "string", "description": "Text to match in the record title or name, or in the name of a linked record."},
 		"filters":     findFiltersSchema(),
 		"limit":       map[string]any{"type": "integer", "minimum": 1, "maximum": maxFindRecords, "description": "Max rows (default 5)."},
 	}
