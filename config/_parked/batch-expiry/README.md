@@ -10,15 +10,24 @@ and a `batch_expiry_insights` dashboard (prescriptions by status, batches by med
 - Prescription references and batch numbers are unique; patients are found by name or phone.
 - A prescription line needs a medicine and a quantity; a batch needs an expiry date and cannot
   have a negative quantity.
-- Once a prescription is Dispensed, its patient and prescription date are frozen. The
-  medicine lines are not frozen, because the Engine cannot yet freeze a child table.
+- Once a prescription is Dispensed, its patient and prescription date are frozen, and so are
+  its medicine lines (product, batch, quantity), by the prescription's script.
+
+Dispensing: each line needs a batch of the same medicine that has not expired (expiry on or
+after today, UTC date) and enough quantity on hand. Dispensing is all or nothing. Each batch
+keeps a **quantity on hand** (quantity received, less what prescriptions dispensed); changing
+the quantity received moves it by the same difference and cannot take it below zero.
+Cancelling a dispensed prescription returns its quantities. A cancelled prescription is final.
 
 Limits: patients, prescriptions and medicine batches with expiry dates. No controlled-drug
-register, no clinical records, no automatic stock deduction by batch, no expiry alerts: the
+register, no clinical records, no expiry alerts: the
 batches table is sorted by expiry date but nothing warns when a batch is close to expiring.
-The "quantity above zero" rule on a prescription line is declared but the Engine does not yet
-check field rules on child rows, so a zero quantity is accepted. Dispensing a prescription does not change a product's stock or a batch's quantity. The
-Dispensing Assistant cannot register a new patient (a Pharmacist does that).
+A prescription line's quantity must be above zero (the script refuses zero, because the Engine
+does not check field rules on child rows). Batch quantity on hand is kept by these scripts; a
+product's stock (`stock_qty`) is not changed here, because stock has its own ledger. The
+Dispensing Assistant cannot register a new patient (a Pharmacist does that). The Dispensing
+Assistant may only read medicine batches; dispensing still updates them through the script.
 
-Checks: `go test ./internal/site -run Dispensary`, `go test ./internal/analytics -run Dispensary`
-and `go test -tags integration ./internal/api -run Dispensary` (needs MySQL, set `KORA_TEST_DSN`).
+Checks: `go test ./internal/site -run Dispensary`, and
+`go test -tags integration ./internal/api -run 'TestPackScriptsBatchExpiry|Dispensary'`
+(the scripts run on MySQL and PostgreSQL through `KORA_PACK_SCRIPTS_DISPOSABLE_*_DSN`).

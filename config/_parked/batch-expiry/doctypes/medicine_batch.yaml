@@ -34,6 +34,12 @@ fields:
       - type: min
         value: 0.0
         message: "The quantity cannot be negative."
+  - fieldname: quantity_on_hand
+    fieldtype: Float
+    label: Quantity on hand
+    read_only: true
+    in_list_view: true
+    description: "Received less dispensed, kept by prescriptions."
   - fieldname: supplier
     fieldtype: Data
     label: Supplier
