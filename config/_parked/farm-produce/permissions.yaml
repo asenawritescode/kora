@@ -22,3 +22,27 @@
   write: false
   create: true
   delete: false
+- doctype: Farmer Payment
+  role: Cooperative Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Farmer Payment Allocation
+  role: Cooperative Manager
+  read: true
+  write: true
+  create: true
+  delete: false
+- doctype: Farmer Payment
+  role: Produce Clerk
+  read: true
+  write: false
+  create: false
+  delete: false
+- doctype: Farmer Payment Allocation
+  role: Produce Clerk
+  read: true
+  write: false
+  create: false
+  delete: false

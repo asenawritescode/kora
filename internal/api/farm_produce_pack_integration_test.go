@@ -49,10 +49,11 @@ func TestProduceDeliveryRaisesStockAndIsFrozenOnMySQL(t *testing.T) {
 		t.Fatalf("stock after a second delivery = %v, want 130.5", got)
 	}
 
-	// A saved delivery is frozen: no edit, not even the status, and stock stays.
-	if !c.refused(httpMethodPut, "Produce Delivery", delivery, `{"status":"Paid"}`) {
-		t.Fatal("a saved delivery was edited")
+	// The status is read-only for a person: the write is accepted but changes nothing.
+	if c.refused(httpMethodPut, "Produce Delivery", delivery, `{"status":"Paid"}`) {
+		t.Fatal("a status write on a delivery was refused instead of ignored")
 	}
+	// A saved delivery is frozen: its quantity cannot change, and stock stays.
 	if !c.refused(httpMethodPut, "Produce Delivery", delivery, `{"quantity_kg":1}`) {
 		t.Fatal("the quantity of a saved delivery was changed")
 	}

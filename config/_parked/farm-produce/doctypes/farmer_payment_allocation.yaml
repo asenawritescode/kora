@@ -1,0 +1,18 @@
+name: Farmer Payment Allocation
+module: Produce
+is_child_table: true
+title_field: produce_delivery
+sort_field: modified
+sort_order: DESC
+description: How much of one produce delivery a farmer payment pays.
+
+fields:
+  - fieldname: produce_delivery
+    fieldtype: Link
+    label: Produce delivery
+    options: Produce Delivery
+    reqd: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount paid on this delivery
+    reqd: true
