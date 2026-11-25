@@ -25,7 +25,7 @@ components:
     label: Deliveries not yet paid
     filters:
       - field: status
-        op: equals
-        value: Received
-    desktop_columns: [reference, farmer, product, delivery_date, quantity_kg, grade, amount]
+        op: in
+        value: [Received, Partly Paid]
+    desktop_columns: [reference, farmer, product, delivery_date, quantity_kg, grade, amount, outstanding]
     mobile_columns: [farmer, quantity_kg, amount]
