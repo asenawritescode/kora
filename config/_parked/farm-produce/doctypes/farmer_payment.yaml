@@ -1,0 +1,71 @@
+name: Farmer Payment
+module: Produce
+search_fields: reference, farmer, status
+title_field: reference
+sort_field: modified
+sort_order: DESC
+description: Money paid to a farmer, set against the deliveries it pays for. Money beyond those deliveries is kept as farmer credit.
+
+fields:
+  - fieldname: reference
+    fieldtype: Data
+    label: Reference
+    default_to_name: true
+    description: Leave blank to use this record's number.
+    unique: true
+    in_list_view: true
+  - fieldname: payment_date
+    fieldtype: Date
+    label: Paid on
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: farmer
+    fieldtype: Link
+    label: Farmer
+    options: Farmer
+    reqd: true
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: method
+    fieldtype: Select
+    label: Method
+    options: |
+      Cash
+      Mobile Money
+      Bank Transfer
+      Other
+    default: "Cash"
+    in_list_view: true
+  - fieldname: status
+    fieldtype: Select
+    label: Status
+    options: |
+      Draft
+      Paid
+      Voided
+    default: "Draft"
+    in_list_view: true
+    in_standard_filter: true
+  - fieldname: amount
+    fieldtype: Currency
+    label: Amount
+    reqd: true
+    in_list_view: true
+    constraints:
+      - type: min
+        value: 0.000001
+        message: "The amount must be more than zero."
+  - fieldname: allocations
+    fieldtype: Table
+    label: Deliveries paid
+    options: Farmer Payment Allocation
+    description: "Which of this farmer's deliveries the payment pays, and how much of each. Ask the farmer each time."
+  - fieldname: unallocated_amount
+    fieldtype: Currency
+    label: Farmer credit
+    read_only: true
+    description: "Paid but not set against a delivery; kept as credit with the farmer."
+  - fieldname: notes
+    fieldtype: Text
+    label: Notes

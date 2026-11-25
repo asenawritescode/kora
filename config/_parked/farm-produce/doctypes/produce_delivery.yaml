@@ -1,6 +1,5 @@
 name: Produce Delivery
 module: Produce
-append_only: true
 quantity_effect:
   target_doctype: Product
   target_quantity_field: stock_qty
@@ -13,8 +12,9 @@ sort_field: modified
 sort_order: DESC
 description: >-
   Produce a farmer brought in. Saving a delivery adds the kilograms to the
-  product's stock in the same step. It cannot be edited afterwards; correct a
-  mistake with a Stock Adjustment.
+  product's stock in the same step. Its facts are fixed once it is saved, and
+  farmer payments set how much of it has been paid. A delivery is never deleted;
+  correct a mistake with a Stock Adjustment.
 
 fields:
   - fieldname: reference
@@ -78,10 +78,31 @@ fields:
   - fieldname: status
     fieldtype: Select
     label: Status
-    description: Set when the delivery is recorded. Choose Paid if the farmer was paid on the spot. A saved delivery cannot be changed.
+    description: "Follows farmer payments."
     options: |
       Received
+      Partly Paid
       Paid
     default: Received
+    read_only: true
     in_list_view: true
     in_standard_filter: true
+  - fieldname: amount_paid
+    fieldtype: Currency
+    label: Amount paid
+    default: "0"
+    read_only: true
+    description: "Kept by farmer payments."
+  - fieldname: outstanding
+    fieldtype: Currency
+    label: Still owed
+    computed: "(round (- (round amount 9) (round amount_paid 9)) 2)"
+    read_only: true
+    in_list_view: true
+
+doc_constraints:
+  - type: immutable_after
+    status_field: status
+    status_values: [Received, Partly Paid, Paid]
+    immutable_fields: [reference, farmer, product, delivery_date, quantity_kg, grade, price_per_kg]
+    message: "A saved produce delivery cannot be changed. Correct it with a Stock Adjustment."
