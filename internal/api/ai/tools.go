@@ -730,10 +730,6 @@ func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.
 		}
 
 		result := executeSingleTool(tx, reg, toolInvocation{Name: name, Args: args, Owner: batch.Owner, Site: batch.Site, RunID: batch.RunID, StepID: batch.StepID, ConversationID: batch.ConversationID, PreviewWrites: true, IdempotencyKey: aiToolMutationIdempotencyKey(batch.Site, batch.RunID, batch.StepID, id), Execution: batch.Execution, Turn: batch.Turn, Commands: batch.Commands, Operations: batch.Operations}) //nolint:contextcheck // the context travels in tx.Context
-		status := "completed"
-		if isToolError(result) {
-			status = "failed"
-		}
 		_ = RecordAudit(ctx, tx.DB, AuditEvent{
 			Site:           batch.Site,
 			RunID:          batch.RunID,
@@ -741,10 +737,11 @@ func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.
 			ConversationID: batch.ConversationID,
 			Kind:           "tool_call",
 			Name:           name,
-			Status:         status,
+			Status:         toolAuditStatus(name, result),
 			Details: map[string]any{
 				"tool_call_id": id,
 				"args":         args,
+				"result":       toolAuditResult(result),
 			},
 		})
 		results = append(results, map[string]any{
@@ -754,6 +751,27 @@ func executeToolCallsForAI(ctx context.Context, tx *orm.TxManager, reg *doctype.
 		})
 	}
 	return results
+}
+
+// toolAuditStatus is the status of a tool_call audit row: "failed" for a tool error, "empty" for a find_records
+// reply with no row, else "completed".
+func toolAuditStatus(name, result string) string {
+	switch {
+	case isToolError(result):
+		return "failed"
+	case name == toolFindRecords && isEmptyFindReply(result):
+		return "empty"
+	default:
+		return "completed"
+	}
+}
+
+// defaultToolResultChars is the MaxToolResultChars of the model defaults in provider.go.
+const defaultToolResultChars = 4000
+
+// toolAuditResult is the tool result an audit row keeps, capped to the default tool result size.
+func toolAuditResult(result string) string {
+	return capResultSize(result, defaultToolResultChars)
 }
 
 // toolInvocation is one tool call to run under a verified execution.
