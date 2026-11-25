@@ -158,7 +158,78 @@ func TestFindRecordsMatchesNamesAcrossDialects(t *testing.T) {
 					t.Fatalf("find_records search as clerk = %q, want no supplier name", got)
 				}
 			})
+
+			// The bill below has the title BILL-001 and the code SB-0003, so only the title names it. It is written after
+			// the subtests above, which count the bills.
+			seedBill(t, tx, database, registry, "SB-0003", map[string]any{"reference": "BILL-001", "supplier": "SUPP-0001", "bill_date": "2026-11-03", "amount": 700})
+
+			t.Run("get_record opens a bill by its title, with a note and the Link name", func(t *testing.T) {
+				got := run(execution, toolGetRecord, `{"record_type":"Supplier Bill","name":"BILL-001"}`)
+				for _, want := range []string{`"name":"SB-0003"`, `"note":"BILL-001 is SB-0003."`, `"link_titles":{"supplier":"Mr. Ouma Son"}`} {
+					if !strings.Contains(got, want) {
+						t.Fatalf("get_record by title = %q, want it to contain %q", got, want)
+					}
+				}
+			})
+
+			t.Run("get_record opens a bill by its title in lower case", func(t *testing.T) {
+				got := run(execution, toolGetRecord, `{"record_type":"Supplier Bill","name":"bill-001"}`)
+				for _, want := range []string{`"name":"SB-0003"`, `"note":"bill-001 is SB-0003."`} {
+					if !strings.Contains(got, want) {
+						t.Fatalf("get_record by lower-case title = %q, want it to contain %q", got, want)
+					}
+				}
+			})
+
+			t.Run("get_record opens a code typed in lower case on both dialects", func(t *testing.T) {
+				got := run(execution, toolGetRecord, `{"record_type":"Supplier Bill","name":"sb-0001"}`)
+				if !strings.Contains(got, `"name":"SB-0001"`) {
+					t.Fatalf("get_record of sb-0001 = %q, want the record SB-0001", got)
+				}
+			})
+
+			t.Run("get_record of a supplier code typed in lower case suggests the code", func(t *testing.T) {
+				got := run(execution, toolGetRecord, `{"record_type":"Supplier","name":"supp-001"}`)
+				if !strings.Contains(got, "was not found. Did you mean SUPP-0001") {
+					t.Fatalf("get_record of supp-001 = %q, want a suggestion of SUPP-0001", got)
+				}
+			})
+
+			t.Run("get_record of a name with no near code is a plain not found", func(t *testing.T) {
+				got := run(execution, toolGetRecord, `{"record_type":"Supplier","name":"zzz"}`)
+				if !strings.Contains(got, "was not found.") || strings.Contains(got, "Did you mean") {
+					t.Fatalf("get_record of zzz = %q, want a plain not found", got)
+				}
+			})
+
+			t.Run("a reader who owns no bill cannot open another bill by its title", func(t *testing.T) {
+				registry.Permissions.SetPermission(&doctype.Permission{Doctype: "Supplier Bill", Role: "Own Bill Clerk", Read: true, IfOwner: true})
+				clerk := testAIExecution(t, site, "own-clerk@example.test", []string{"Own Bill Clerk"})
+				got := run(clerk, toolGetRecord, `{"record_type":"Supplier Bill","name":"BILL-001"}`)
+				if !strings.Contains(got, "was not found.") || strings.Contains(got, "SB-0003") || strings.Contains(got, "note") {
+					t.Fatalf("get_record by title as an owner-only reader = %q, want not found and no leak", got)
+				}
+			})
 		})
+	}
+}
+
+// seedBill writes one Supplier Bill under its code, in its own transaction.
+func seedBill(t *testing.T, tx *orm.TxManager, database *sql.DB, registry *doctype.Registry, name string, fields map[string]any) {
+	t.Helper()
+	dbTx, err := database.Begin()
+	if err != nil {
+		t.Fatal("begin bill seed:", err)
+	}
+	doc := doctype.NewDocument("Supplier Bill")
+	doc.Name = name
+	doc.Fields = fields
+	if err := tx.InsertInTx(dbTx, registry.Get("Supplier Bill"), doc, "alice@example.test", "alice@example.test"); err != nil {
+		_ = dbTx.Rollback()
+		t.Fatalf("insert Supplier Bill %s: %v", name, err)
+	}
+	if err := dbTx.Commit(); err != nil {
+		t.Fatal("commit bill seed:", err)
 	}
 }
 
