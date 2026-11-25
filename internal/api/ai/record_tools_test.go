@@ -259,8 +259,8 @@ func TestTypedNameNearCodes(t *testing.T) {
 		typed string
 		want  []string
 	}{
-		{name: "a code one digit short", typed: "supp-001", want: []string{"SUPP-0001", "SUPP-0002", "SUPP-0003"}},
-		{name: "case does not matter, ties by code", typed: "SUPP-0004", want: []string{"SUPP-0001", "SUPP-0002", "SUPP-0003"}},
+		{name: "a code one digit short gives only the nearest", typed: "supp-001", want: []string{"SUPP-0001"}},
+		{name: "equally near codes all show, by code", typed: "SUPP-0004", want: []string{"SUPP-0001", "SUPP-0002", "SUPP-0003"}},
 		{name: "a word with no near code", typed: "zzz"},
 		{name: "a short word is too far from every code", typed: "sup-0"},
 	}

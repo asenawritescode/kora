@@ -190,7 +190,7 @@ func TestFindRecordsMatchesNamesAcrossDialects(t *testing.T) {
 
 			t.Run("get_record of a supplier code typed in lower case suggests the code", func(t *testing.T) {
 				got := run(execution, toolGetRecord, `{"record_type":"Supplier","name":"supp-001"}`)
-				if !strings.Contains(got, "was not found. Did you mean SUPP-0001") {
+				if !strings.Contains(got, "was not found. Did you mean SUPP-0001?") {
 					t.Fatalf("get_record of supp-001 = %q, want a suggestion of SUPP-0001", got)
 				}
 			})

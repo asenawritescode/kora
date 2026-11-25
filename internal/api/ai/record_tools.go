@@ -415,8 +415,8 @@ func (n typedName) openTitle(matches orm.TitleMatches) (string, bool) {
 	return equal[0], true
 }
 
-// nearCodes returns up to maxSuggestedCodes codes within maxNearCodeDistance edits of the typed name, ignoring case:
-// the nearest first, then by code.
+// nearCodes returns up to maxSuggestedCodes codes within maxNearCodeDistance edits of the typed name, ignoring case.
+// Only the nearest codes are kept, ordered by code: a farther code would invite the model to pick the wrong record.
 func (n typedName) nearCodes(codes []string) []string {
 	type near struct {
 		code string
@@ -436,7 +436,7 @@ func (n typedName) nearCodes(codes []string) []string {
 		return strings.Compare(a.code, b.code)
 	})
 	var out []string
-	for i := 0; i < len(found) && i < maxSuggestedCodes; i++ {
+	for i := 0; i < len(found) && i < maxSuggestedCodes && found[i].dist == found[0].dist; i++ {
 		out = append(out, found[i].code)
 	}
 	return out
