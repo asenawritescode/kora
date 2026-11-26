@@ -42,6 +42,30 @@ fields:
     description: Untick for group accounts that only hold other accounts.
     default: "1"
     in_list_view: true
+  - fieldname: posting_role
+    fieldtype: Select
+    label: Used for
+    description: >-
+      What sales, purchases, payments and stock changes post here. One active
+      account per role. When a role has no account, the first posting creates
+      the standard one, which you can rename and renumber.
+    options: |
+
+      Cash
+      Mobile Money
+      Bank
+      Receivable
+      Inventory
+      Supplier Advances
+      Payable
+      Goods Received Not Billed
+      Tax Payable
+      Cash Clearing
+      Sales
+      Cost of Sales
+      Stock Adjustments
+      Expenses
+    in_standard_filter: true
   - fieldname: currency
     fieldtype: Link
     options: Currency

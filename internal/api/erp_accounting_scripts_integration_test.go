@@ -52,6 +52,17 @@ func accountingScenario(f *packFixture) {
 		books.refused(httpMethodPut, "Account", assets, `{"account_type":"Liability"}`, "same type")
 	})
 
+	f.run("one active account per posting role, of the role's type", func(f *packFixture) {
+		books := f.as("Accountant")
+		till := accountingCreate(books, "Account", map[string]any{"code": "1001", "account_name": "Till", "account_type": "Asset", "posting_role": "Cash"})
+		books.refused(httpMethodPost, "Account", "", jsonBody(f.t, map[string]any{"code": "1002", "account_name": "Safe", "account_type": "Asset", "posting_role": "Cash"}), "1001 Till is already used for Cash.")
+		books.refused(httpMethodPost, "Account", "", jsonBody(f.t, map[string]any{"code": "4001", "account_name": "Shop Sales", "account_type": "Asset", "posting_role": "Sales"}), "An account used for Sales must be Income, not Asset.")
+		books.refused(httpMethodPost, "Account", "", jsonBody(f.t, map[string]any{"code": "4002", "account_name": "Sales Group", "account_type": "Income", "posting_role": "Sales", "allow_posting": false}), "must take postings")
+		books.update("Account", till, `{"status":"Inactive"}`)
+		safe := accountingCreate(books, "Account", map[string]any{"code": "1002", "account_name": "Safe", "account_type": "Asset", "posting_role": "Cash"})
+		books.refused(httpMethodPut, "Account", till, `{"status":"Active"}`, "1002 Safe is already used for Cash.")
+		f.expect("Account", safe, "posting_role", "Cash")
+	})
 	f.run("a draft is free to change until it posts", func(f *packFixture) {
 		books := f.as("Accountant")
 		draft = books.create("Journal Entry", accountingEntryBody(f, "Draft", oct,
