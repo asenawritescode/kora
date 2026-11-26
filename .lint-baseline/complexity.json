@@ -664,9 +664,6 @@
    "cyclomatic": 30,
    "statements": 57
   },
-  "internal/api::scriptMutationFields": {
-   "cognitive": 20
-  },
   "internal/api::serveStoredFile": {
    "statements": 46
   },
@@ -1609,9 +1606,6 @@
    "cognitive": 22,
    "cyclomatic": 17
   },
-  "internal/kernel::applyData": {
-   "cognitive": 27
-  },
   "internal/kernel::authorizeOp": {
    "cognitive": 108,
    "cyclomatic": 63,
@@ -1737,8 +1731,8 @@
    "cyclomatic": 17
   },
   "internal/orm::(*TxManager).SaveInTxWithScope": {
-   "cognitive": 67,
-   "cyclomatic": 43
+   "cognitive": 48,
+   "cyclomatic": 36
   },
   "internal/orm::(*TxManager).computedScriptHook": {
    "cognitive": 33
@@ -1772,7 +1766,7 @@
    "statements": 66
   },
   "internal/orm::SaveInTxWithScope": {
-   "statements": 88
+   "statements": 73
   },
   "internal/orm::buildClause": {
    "cyclomatic": 23,

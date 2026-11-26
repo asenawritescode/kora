@@ -427,13 +427,7 @@ func scriptMutationFields(dt *doctype.DocType, registry *doctype.Registry, field
 			rows := make([]any, 0, len(children))
 			childDT := registry.Get(field.Options)
 			for _, child := range children {
-				row := make(map[string]any, len(child.Fields))
-				for childField, childValue := range child.Fields {
-					if childDT == nil || childDT.GetField(childField) != nil {
-						row[childField] = childValue
-					}
-				}
-				rows = append(rows, row)
+				rows = append(rows, scriptChildRow(child, childDT))
 			}
 			allowed[key] = rows
 			continue
@@ -658,4 +652,19 @@ func intFromScriptValue(value any) int {
 	default:
 		return 0
 	}
+}
+
+// scriptChildRow is the script's view of one child row: its data fields plus its name,
+// so the ORM updates the row in place.
+func scriptChildRow(child *doctype.Document, childDT *doctype.DocType) map[string]any {
+	row := make(map[string]any, len(child.Fields)+1)
+	for childField, childValue := range child.Fields {
+		if childDT == nil || childDT.GetField(childField) != nil {
+			row[childField] = childValue
+		}
+	}
+	if child.Name != "" {
+		row["name"] = child.Name
+	}
+	return row
 }
