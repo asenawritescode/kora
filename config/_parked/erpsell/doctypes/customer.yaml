@@ -26,6 +26,12 @@ fields:
   - fieldname: notes
     fieldtype: Text
     label: Notes
+  - fieldname: outstanding_balance
+    fieldtype: Currency
+    label: Owed in base currency
+    default: "0"
+    read_only: true
+    description: Credit sales not yet paid, in the base currency.
   - fieldname: status
     fieldtype: Select
     label: Status

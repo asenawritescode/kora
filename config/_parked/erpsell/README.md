@@ -57,6 +57,26 @@ Roles: **Manager** (runs the shop, owns currencies and rates) and **Cashier**
 - Sales entered outside the register (back-office entries, old sales) need no
   session, so upgrading keeps every earlier sale editable.
 
+## Credit sales
+
+- A sale entered as **Awaiting Payment** is a credit sale (`on_credit` is set by the
+  Sale script on create). Its customer's `outstanding_balance` goes up by its total.
+- A person cannot move a credit sale to Partially Paid or Paid by hand. Recording a
+  **Payment** linked to it does that: a Received payment adds to the sale's
+  `base_amount_paid` in the base currency (a foreign-currency payment uses its frozen
+  rate) and cannot be more than the sale still owes. Paying in full makes it Paid.
+- Voiding a payment reverses it. A voided payment stays voided. A received payment
+  cannot go back to Pending or Failed, and cannot be deleted; void it instead.
+- A credit sale with payments cannot change its total, currency or customer, and
+  cannot be voided or cancelled until its payments are voided.
+- Cancelling a credit sale with no payments removes what it owed from the customer.
+- A sale created as Paid or Return (the register path, and a held sale paid at the
+  till) is paid in full: `base_amount_paid` is its base total, so `base_outstanding`
+  is zero. Payments linked to such a sale change nothing.
+- The Sale script owns the customer balance: each save moves it by what the sale
+  owed before and what it owes now. A recorded payment therefore reaches the
+  customer through its sale.
+
 ## Limits to know
 
 - **The register screen sells in the base currency.** Its payment panel does not
@@ -92,6 +112,7 @@ Holding and recalling sales, voids and returns are in (a return moves no stock: 
 
 ## Checks
 
-- `go test ./doctype -run POSBase` — structure, links and the money convention.
-- `go test -tags integration ./api -run TestPOSBase` — loads this pack into MySQL
-  and rings up sales through the register action (needs MySQL; set `KORA_TEST_DSN`).
+- `go test ./internal/site -run 'Pack|Config'` — the pack parses as Cloud publishes it.
+- `go test -tags integration ./internal/api -run TestPackScriptsSellingCredit` — credit
+  sales, payments and the register paths on MySQL and PostgreSQL (set
+  `KORA_PACK_SCRIPTS_DISPOSABLE_MYSQL_DSN` and `KORA_PACK_SCRIPTS_DISPOSABLE_POSTGRES_DSN`).
