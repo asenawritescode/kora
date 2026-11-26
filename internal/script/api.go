@@ -2,10 +2,32 @@ package script
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
+	"github.com/asenawritescode/kora/contract"
 	"github.com/dop251/goja"
 )
+
+// isEmptyReadError reports whether a provider read error means "no visible result"
+// (the record does not exist, or this reader may not see it). Those are legitimate
+// empty results for a script. Any other error is an infrastructure failure and must throw.
+func isEmptyReadError(err error) bool {
+	var ce *contract.Error
+	if !errors.As(err, &ce) {
+		return false
+	}
+	return ce.Type == contract.CodeNotFound || ce.Type == contract.CodePermissionDenied || ce.Type == contract.CodeUnauthenticated
+}
+
+// readFailure returns empty for a read that found nothing visible, and throws for any
+// other provider error so the script fails and the save rolls back.
+func readFailure(vm *goja.Runtime, err error, empty goja.Value, what string) goja.Value {
+	if isEmptyReadError(err) {
+		return empty
+	}
+	panic(vm.ToValue(fmt.Sprintf("%s failed: %v", what, err)))
+}
 
 // koraAPI is the JavaScript-accessible API injected into every script.
 // It bridges script calls to the KoraProvider sub-interfaces.
@@ -56,8 +78,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 		name := call.Arguments[1].String()
 		doc, err := api.docProvider.GetDoc(doctype, name)
 		if err != nil {
-			api.logMsg("warn", fmt.Sprintf("kora.getDoc(%q, %q) error: %v", doctype, name, err))
-			return goja.Null()
+			return readFailure(vm, err, goja.Null(), fmt.Sprintf("kora.getDoc(%q, %q)", doctype, name))
 		}
 		if doc == nil {
 			return goja.Null()
@@ -90,8 +111,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 
 		docs, err := api.docProvider.GetList(doctype, filters, orderBy, limit, offset)
 		if err != nil {
-			api.logMsg("warn", fmt.Sprintf("kora.getList(%q) error: %v", doctype, err))
-			return vm.ToValue([]any{})
+			return readFailure(vm, err, vm.ToValue([]any{}), fmt.Sprintf("kora.getList(%q)", doctype))
 		}
 		return vm.ToValue(jsValue(docs))
 	})

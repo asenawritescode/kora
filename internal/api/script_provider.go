@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -99,6 +100,10 @@ func (p *scriptProvider) GetDoc(doctypeName, name string) (map[string]any, error
 		return nil, err
 	}
 	doc, err := p.tx.GetDocWithScope(dt, name, scope)
+	if errors.Is(err, orm.ErrNotFound) {
+		// Typed so a script can tell "no such visible record" from an infrastructure failure.
+		return nil, contract.NewError(contract.CodeNotFound, err.Error())
+	}
 	if err != nil {
 		return nil, err
 	}
