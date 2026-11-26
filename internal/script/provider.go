@@ -12,6 +12,12 @@ type DocProvider interface {
 	DeleteDoc(doctype, name string) error
 }
 
+// DocTypeChecker is optionally implemented by a DocProvider that can tell whether a
+// record type is installed. It is a separate interface so DocProvider fakes need no change.
+type DocTypeChecker interface {
+	HasDocType(name string) bool
+}
+
 // SecretProvider is the interface for retrieving secrets.
 type SecretProvider interface {
 	GetSecret(key string) (string, error)

@@ -278,6 +278,7 @@ func (r *EmbeddedRunner) Validate(script string) error {
 	stubLog.Set("warn", func(call goja.FunctionCall) goja.Value { return goja.Undefined() })
 	stubLog.Set("error", func(call goja.FunctionCall) goja.Value { return goja.Undefined() })
 	stubKora.Set("log", stubLog)
+	stubKora.Set("hasDocType", func(call goja.FunctionCall) goja.Value { return vm.ToValue(false) })
 	vm.Set("kora", stubKora)
 
 	// First, try to compile without running to catch syntax errors.

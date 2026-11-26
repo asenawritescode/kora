@@ -188,7 +188,7 @@
    "statements": 73
   },
   "internal/api/ai::executeToolCallsForAI": {
-   "lines": 108
+   "lines": 105
   },
   "internal/api/ai::executeUpdateDoctypeDraft": {
    "cognitive": 16
@@ -1612,9 +1612,6 @@
   "internal/kernel::applyData": {
    "cognitive": 27
   },
-  "internal/kernel::authorize": {
-   "cognitive": 16
-  },
   "internal/kernel::authorizeOp": {
    "cognitive": 108,
    "cyclomatic": 63,
@@ -2210,8 +2207,8 @@
    "cyclomatic": 17
   },
   "internal/script::(*koraAPI).buildObject": {
-   "cognitive": 70,
-   "cyclomatic": 34
+   "cognitive": 47,
+   "cyclomatic": 24
   },
   "internal/script::ClaimAsyncHooks": {
    "statements": 60
@@ -2227,7 +2224,7 @@
    "statements": 54
   },
   "internal/script::buildObject": {
-   "lines": 197
+   "lines": 142
   },
   "internal/site::(*CommonConfig).ApplyEnvOverrides": {
    "cognitive": 23,
