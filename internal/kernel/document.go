@@ -59,15 +59,26 @@ func applyData(dt *doctype.DocType, doc *doctype.Document, raw json.RawMessage, 
 			continue
 		}
 		if f.Fieldtype == "Table" {
-			children, err := childDocumentsFromData(key, f, reg, val)
-			if err != nil {
+			if err := setChildRows(doc, f, reg, val, skipReadOnly); err != nil {
 				return err
 			}
-			doc.Set(key, children)
 			continue
 		}
 		doc.Set(key, val)
 	}
+	return nil
+}
+
+// setChildRows replaces a table field's rows with the rows sent for it.
+func setChildRows(doc *doctype.Document, f *doctype.Field, reg *doctype.Registry, val any, skipReadOnly bool) error {
+	children, err := childDocumentsFromData(f.Fieldname, f, reg, val)
+	if err != nil {
+		return err
+	}
+	if skipReadOnly {
+		restoreReadOnlyChildFields(reg.Get(f.Options), children, doc.GetTable(f.Fieldname))
+	}
+	doc.Set(f.Fieldname, children)
 	return nil
 }
 
@@ -105,4 +116,41 @@ func childDocumentFromData(doctypeName string, row map[string]any) *doctype.Docu
 		}
 	}
 	return child
+}
+
+// restoreReadOnlyChildFields sets the read-only fields of person-sent child rows: a row that
+// names a stored row keeps that row's values, and any other row takes the field's default,
+// or stays empty. Trusted writers skip this, so their read-only values are kept as sent.
+func restoreReadOnlyChildFields(childDT *doctype.DocType, children, stored []*doctype.Document) {
+	defaults := doctype.NewDocument(childDT.Name)
+	doctype.ApplyDefaultValues(childDT, defaults)
+	for _, child := range children {
+		previous := storedChildNamed(stored, child.Name)
+		for _, field := range childDT.DataFields() {
+			if !field.ReadOnly {
+				continue
+			}
+			switch {
+			case previous != nil:
+				child.Set(field.Fieldname, previous.Get(field.Fieldname))
+			case defaults.Get(field.Fieldname) != nil:
+				child.Set(field.Fieldname, defaults.Get(field.Fieldname))
+			default:
+				delete(child.Fields, field.Fieldname)
+			}
+		}
+	}
+}
+
+// storedChildNamed returns the stored child row with the given name, or nil for a new row.
+func storedChildNamed(stored []*doctype.Document, name string) *doctype.Document {
+	if name == "" {
+		return nil
+	}
+	for _, child := range stored {
+		if child.Name == name {
+			return child
+		}
+	}
+	return nil
 }
