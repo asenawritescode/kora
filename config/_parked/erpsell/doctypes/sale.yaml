@@ -148,6 +148,24 @@ fields:
     computed: "(round (* (round total 9) (round exchange_rate 9)) 2)"
     read_only: true
     in_list_view: true
+  - fieldname: on_credit
+    fieldtype: Check
+    label: On credit
+    default: "0"
+    read_only: true
+    description: Set when the sale is entered as Awaiting Payment; it is then settled by payments.
+  - fieldname: base_amount_paid
+    fieldtype: Currency
+    label: Paid in base currency
+    default: "0"
+    read_only: true
+    description: Money received for this sale, in the base currency. Recorded payments move it on a credit sale; a register sale is paid in full when it is paid.
+  - fieldname: base_outstanding
+    fieldtype: Currency
+    label: Owed in base currency
+    computed: "(round (- base_total base_amount_paid) 2)"
+    read_only: true
+    description: What is still owed on the sale, in the base currency. Zero once it is paid.
   - fieldname: location
     fieldtype: Data
     label: Location
