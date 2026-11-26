@@ -52,6 +52,11 @@ func (tx *TxManager) deriveChildRows(ex db.Queryer, childDT *doctype.DocType, ch
 		stored[row.Name] = row
 	}
 	for _, child := range children {
+		if stored[child.Name] == nil {
+			// A new row gets its static defaults here, as the insert gives them,
+			// so its computed fields read the same inputs before and after the hook.
+			applyChildDefaults(childDT, child, false)
+		}
 		if err := tx.populateLinkedFields(ex, childDT, child, stored[child.Name]); err != nil {
 			return err
 		}

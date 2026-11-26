@@ -22,6 +22,31 @@ func (tx *TxManager) insertChildRows(dbTx *sql.Tx, parent *doctype.DocType, f do
 	return insertChildrenBatch(dbTx, parent, f.Fieldname, childDT, children, parentName, tx.Dialect)
 }
 
+// applyChildDefaults sets each field of a new child row that lacks a value to its
+// default. The insert applies every default, clock ones included. Derivation runs
+// before the insert, so it passes clock=false: a "today" Date stays unset there
+// and applyChildTodayDefaults fills it with the tenant's business day at insert.
+func applyChildDefaults(childDT *doctype.DocType, child *doctype.Document, clock bool) {
+	for _, f := range childDT.DataFields() {
+		if f.Fieldtype == "Table" || f.Default == "" || child.Get(f.Fieldname) != nil {
+			continue
+		}
+		if !clock && clockDefault(f.Default) {
+			continue
+		}
+		child.Set(f.Fieldname, convertDefault(f.Default, f.Fieldtype, ""))
+	}
+}
+
+// clockDefault reports a default that reads the clock.
+func clockDefault(def string) bool {
+	switch strings.ToLower(strings.TrimSpace(def)) {
+	case "today", "now":
+		return true
+	}
+	return false
+}
+
 // applyChildTodayDefaults sets a Date field defaulting to "today" on each child
 // row that lacks a value, to the tenant's business day. It runs before
 // insertChildrenBatch, which has no TxManager to resolve the clock.
@@ -91,17 +116,12 @@ func insertChildrenBatch(ex db.Queryer, parentDT *doctype.DocType, parentField s
 				parentName, parentField, parentDT.Name, // parent, parentfield, parenttype
 			)
 
+			applyChildDefaults(childDT, child, true)
 			for _, f := range childDT.DataFields() {
 				if f.Fieldtype == "Table" {
 					continue
 				}
-				val := child.Get(f.Fieldname)
-				if val == nil && f.Default != "" {
-					// "today" was already filled by applyChildTodayDefaults.
-					val = convertDefault(f.Default, f.Fieldtype, "")
-					child.Set(f.Fieldname, val)
-				}
-				val, err := canonicalizeDecimal(child, f, val)
+				val, err := canonicalizeDecimal(child, f, child.Get(f.Fieldname))
 				if err != nil {
 					return err
 				}
