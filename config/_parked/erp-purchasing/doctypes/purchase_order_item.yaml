@@ -35,3 +35,9 @@ fields:
     label: Line total
     computed: "(round (* (round quantity 9) (round unit_cost 9)) 2)"
     read_only: true
+  - fieldname: received_qty
+    fieldtype: Float
+    label: Received
+    default: "0"
+    read_only: true
+    description: "Kept by goods receipts."

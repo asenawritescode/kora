@@ -37,4 +37,86 @@ if (paid > 0) {
   }
 }
 
+// A bill against a goods receipt or a purchase order is checked against what was received.
+// Amounts are compared in the base currency across an order; a receipt needs the same currency.
+function baseOf(amount, rate) {
+  return Math.round(Number(amount || 0) * Number(rate || 1) * 100) / 100;
+}
+
+function checkReceipt(doc, ref) {
+  var receiptName = String(doc.goods_receipt || "");
+  if (receiptName === "") {
+    return null;
+  }
+  var receipt = kora.getDoc("Goods Receipt", receiptName);
+  if (!receipt) {
+    throw new Error("Cannot check goods receipt " + receiptName + ".");
+  }
+  if (String(receipt.supplier || "") !== String(doc.supplier || "")) {
+    throw new Error(ref + " is from another supplier than " + receiptName + ".");
+  }
+  if (String(receipt.currency || "") !== String(doc.currency || "")) {
+    throw new Error(ref + " is in another currency than " + receiptName + ".");
+  }
+  if (money(doc.amount) > money(receipt.total)) {
+    throw new Error(ref + " is " + money(doc.amount) + ", more than " + receiptName + " of " + money(receipt.total) + ".");
+  }
+  return receipt;
+}
+
+function checkOrder(doc, ref, receipt) {
+  var orderName = String(doc.purchase_order || "");
+  if (orderName === "") {
+    return;
+  }
+  var order = kora.getDoc("Purchase Order", orderName);
+  if (!order) {
+    throw new Error("Cannot check purchase order " + orderName + ".");
+  }
+  if (String(order.supplier || "") !== String(doc.supplier || "")) {
+    throw new Error(ref + " is from another supplier than " + orderName + ".");
+  }
+  if (receipt && String(receipt.purchase_order || "") !== orderName) {
+    throw new Error(ref + " names " + orderName + " but " + receipt.name + " belongs to " + (receipt.purchase_order || "no order") + ".");
+  }
+
+  var receipts = kora.getList("Goods Receipt", { filters: { purchase_order: orderName }, limit: 500 });
+  if (receipts.length >= 500) {
+    throw new Error("Cannot check " + orderName + ": too many records.");
+  }
+  var orderLines = order.items || [];
+  var orderReceived = 0;
+  for (var k = 0; k < orderLines.length; k++) {
+    orderReceived = orderReceived + Number(orderLines[k].received_qty || 0);
+  }
+  if (receipts.length === 0 && orderReceived > 0) {
+    throw new Error("Cannot check " + orderName + ": its goods receipts could not be read.");
+  }
+  var received = 0;
+  for (var i = 0; i < receipts.length; i++) {
+    received = received + baseOf(receipts[i].total, receipts[i].exchange_rate);
+  }
+
+  var bills = kora.getList("Supplier Bill", { filters: { purchase_order: orderName }, limit: 500 });
+  if (bills.length >= 500) {
+    throw new Error("Cannot check " + orderName + ": too many records.");
+  }
+  var billed = 0;
+  for (var j = 0; j < bills.length; j++) {
+    if (bills[j].name === doc.name || bills[j].status === "Cancelled") {
+      continue;
+    }
+    billed = billed + baseOf(bills[j].amount, bills[j].exchange_rate);
+  }
+  if (doc.status !== "Cancelled") {
+    billed = billed + baseOf(doc.amount, doc.exchange_rate);
+  }
+  if (Math.round(billed * 100) > Math.round(received * 100)) {
+    throw new Error("The bills on " + orderName + " would total " + Math.round(billed * 100) / 100 + ", more than the " + Math.round(received * 100) / 100 + " received.");
+  }
+}
+
+var receiptRecord = checkReceipt(doc, ref);
+checkOrder(doc, ref, receiptRecord);
+
 return { doc: doc };

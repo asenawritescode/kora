@@ -44,6 +44,7 @@ fields:
     default: "Draft"
     in_list_view: true
     in_standard_filter: true
+    description: "Draft, Ordered and Cancelled are set by a person; Partly Received and Received follow goods receipts."
   - fieldname: currency
     fieldtype: Link
     label: Currency
