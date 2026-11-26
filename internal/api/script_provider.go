@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -37,30 +37,45 @@ type scriptProvider struct {
 	externalJournal  script.ExternalEffectJournal
 }
 
+// maxScriptRedirects bounds how many redirect hops a script HTTP request may
+// follow; each hop is re-validated against the allowlist.
+const maxScriptRedirects = 5
+
 // NewScriptProvider creates a provider with a scoped HTTP client.
 func NewScriptProvider(tx *orm.TxManager, registry *doctype.Registry, site string, secretStore *secret.Store, httpAllowlist []string) script.KoraProvider {
 	transport := &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
+		// PublicDialer refuses to connect to any private, loopback or
+		// link-local IP at connect time, which closes DNS-rebinding and the
+		// userinfo trick regardless of the hostname string check.
+		DialContext: netguard.PublicDialer(10*time.Second, 30*time.Second).DialContext,
 		TLSClientConfig: &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		},
 		MaxIdleConns:    10,
 		IdleConnTimeout: 60 * time.Second,
 	}
-	return &scriptProvider{
+	p := &scriptProvider{
 		tx:            tx,
 		registry:      registry,
 		site:          site,
 		secretStore:   secretStore,
 		HTTPAllowlist: httpAllowlist,
-		httpClient: &http.Client{
-			Transport: transport,
-			Timeout:   10 * time.Second,
+	}
+	p.httpClient = &http.Client{
+		Transport: transport,
+		Timeout:   10 * time.Second,
+		// Re-validate every redirect hop against the allowlist. The dialer
+		// already blocks private IPs, but the allowlist must still hold on
+		// each hop so a public allowlisted host cannot bounce the request to
+		// an unlisted destination.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxScriptRedirects {
+				return fmt.Errorf("http: stopped after %d redirects", maxScriptRedirects)
+			}
+			return p.checkHTTPAllowlist(req.URL.String())
 		},
 	}
+	return p
 }
 
 // ScriptProviderFactory creates a provider bound to the TxManager supplied by
@@ -537,20 +552,17 @@ func (p *scriptProvider) checkHTTPAllowlist(urlStr string) error {
 		return fmt.Errorf("http: external requests are disabled (no domain allowlist configured)")
 	}
 
-	// Strip scheme.
-	host := urlStr
-	if i := strings.Index(host, "://"); i >= 0 {
-		host = host[i+3:]
+	// Parse the URL so userinfo, port and path cannot fool the host check:
+	// a value like http://allowed.example.com@127.0.0.1/ has host 127.0.0.1,
+	// not allowed.example.com.
+	parsed, err := url.Parse(urlStr)
+	if err != nil {
+		return fmt.Errorf("http: invalid URL: %w", err)
 	}
-	// Strip path.
-	if i := strings.Index(host, "/"); i >= 0 {
-		host = host[:i]
+	host := strings.ToLower(parsed.Hostname())
+	if host == "" {
+		return fmt.Errorf("http: URL must include a host")
 	}
-	// Strip port.
-	if i := strings.Index(host, ":"); i >= 0 {
-		host = host[:i]
-	}
-	host = strings.ToLower(host)
 
 	// Block private IPs.
 	if netguard.IsPrivateHost(host) {
