@@ -59,25 +59,9 @@ func applyData(dt *doctype.DocType, doc *doctype.Document, raw json.RawMessage, 
 			continue
 		}
 		if f.Fieldtype == "Table" {
-			rows, ok := val.([]any)
-			if !ok {
-				return fmt.Errorf("field %q must be an array of child rows", key)
-			}
-			childDT := reg.Get(f.Options)
-			if childDT == nil {
-				return fmt.Errorf("child doctype %q not found", f.Options)
-			}
-			children := make([]*doctype.Document, 0, len(rows))
-			for index, value := range rows {
-				row, ok := value.(map[string]any)
-				if !ok {
-					return fmt.Errorf("field %q row %d must be an object", key, index)
-				}
-				child := doctype.NewDocument(f.Options)
-				for childField, childValue := range row {
-					child.Set(childField, childValue)
-				}
-				children = append(children, child)
+			children, err := childDocumentsFromData(key, f, reg, val)
+			if err != nil {
+				return err
 			}
 			doc.Set(key, children)
 			continue
@@ -85,4 +69,40 @@ func applyData(dt *doctype.DocType, doc *doctype.Document, raw json.RawMessage, 
 		doc.Set(key, val)
 	}
 	return nil
+}
+
+// childDocumentsFromData builds the child rows of table field key from its JSON value.
+func childDocumentsFromData(key string, f *doctype.Field, reg *doctype.Registry, val any) ([]*doctype.Document, error) {
+	rows, ok := val.([]any)
+	if !ok {
+		return nil, fmt.Errorf("field %q must be an array of child rows", key)
+	}
+	if reg.Get(f.Options) == nil {
+		return nil, fmt.Errorf("child doctype %q not found", f.Options)
+	}
+	children := make([]*doctype.Document, 0, len(rows))
+	for index, value := range rows {
+		row, ok := value.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("field %q row %d must be an object", key, index)
+		}
+		children = append(children, childDocumentFromData(f.Options, row))
+	}
+	return children, nil
+}
+
+// childDocumentFromData builds one child row. A non-empty string name refers to an
+// existing row, which the ORM then updates in place; the name is not a data field.
+func childDocumentFromData(doctypeName string, row map[string]any) *doctype.Document {
+	child := doctype.NewDocument(doctypeName)
+	if name, ok := row["name"].(string); ok && name != "" {
+		child.Name = name
+		child.IsNew = false
+	}
+	for childField, childValue := range row {
+		if childField != "name" {
+			child.Set(childField, childValue)
+		}
+	}
+	return child
 }

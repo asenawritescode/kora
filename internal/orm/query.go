@@ -420,7 +420,7 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 		if childDT == nil {
 			return fmt.Errorf("child doctype %q not found", f.Options)
 		}
-		if err := tx.insertChildRows(dbTx, dt, f, children, doc.Name); err != nil {
+		if err := tx.insertFreshChildRows(dbTx, dt, f, children, doc.Name); err != nil {
 			if validationErr := tx.Dialect.ParseError(err, childDT); validationErr != nil {
 				if validationErr.Type == "UniqueConstraint" {
 					return fmt.Errorf("%w: %w", ErrDuplicate, validationErr)
@@ -737,40 +737,8 @@ func (tx *TxManager) SaveInTxWithScope(dbTx *sql.Tx, dt *doctype.DocType, doc *d
 	}
 
 	for _, f := range dt.TableFields() {
-		childTableName := tx.childTableName(dt, f.Fieldname)
-		newChildren := doc.GetTable(f.Fieldname)
-		childDT := tx.Registry.Get(f.Options)
-		if childDT == nil {
-			if newChildren != nil {
-				return fmt.Errorf("child doctype %q not found", f.Options)
-			}
-			continue
-		}
-
-		var oldChildren []*doctype.Document
-		if oldDoc != nil {
-			oldChildren = oldDoc.GetTable(f.Fieldname)
-		}
-
-		if oldDoc == nil {
-			// Fallback: no old document available — DELETE-all + re-INSERT-all.
-			if _, err := dbTx.Exec(db.Rebind(tx.Dialect,
-				fmt.Sprintf("DELETE FROM %s WHERE parent = ?", childTableName)),
-				doc.Name,
-			); err != nil {
-				return fmt.Errorf("deleting old child rows for %s: %w", f.Fieldname, err)
-			}
-			if newChildren == nil {
-				continue
-			}
-			if err := tx.insertChildRows(dbTx, dt, f, newChildren, doc.Name); err != nil {
-				return fmt.Errorf("inserting child rows in %s: %w", f.Fieldname, err)
-			}
-		} else {
-			// Diff-based reconciliation: only DELETE removed, INSERT new, UPDATE changed.
-			if err := reconcileChildren(dbTx, dt, f.Fieldname, childDT, oldChildren, newChildren, doc.Name, tx.Dialect); err != nil {
-				return fmt.Errorf("reconciling child rows in %s: %w", f.Fieldname, err)
-			}
+		if err := tx.saveChildTable(dbTx, dt, f, doc, oldDoc); err != nil {
+			return err
 		}
 	}
 
