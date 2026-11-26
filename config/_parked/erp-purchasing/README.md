@@ -28,8 +28,26 @@ Voiding a Paid payment reverses exactly what it applied. A bill with payments ca
 be cancelled or set back to Draft or Open; void its payments first. A bill is Paid
 only through payments, and its amount paid is set by payments, not by hand.
 
-Not here yet:
-- No three-way matching, no automatic payable postings, no approvals.
+**Receiving against an order.** A goods receipt that names a purchase order must
+come from that order's supplier, while the order is Ordered or Partly Received. Each
+product on the receipt must be on the order and no more than is still due (quantities
+across the order's lines for that product). The receipt then fills the order's lines
+in line order (Received, per line). The order becomes Partly Received, then Received
+when every line is in full. A person cannot set Partly Received or Received, and
+cannot change an order's items while anything is received (no line may drop below
+what it received). Draft, Ordered and Cancelled stay with the person; Cancelled and
+Received are final.
 
-Checks: `go test ./doctype -run TestERP` and
-`go test -tags integration ./api -run TestERP` (needs MySQL, see `KORA_TEST_DSN`).
+**Bills against receipts and orders.** A bill naming a goods receipt must come from its
+supplier, be in its currency and not exceed the receipt's total. A bill naming an order
+must come from its supplier, and the order's bills that are not Cancelled, compared in
+the base currency, must not exceed the total of its goods receipts. A bill naming both
+must name a receipt that belongs to that order.
+
+Not here yet:
+- No payable postings, no approvals. Matching is by amount and supplier, not by line.
+
+Checks: `go test ./internal/site -run Pack` and
+`go test -tags integration ./internal/api -run 'TestPackScripts(PurchasingPayments|PurchaseOrders)'`
+(needs MySQL and PostgreSQL, see `KORA_PACK_SCRIPTS_DISPOSABLE_MYSQL_DSN` and
+`KORA_PACK_SCRIPTS_DISPOSABLE_POSTGRES_DSN`).
