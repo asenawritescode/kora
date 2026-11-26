@@ -32,8 +32,7 @@ How stock moves (Engine `internal/kernel/quantity_effect.go` on create, `scripts
   needed for counts that are not job cards.
 
 Limits: customer vehicles and job cards that take parts from stock. No quotes or invoices from the
-job card, no service reminders. Changing a saved card's parts needs the Product read permission
-(the Cashier role of the selling pack); a Mechanic without it cannot change a saved card's parts.
+job card, no service reminders. A Mechanic can change a saved card's parts: the job card's script reads and moves Product stock for them.
 
 Checks: `go test ./internal/site -run Workshop`, and `go test -tags integration ./internal/api -run TestPackScriptsJobCards`
 (MySQL and PostgreSQL through `KORA_PACK_SCRIPTS_DISPOSABLE_MYSQL_DSN` and `KORA_PACK_SCRIPTS_DISPOSABLE_POSTGRES_DSN`).

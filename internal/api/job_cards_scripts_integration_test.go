@@ -136,12 +136,12 @@ func TestPackScriptsJobCards(t *testing.T) {
 			stockIs(g, 6, 3)
 		})
 
-		run("a mechanic without the selling reader role cannot change a saved card's parts", func(g, m *packFixture) {
+		run("a mechanic alone changes a saved card's parts; the script reads Product for them", func(g, m *packFixture) {
 			open := g.create("Job Card", cardBody("JC-3", "", jobCardPart(filter, "1")))
 			stockIs(g, 5, 3)
 			alone := g.as("Mechanic")
-			alone.refused(httpMethodPut, "Job Card", open, `{"parts":`+jobCardParts(jobCardPart(filter, "2"))+`}`, "Cannot check product")
-			stockIs(g, 5, 3)
+			alone.update("Job Card", open, `{"parts":`+jobCardParts(jobCardPart(filter, "2"))+`}`)
+			stockIs(g, 4, 3)
 			g.deleted("Job Card", open)
 			stockIs(g, 6, 3)
 		})
