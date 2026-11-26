@@ -341,13 +341,7 @@ func (names packResourceNames) add(file PackFile) error {
 		}
 		return register(names.views, "route:"+definition.Route, "view route")
 	case "script":
-		name := strings.TrimSuffix(path.Base(file.Path), path.Ext(file.Path))
-		if libraryName, ok := packLibraryName(file.Path); ok {
-			name = packLibraryRowName(libraryName)
-		} else if doctypeName, eventName := packScriptBinding(file.Path); doctypeName != "" {
-			name = strings.ReplaceAll(doctypeName, " ", "_") + "_" + eventName
-		}
-		return register(names.scripts, name, "script")
+		return register(names.scripts, packScriptResourceName(file.Path), "script")
 	case "query":
 		definition, err := decodeQueryDefinition([]byte(file.Content))
 		if err != nil {
@@ -370,6 +364,17 @@ func (names packResourceNames) add(file PackFile) error {
 		return names.addDefinition(file, register)
 	}
 	return nil
+}
+
+// packScriptResourceName is the name a pack script file claims in the script namespace.
+func packScriptResourceName(filePath string) string {
+	if libraryName, ok := packLibraryName(filePath); ok {
+		return packLibraryRowName(libraryName)
+	}
+	if doctypeName, eventName := packScriptBinding(filePath); doctypeName != "" {
+		return strings.ReplaceAll(doctypeName, " ", "_") + "_" + eventName
+	}
+	return strings.TrimSuffix(path.Base(filePath), path.Ext(filePath))
 }
 
 // addDefinition claims the names of a metric or a dashboard definition.

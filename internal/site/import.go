@@ -905,31 +905,7 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 			printFiles = append(printFiles, f)
 
 		case "script":
-			h := sha256.Sum256(data)
-			if libraryName, ok := packLibraryName(f.Path); ok {
-				sc := &doctype.ScriptSnapshot{
-					Name: packLibraryRowName(libraryName), ScriptType: string(script.TypeLibrary),
-					IsActive: true, Priority: 10, TimeoutMs: 5000, ScriptHash: hex.EncodeToString(h[:]),
-				}
-				scripts = append(scripts, sc)
-				scriptBodyByHash[sc.ScriptHash] = f.Content
-				continue
-			}
-			doctypeName, eventName := packScriptBinding(f.Path)
-			scriptName := strings.TrimSuffix(filepath.Base(f.Path), ".js")
-			if doctypeName != "" {
-				scriptName = strings.ReplaceAll(doctypeName, " ", "_") + "_" + eventName
-			}
-			sc := &doctype.ScriptSnapshot{
-				Name:       scriptName,
-				ScriptType: "doc_event",
-				DocType:    doctypeName,
-				Event:      eventName,
-				IsActive:   true,
-				Priority:   10,
-				TimeoutMs:  5000,
-				ScriptHash: hex.EncodeToString(h[:]),
-			}
+			sc := packScriptSnapshot(f.Path, data)
 			scripts = append(scripts, sc)
 			scriptBodyByHash[sc.ScriptHash] = f.Content
 		}
@@ -950,6 +926,35 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 		PrintFormats:        printFormats,
 		Scripts:             scripts,
 	}, scriptBodyByHash, nil
+}
+
+// packScriptSnapshot describes one pack script file. scripts/lib/<name>.js is a
+// library; scripts/<DocType>/<event>.js is a document-event script bound to that
+// doctype and event; any other file is an unbound document-event script.
+func packScriptSnapshot(path string, data []byte) *doctype.ScriptSnapshot {
+	h := sha256.Sum256(data)
+	hash := hex.EncodeToString(h[:])
+	if libraryName, ok := packLibraryName(path); ok {
+		return &doctype.ScriptSnapshot{
+			Name: packLibraryRowName(libraryName), ScriptType: string(script.TypeLibrary),
+			IsActive: true, Priority: 10, TimeoutMs: 5000, ScriptHash: hash,
+		}
+	}
+	doctypeName, eventName := packScriptBinding(path)
+	scriptName := strings.TrimSuffix(filepath.Base(path), ".js")
+	if doctypeName != "" {
+		scriptName = strings.ReplaceAll(doctypeName, " ", "_") + "_" + eventName
+	}
+	return &doctype.ScriptSnapshot{
+		Name:       scriptName,
+		ScriptType: "doc_event",
+		DocType:    doctypeName,
+		Event:      eventName,
+		IsActive:   true,
+		Priority:   10,
+		TimeoutMs:  5000,
+		ScriptHash: hash,
+	}
 }
 
 // packLibraryDir is the scripts/ subdirectory whose files are library scripts.

@@ -223,7 +223,7 @@ func (t *scriptTimestamp) parse(value string) error {
 
 // LoadActiveScripts returns all active scripts for a site, filtered by optional doctype+event.
 func (s *Store) LoadActiveScripts(site string, doctype string, event Event) ([]Record, error) {
-	return s.loadActiveScripts(context.Background(), s.DB, site, TypeDocEvent, doctype, event)
+	return s.loadActiveScripts(context.Background(), s.DB, activeScriptFilter{site: site, scriptType: TypeDocEvent, doctype: doctype, event: event})
 }
 
 // LoadActiveScriptsTx selects lifecycle scripts through the caller's tenant
@@ -234,12 +234,12 @@ func (s *Store) LoadActiveScriptsTx(ctx context.Context, tx *sql.Tx, site string
 	if ctx == nil || tx == nil {
 		return nil, fmt.Errorf("script: transaction-bound load requires context and transaction")
 	}
-	return s.loadActiveScripts(ctx, tx, site, TypeDocEvent, doctype, event)
+	return s.loadActiveScripts(ctx, tx, activeScriptFilter{site: site, scriptType: TypeDocEvent, doctype: doctype, event: event})
 }
 
 // LoadLibraries returns the site's active library scripts ordered by name.
-func (s *Store) LoadLibraries(site string) ([]Library, error) {
-	return s.loadLibraries(context.Background(), s.DB, site)
+func (s *Store) LoadLibraries(ctx context.Context, site string) ([]Library, error) {
+	return s.loadLibraries(ctx, s.DB, site)
 }
 
 // LoadLibrariesTx selects library scripts through the caller's tenant transaction.
@@ -251,7 +251,7 @@ func (s *Store) LoadLibrariesTx(ctx context.Context, tx *sql.Tx, site string) ([
 }
 
 func (s *Store) loadLibraries(ctx context.Context, queryer activeScriptQueryer, site string) ([]Library, error) {
-	records, err := s.loadActiveScripts(ctx, queryer, site, TypeLibrary, "", "")
+	records, err := s.loadActiveScripts(ctx, queryer, activeScriptFilter{site: site, scriptType: TypeLibrary})
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +267,17 @@ type activeScriptQueryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-func (s *Store) loadActiveScripts(ctx context.Context, queryer activeScriptQueryer, site string, scriptType Type, doctype string, event Event) ([]Record, error) {
+// activeScriptFilter selects the active scripts of one site. Empty doctype or event
+// leaves that column unfiltered.
+type activeScriptFilter struct {
+	site       string
+	scriptType Type
+	doctype    string
+	event      Event
+}
+
+func (s *Store) loadActiveScripts(ctx context.Context, queryer activeScriptQueryer, filter activeScriptFilter) ([]Record, error) {
+	site, scriptType, doctype, event := filter.site, filter.scriptType, filter.doctype, filter.event
 	query := `SELECT name, site, script_type, doctype, event, method_path, schedule,
 		priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
 		created_by, updated_by, creation, modified

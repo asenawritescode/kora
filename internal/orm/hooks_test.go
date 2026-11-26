@@ -134,16 +134,12 @@ func TestBeforeHookPanicRejectsMutationAndLogsFailure(t *testing.T) {
 	}
 }
 
-func TestBeforeHookReceivesCanceledCommandContext(t *testing.T) {
+func TestBeforeHookStopsWhenCommandContextCanceled(t *testing.T) {
 	database, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("create sql mock: %v", err)
 	}
 	defer database.Close()
-	mock.ExpectQuery("SELECT name, site, script_type, doctype, event, method_path").WillReturnRows(sqlmock.NewRows([]string{"name"}))
-	mock.ExpectExec("INSERT INTO _kora_script_execution").
-		WithArgs(sqlmock.AnyArg(), "test-site", "validate-task", sqlmock.AnyArg(), "Task", "TASK-1", string(script.EventValidate), "alice@example.test", int64(0), "error", context.Canceled.Error()).
-		WillReturnResult(sqlmock.NewResult(1, 1))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	runner := &hookFailureRunner{err: context.Canceled}
@@ -157,15 +153,16 @@ func TestBeforeHookReceivesCanceledCommandContext(t *testing.T) {
 			"Task": {{Name: "validate-task", ScriptType: script.TypeDocEvent, Event: script.EventValidate}},
 		},
 	}
+	// The library read shares the canceled context, so the hook stops before any script runs.
 	err = tx.runHooks(&doctype.DocType{Name: "Task"}, script.EventValidate, &doctype.Document{DocType: "Task", Name: "TASK-1"}, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled hook error = %v, want context.Canceled", err)
 	}
-	if !errors.Is(runner.seenCtxErr, context.Canceled) {
-		t.Fatalf("runner context error = %v, want context.Canceled", runner.seenCtxErr)
+	if runner.seenCtxErr != nil {
+		t.Fatalf("script ran under a canceled command context: %v", runner.seenCtxErr)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("expected canceled execution log: %v", err)
+		t.Fatalf("unexpected database calls: %v", err)
 	}
 }
 

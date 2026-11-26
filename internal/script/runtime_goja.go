@@ -210,11 +210,7 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 				err = fmt.Errorf("script: runtime panic: %v", rec)
 			}
 		}()
-		if err = runLibraries(vm, req.Libraries); err != nil {
-			return
-		}
-		script := r.wrapScript(req)
-		val, err = vm.RunString(script)
+		val, err = runWithLibraries(vm, req.Libraries, r.wrapScript(req))
 	}()
 	duration := time.Since(start)
 
@@ -250,6 +246,14 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 	}
 
 	return result, nil
+}
+
+// runWithLibraries evaluates the libraries, then the wrapped script, in one VM.
+func runWithLibraries(vm *goja.Runtime, libraries []Library, script string) (goja.Value, error) {
+	if err := runLibraries(vm, libraries); err != nil {
+		return nil, err
+	}
+	return vm.RunString(script)
 }
 
 // runLibraries evaluates each library at global scope, in order, so the

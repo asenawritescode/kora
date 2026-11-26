@@ -245,14 +245,7 @@ func (w *AsyncHookWorker) run(ctx context.Context, opts AsyncHookOptions) {
 				execReq.OldDocument = oldDoc.ToMap()
 			}
 
-			var result *script.ExecuteResult
-			var execErr error
-			if services.ScriptStore != nil {
-				execReq.Libraries, execErr = services.ScriptStore.LoadLibraries(req.Site)
-			}
-			if execErr == nil {
-				result, execErr = opts.Runner.Execute(ctx, execReq)
-			}
+			result, execErr := executeAsyncHook(ctx, opts.Runner, services.ScriptStore, req.Site, execReq)
 			status := "success"
 			errMsg := ""
 			durationMs := 0
@@ -542,4 +535,17 @@ func (q *asyncHookQueueSink) Close() {
 		q.closed = true
 		close(q.queue)
 	}
+}
+
+// executeAsyncHook loads the site's libraries into the hook's request and runs it.
+// A site without a script store has no libraries to load.
+func executeAsyncHook(ctx context.Context, runner script.Runner, store *script.Store, site string, req script.ExecuteRequest) (*script.ExecuteResult, error) {
+	if store != nil {
+		libraries, err := store.LoadLibraries(ctx, site)
+		if err != nil {
+			return nil, err
+		}
+		req.Libraries = libraries
+	}
+	return runner.Execute(ctx, req)
 }
