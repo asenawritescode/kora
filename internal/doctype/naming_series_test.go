@@ -90,3 +90,24 @@ func TestDocTypeValidatesNamingSeries(t *testing.T) {
 		t.Fatalf("naming series lost in snapshot: %q", parsed.DocTypes[0].NamingSeries)
 	}
 }
+
+func TestNamingSeriesUsesFields(t *testing.T) {
+	cases := []struct {
+		template string
+		want     bool
+	}{
+		{"PREFIX-.####", false},
+		{"INV-.YYYY.-.#####", false},
+		{"LOAN-.{branch}.-.###", true},
+		{"LOAN-.YY.-.{branch}.-.###", true},
+	}
+	for _, tc := range cases {
+		series, err := ParseNamingSeries(tc.template)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.template, err)
+		}
+		if got := series.UsesFields(); got != tc.want {
+			t.Errorf("%s: UsesFields() = %v, want %v", tc.template, got, tc.want)
+		}
+	}
+}

@@ -63,6 +63,12 @@ func ParseNamingSeries(template string) (NamingSeries, error) {
 	return series, nil
 }
 
+// UsesFields reports whether the series reads any document field, so its name
+// is known only once those fields are set.
+func (s NamingSeries) UsesFields() bool {
+	return len(s.Fields()) > 0
+}
+
 // Fields returns the document fields the series reads.
 func (s NamingSeries) Fields() []string {
 	var out []string
