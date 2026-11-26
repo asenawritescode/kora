@@ -15,7 +15,7 @@ const (
 
 func TestPackScriptsMenuTables(t *testing.T) {
 	eachPackDialect(t, []string{menuTablesScriptsSelling, menuTablesScriptsPack}, func(f *packFixture) {
-		runPackCase(f, "a new order makes a free table occupied", func(f *packFixture) {
+		f.run("a new order makes a free table occupied", func(f *packFixture) {
 			g := f.as("Restaurant Manager")
 			item := g.create("Menu Item", `{"item_name":"Beef stew","category":"Main","price":650}`)
 			table := g.create("Dining Table", `{"table_no":"A1","seats":4}`)
@@ -23,7 +23,7 @@ func TestPackScriptsMenuTables(t *testing.T) {
 			g.expect("Dining Table", table, "status", "Occupied")
 		})
 
-		runPackCase(f, "a reserved table is taken by a new order", func(f *packFixture) {
+		f.run("a reserved table is taken by a new order", func(f *packFixture) {
 			g := f.as("Restaurant Manager")
 			item := g.create("Menu Item", `{"item_name":"Masala tea","category":"Drink","price":120}`)
 			table := g.create("Dining Table", `{"table_no":"A2","seats":2,"status":"Reserved"}`)
@@ -31,7 +31,7 @@ func TestPackScriptsMenuTables(t *testing.T) {
 			g.expect("Dining Table", table, "status", "Occupied")
 		})
 
-		runPackCase(f, "a line quantity below one is refused", func(f *packFixture) {
+		f.run("a line quantity below one is refused", func(f *packFixture) {
 			g := f.as("Restaurant Manager")
 			item := g.create("Menu Item", `{"item_name":"Chapati","category":"Side","price":40}`)
 			table := g.create("Dining Table", `{"table_no":"A3","seats":2}`)
@@ -40,7 +40,7 @@ func TestPackScriptsMenuTables(t *testing.T) {
 			g.expect("Dining Table", table, "status", "Free")
 		})
 
-		runPackCase(f, "an unavailable item is refused on a new order", func(f *packFixture) {
+		f.run("an unavailable item is refused on a new order", func(f *packFixture) {
 			g := f.as("Restaurant Manager")
 			item := g.create("Menu Item", `{"item_name":"Fish of the day","category":"Main","price":900}`)
 			g.update("Menu Item", item, `{"available":0}`)
@@ -50,7 +50,7 @@ func TestPackScriptsMenuTables(t *testing.T) {
 			g.expect("Dining Table", table, "status", "Free")
 		})
 
-		runPackCase(f, "an order needs at least one line", func(f *packFixture) {
+		f.run("an order needs at least one line", func(f *packFixture) {
 			g := f.as("Restaurant Manager")
 			item := g.create("Menu Item", `{"item_name":"Samosa","category":"Starter","price":80}`)
 			table := g.create("Dining Table", `{"table_no":"A5","seats":2}`)
@@ -60,7 +60,7 @@ func TestPackScriptsMenuTables(t *testing.T) {
 			g.refused(httpMethodPut, "Kitchen Order", order, `{"lines":[]}`, "Items is required.")
 		})
 
-		runPackCase(f, "an old order stays editable after its item is marked unavailable", func(f *packFixture) {
+		f.run("an old order stays editable after its item is marked unavailable", func(f *packFixture) {
 			g := f.as("Restaurant Manager")
 			item := g.create("Menu Item", `{"item_name":"Mandazi","category":"Starter","price":30}`)
 			table := g.create("Dining Table", `{"table_no":"A7","seats":2}`)
@@ -72,7 +72,7 @@ func TestPackScriptsMenuTables(t *testing.T) {
 				"Mandazi is not available.")
 		})
 
-		runPackCase(f, "a waiter takes an order, which occupies the table", func(f *packFixture) {
+		f.run("a waiter takes an order, which occupies the table", func(f *packFixture) {
 			w := f.as("Waiter")
 			m := f.as("Restaurant Manager")
 			item := m.create("Menu Item", `{"item_name":"Juice","category":"Drink","price":200}`)
@@ -90,16 +90,5 @@ func TestPackScriptsMenuTables(t *testing.T) {
 			w.update("Kitchen Order", order, `{"status":"Served"}`)
 			m.expect("Dining Table", table, "status", "Occupied")
 		})
-	})
-}
-
-// runPackCase runs one case as a subtest of the dialect with its own *testing.T, so a failed
-// assertion inside it fails that case only (calling Fatal on the dialect's T from a nested
-// subtest's goroutine would stop the wrong test).
-func runPackCase(f *packFixture, name string, scenario func(f *packFixture)) {
-	f.t.Run(name, func(t *testing.T) {
-		own := *f
-		own.t = t
-		scenario(&own)
 	})
 }
