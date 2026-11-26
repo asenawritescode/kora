@@ -148,3 +148,61 @@ func TestReserveNumbersCommandGivesEachSessionDisjointOpenBlocks(t *testing.T) {
 		})
 	}
 }
+
+// TestReserveNumbersReplayKeepsOneBlock proves a keyed reserve_numbers claims its
+// receipt before it reserves: a replay with the same key returns the stored result and
+// reserves nothing more, while a new key reserves a further block.
+func TestReserveNumbersReplayKeepsOneBlock(t *testing.T) {
+	cases := []struct{ driver, env string }{
+		{"mysql", "KORA_KERNEL_DISPOSABLE_MYSQL_DSN"},
+		{"postgres", "KORA_KERNEL_DISPOSABLE_POSTGRES_DSN"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.driver, func(t *testing.T) {
+			s := newReserveFixture(t, tc.driver, tc.env)
+			defer s.DB.Close()
+			k := newKernel(s)
+			k.Commands = kernel.NewCommandRegistry()
+			mustRegister(t, k, reserveNumbersYAML)
+
+			keyed := func(key string) kernel.Operation {
+				payload, _ := json.Marshal(map[string]any{"data": map[string]any{"till_session": "till-replay"}})
+				ctx := opCtx(s.Name, "Administrator")
+				ctx.IdempotencyKey = key
+				return kernel.Operation{Command: "pos.reserve_numbers", Payload: payload, Context: ctx}
+			}
+			blockCount := func() int {
+				t.Helper()
+				var n int
+				if err := s.DB.QueryRow("SELECT COUNT(*) FROM _kora_number_block").Scan(&n); err != nil {
+					t.Fatalf("count blocks: %v", err)
+				}
+				return n
+			}
+
+			first := exec(t, s, k, keyed("reserve-till-replay-1"))
+			mustComplete(t, first)
+			if n := blockCount(); n != 1 {
+				t.Fatalf("after first keyed reserve: %d blocks, want 1", n)
+			}
+
+			replay := exec(t, s, k, keyed("reserve-till-replay-1"))
+			mustComplete(t, replay)
+			if !replay.Replayed {
+				t.Fatalf("replay with the same key was not replayed")
+			}
+			if string(replay.Data) != string(first.Data) {
+				t.Fatalf("replay data = %s, want the first result %s", replay.Data, first.Data)
+			}
+			if n := blockCount(); n != 1 {
+				t.Fatalf("after replay: %d blocks, want still 1", n)
+			}
+
+			fresh := exec(t, s, k, keyed("reserve-till-replay-2"))
+			mustComplete(t, fresh)
+			if n := blockCount(); n != 2 {
+				t.Fatalf("after a new key: %d blocks, want 2", n)
+			}
+		})
+	}
+}

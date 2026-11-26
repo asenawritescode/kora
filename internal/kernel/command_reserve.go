@@ -1,7 +1,6 @@
 package kernel
 
 import (
-	"database/sql"
 	"fmt"
 	"time"
 
@@ -10,9 +9,14 @@ import (
 	"github.com/asenawritescode/kora/internal/orm"
 )
 
-// execReserveStep reserves the block a reserve step asks for and returns its
-// outcome; the step's As name, if any, refers to the block's first record.
-func (k *Kernel) execReserveStep(dbTx *sql.Tx, reg *doctype.Registry, step CommandStep, env refEnv, stepNames map[string]string) (stepOutcome, *contract.Error) {
+// reserve claims the receipt before the first write, then reserves the block a
+// reserve step asks for and returns its outcome; the step's As name, if any,
+// refers to the block's first record. writes counts the outcomes before it.
+func (w commandWriter) reserve(reg *doctype.Registry, step CommandStep, env refEnv, stepNames map[string]string, writes int) (stepOutcome, *contract.Error) {
+	if cerr := w.k.claimFirstWriteReceipt(w.run.Tx, w.op, w.def, w.run.OpID, writes); cerr != nil {
+		return stepOutcome{}, cerr
+	}
+	dbTx, k := w.run.Tx, w.k
 	req := step.Reserve
 	dt := reg.Get(req.Record)
 	if dt == nil {
