@@ -72,6 +72,7 @@ func TestProcessOneDurableLifecycleHookCommitsFencedReceipt(t *testing.T) {
 	mock.ExpectCommit()
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT id FROM _kora_script_invocation").WithArgs("tenant-a", string(invocation.SourceOperation), uint16(1), sqlmock.AnyArg(), uint64(1)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("invocation-id"))
+	mock.ExpectQuery("SELECT name, site, script_type, doctype, event, method_path").WillReturnRows(sqlmock.NewRows([]string{"name"}))
 	mock.ExpectExec("UPDATE _kora_script_invocation SET status = 'succeeded'").WithArgs("tenant-a", string(invocation.SourceOperation), uint16(1), sqlmock.AnyArg(), uint64(1)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	mock.ExpectExec("INSERT INTO _kora_script_execution").WithArgs(sqlmock.AnyArg(), "tenant-a", "task-after-save", string(script.TypeDocEvent), "Task", "TASK-1", string(script.EventAfterSave), "alice@example.test", sqlmock.AnyArg(), "success", "").WillReturnResult(sqlmock.NewResult(1, 1))

@@ -245,7 +245,14 @@ func (w *AsyncHookWorker) run(ctx context.Context, opts AsyncHookOptions) {
 				execReq.OldDocument = oldDoc.ToMap()
 			}
 
-			result, execErr := opts.Runner.Execute(ctx, execReq)
+			var result *script.ExecuteResult
+			var execErr error
+			if services.ScriptStore != nil {
+				execReq.Libraries, execErr = services.ScriptStore.LoadLibraries(req.Site)
+			}
+			if execErr == nil {
+				result, execErr = opts.Runner.Execute(ctx, execReq)
+			}
 			status := "success"
 			errMsg := ""
 			durationMs := 0

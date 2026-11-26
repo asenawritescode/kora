@@ -189,12 +189,16 @@ func processOneDurableLifecycleHook(ctx context.Context, w *lifecycleHookPass) (
 	}
 	record := invocation.Record
 	started := time.Now()
-	result, runErr := executeDurableLifecycleHookSafely(w.Runner, callCtx, script.ExecuteRequest{
-		Script: record.Script, ScriptType: record.ScriptType, ScriptName: record.Name,
-		DocType: invocation.Doctype, Event: invocation.Event, Document: document,
-		OldDocument: oldDocument, User: user, UserRoles: append([]string(nil), actor.Roles...),
-		Site: w.Site, Timeout: timeout, Provider: provider,
-	})
+	libraries, runErr := w.Store.LoadLibrariesTx(callCtx, execTx, w.Site)
+	var result *script.ExecuteResult
+	if runErr == nil {
+		result, runErr = executeDurableLifecycleHookSafely(w.Runner, callCtx, script.ExecuteRequest{
+			Script: record.Script, ScriptType: record.ScriptType, ScriptName: record.Name,
+			DocType: invocation.Doctype, Event: invocation.Event, Document: document,
+			OldDocument: oldDocument, User: user, UserRoles: append([]string(nil), actor.Roles...),
+			Site: w.Site, Timeout: timeout, Provider: provider, Libraries: libraries,
+		})
+	}
 	duration := time.Since(started)
 	if result != nil && result.Duration > 0 {
 		duration = result.Duration

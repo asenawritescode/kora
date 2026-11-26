@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -80,16 +81,20 @@ func (tx *TxManager) computedScriptHook() doctype.ComputedScriptHook {
 				if len(userRoles) == 0 && tx.CurrentUserRole != "" {
 					userRoles = []string{tx.CurrentUserRole}
 				}
+				cctx := tx.Context
+				if cctx == nil {
+					cctx = context.Background()
+				}
+				libraries, err := tx.libraries()
+				if err != nil {
+					return nil, err
+				}
 				req := script.ExecuteRequest{
 					Script: rec.Script, ScriptType: rec.ScriptType, ScriptName: rec.Name,
 					DocType: doctypeName, Event: script.EventComputed,
 					Document: doc.ToMap(), User: tx.CurrentUser,
 					UserRoles: userRoles, Site: tx.SiteName,
-					Provider: provider,
-				}
-				cctx := tx.Context
-				if cctx == nil {
-					cctx = context.Background()
+					Provider: provider, Libraries: libraries,
 				}
 				result, err := tx.ScriptRunner.Execute(cctx, req)
 				if err != nil {
@@ -217,6 +222,7 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 		slog.Debug("runHooks: no scripts matched", "site", tx.SiteName, "doctype", dt.Name, "event", event)
 		return nil
 	}
+	loadLibraries := sync.OnceValues(tx.libraries)
 	slog.Debug("runHooks: executing scripts", "site", tx.SiteName, "doctype", dt.Name, "event", event, "count", len(scripts))
 
 	userRoles := append([]string(nil), tx.CurrentUserRoles...)
@@ -284,6 +290,10 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 				return fmt.Errorf("module validation extension %q timeout must be between 1ms and %s", rec.Name, maxModuleValidationExtensionTime)
 			}
 		}
+		libraries, libErr := loadLibraries()
+		if libErr != nil {
+			return fmt.Errorf("loading script libraries: %w", libErr)
+		}
 		provider := scopedHookProvider(tx, tx.ScriptProvider, dt.Name, event, rec.Name)
 		if isValidationExtension {
 			provider = nil // Validators receive no document, secret, HTTP, or mutation bridge.
@@ -300,6 +310,7 @@ func (tx *TxManager) runHooks(dt *doctype.DocType, event script.Event, doc *doct
 			UserRoles:   userRoles,
 			Site:        tx.SiteName,
 			Provider:    provider,
+			Libraries:   libraries,
 		}
 		if isValidationExtension {
 			req.Timeout = time.Duration(rec.TimeoutMs) * time.Millisecond
@@ -462,6 +473,19 @@ func (tx *TxManager) selectLifecycleScripts(dt *doctype.DocType, event script.Ev
 		result = append(result, record)
 	}
 	return result, nil
+}
+
+// libraries loads the site's library scripts for one run, through the operation's
+// transaction when it has one.
+func (tx *TxManager) libraries() ([]script.Library, error) {
+	ctx := tx.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if tx.Transaction != nil {
+		return tx.ScriptStore.LoadLibrariesTx(ctx, tx.Transaction, tx.SiteName)
+	}
+	return tx.ScriptStore.LoadLibraries(tx.SiteName)
 }
 
 func (tx *TxManager) activeHookScripts(doctypeName string) ([]script.Record, error) {

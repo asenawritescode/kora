@@ -1666,6 +1666,11 @@ func (h *Handler) HandleMethod(c *gin.Context) {
 	ss := h.runtimeService(c, siteNameStr).SecretStore
 	provider := NewScriptProvider(tx, h.siteRegistry(c), siteNameStr, ss, h.ScriptHTTPAllowlist)
 
+	libraries, err := store.LoadLibraries(siteNameStr)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: map[string]string{"message": "Script libraries could not be loaded"}})
+		return
+	}
 	execReq := script.ExecuteRequest{
 		Script:     rec.Script,
 		ScriptType: script.TypeAPIMethod,
@@ -1677,6 +1682,7 @@ func (h *Handler) HandleMethod(c *gin.Context) {
 		Site:       siteNameStr,
 		Timeout:    time.Duration(rec.TimeoutMs) * time.Millisecond,
 		Provider:   provider,
+		Libraries:  libraries,
 	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(rec.TimeoutMs)*time.Millisecond)

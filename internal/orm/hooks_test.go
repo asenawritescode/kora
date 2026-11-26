@@ -111,6 +111,7 @@ func TestBeforeHookPanicRejectsMutationAndLogsFailure(t *testing.T) {
 		t.Fatalf("create sql mock: %v", err)
 	}
 	defer database.Close()
+	mock.ExpectQuery("SELECT name, site, script_type, doctype, event, method_path").WillReturnRows(sqlmock.NewRows([]string{"name"}))
 	mock.ExpectExec("INSERT INTO _kora_script_execution").
 		WithArgs(sqlmock.AnyArg(), "test-site", "validate-task", sqlmock.AnyArg(), "Task", "TASK-1", string(script.EventValidate), "alice@example.test", int64(0), "error", "script panic: broken hook").
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -139,6 +140,7 @@ func TestBeforeHookReceivesCanceledCommandContext(t *testing.T) {
 		t.Fatalf("create sql mock: %v", err)
 	}
 	defer database.Close()
+	mock.ExpectQuery("SELECT name, site, script_type, doctype, event, method_path").WillReturnRows(sqlmock.NewRows([]string{"name"}))
 	mock.ExpectExec("INSERT INTO _kora_script_execution").
 		WithArgs(sqlmock.AnyArg(), "test-site", "validate-task", sqlmock.AnyArg(), "Task", "TASK-1", string(script.EventValidate), "alice@example.test", int64(0), "error", context.Canceled.Error()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -188,6 +190,12 @@ func TestOwnerModuleValidationExtensionsAreOrderedBoundedAndEffectFree(t *testin
 		t.Fatal("order module validation extensions:", err)
 	}
 	runner := &moduleExtensionRunner{}
+	// Five runHooks calls below each load the site's libraries once; their logs and
+	// loads interleave, so this test matches expectations unordered.
+	mock.MatchExpectationsInOrder(false)
+	for range 5 {
+		mock.ExpectQuery("SELECT name, site, script_type, doctype, event, method_path").WillReturnRows(sqlmock.NewRows([]string{"name"}))
+	}
 	logSuccess := func(name string) {
 		mock.ExpectExec("INSERT INTO _kora_script_execution").WithArgs(sqlmock.AnyArg(), "", name, string(script.TypeDocEvent), "Invoice", "INV-1", string(script.EventValidate), "", sqlmock.AnyArg(), "success", "").WillReturnResult(sqlmock.NewResult(1, 1))
 	}

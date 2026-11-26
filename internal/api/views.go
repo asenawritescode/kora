@@ -1801,11 +1801,15 @@ func (h *Handler) executeNamedOperationScript(c *gin.Context, scriptName string,
 	if !verified {
 		return nil, contract.NewError(contract.CodeUnauthenticated, "verified payment-script execution identity required")
 	}
+	libraries, err := store.LoadLibraries(site)
+	if err != nil {
+		return nil, err
+	}
 	result, err := h.ScriptRunner.Execute(execCtx, script.ExecuteRequest{
 		Script: rec.Script, ScriptType: script.TypeAPIMethod, ScriptName: rec.Name,
 		DocType: "External Operation", Event: script.EventPayment, Document: doc.ToMap(),
 		User: user, UserRoles: roles, Site: site,
-		Timeout: timeout, Provider: tx.ScriptProvider,
+		Timeout: timeout, Provider: tx.ScriptProvider, Libraries: libraries,
 	})
 	if err != nil {
 		_ = store.LogExecution(site, *rec, "External Operation", doc.Name, script.EventPayment, user, int(resultDuration(result).Milliseconds()), "error", err.Error())
@@ -1874,12 +1878,16 @@ func (h *Handler) executeTransactionPaymentScript(c *gin.Context, scriptName str
 	timeout := paymentScriptTimeout(rec.TimeoutMs)
 	execCtx, cancel := context.WithTimeout(c.Request.Context(), timeout)
 	defer cancel()
-	result, execErr := h.ScriptRunner.Execute(execCtx, script.ExecuteRequest{
-		Script: rec.Script, ScriptType: script.TypeAPIMethod, ScriptName: rec.Name,
-		DocType: dt.Name, Event: script.EventPayment, Document: doc.ToMap(),
-		User: user, UserRoles: roles, Site: site,
-		Timeout: timeout, Provider: tm.ScriptProvider,
-	})
+	libraries, execErr := store.LoadLibraries(site)
+	var result *script.ExecuteResult
+	if execErr == nil {
+		result, execErr = h.ScriptRunner.Execute(execCtx, script.ExecuteRequest{
+			Script: rec.Script, ScriptType: script.TypeAPIMethod, ScriptName: rec.Name,
+			DocType: dt.Name, Event: script.EventPayment, Document: doc.ToMap(),
+			User: user, UserRoles: roles, Site: site,
+			Timeout: timeout, Provider: tm.ScriptProvider, Libraries: libraries,
+		})
+	}
 	durationMs := 0
 	if result != nil {
 		durationMs = int(result.Duration.Milliseconds())
