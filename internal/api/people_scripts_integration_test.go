@@ -3,7 +3,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -158,17 +157,8 @@ func (p *peopleScripts) attendance(employee, day, status string) string {
 	return jsonBody(p.t, map[string]any{"employee": employee, "attendance_date": day, "status": status})
 }
 
-func leaveBody(t interface{ Fatalf(string, ...any) }, employee, leaveType, start, end string) string {
+func leaveBody(t testing.TB, employee, leaveType, start, end string) string {
 	return jsonBody(t, map[string]any{"employee": employee, "leave_type": leaveType, "start_date": start, "end_date": end})
-}
-
-// jsonBody encodes a request body, failing the test on an encoding error.
-func jsonBody(t interface{ Fatalf(string, ...any) }, body map[string]any) string {
-	raw, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("encode body: %v", err)
-	}
-	return string(raw)
 }
 
 // today, yesterday and tomorrow are UTC dates, the clock the script reads.
