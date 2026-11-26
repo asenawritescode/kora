@@ -342,7 +342,9 @@ func (names packResourceNames) add(file PackFile) error {
 		return register(names.views, "route:"+definition.Route, "view route")
 	case "script":
 		name := strings.TrimSuffix(path.Base(file.Path), path.Ext(file.Path))
-		if doctypeName, eventName := packScriptBinding(file.Path); doctypeName != "" {
+		if libraryName, ok := packLibraryName(file.Path); ok {
+			name = packLibraryRowName(libraryName)
+		} else if doctypeName, eventName := packScriptBinding(file.Path); doctypeName != "" {
 			name = strings.ReplaceAll(doctypeName, " ", "_") + "_" + eventName
 		}
 		return register(names.scripts, name, "script")

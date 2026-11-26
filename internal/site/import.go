@@ -28,6 +28,7 @@ import (
 	"github.com/asenawritescode/kora/internal/policy"
 	"github.com/asenawritescode/kora/internal/print"
 	"github.com/asenawritescode/kora/internal/schema"
+	"github.com/asenawritescode/kora/internal/script"
 	flow "github.com/asenawritescode/kora/internal/workflow"
 	workflowsql "github.com/asenawritescode/kora/internal/workflow/sqlstore"
 )
@@ -905,6 +906,15 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 
 		case "script":
 			h := sha256.Sum256(data)
+			if libraryName, ok := packLibraryName(f.Path); ok {
+				sc := &doctype.ScriptSnapshot{
+					Name: packLibraryRowName(libraryName), ScriptType: string(script.TypeLibrary),
+					IsActive: true, Priority: 10, TimeoutMs: 5000, ScriptHash: hex.EncodeToString(h[:]),
+				}
+				scripts = append(scripts, sc)
+				scriptBodyByHash[sc.ScriptHash] = f.Content
+				continue
+			}
 			doctypeName, eventName := packScriptBinding(f.Path)
 			scriptName := strings.TrimSuffix(filepath.Base(f.Path), ".js")
 			if doctypeName != "" {
@@ -942,11 +952,29 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 	}, scriptBodyByHash, nil
 }
 
+// packLibraryDir is the scripts/ subdirectory whose files are library scripts.
+const packLibraryDir = "lib"
+
+// packLibraryName reports whether path is scripts/lib/<name>.js and returns <name>.
+func packLibraryName(path string) (string, bool) {
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	if len(parts) != 3 || parts[0] != "scripts" || parts[1] != packLibraryDir || !strings.HasSuffix(parts[2], ".js") {
+		return "", false
+	}
+	return strings.TrimSuffix(parts[2], ".js"), true
+}
+
+// packLibraryRowName is the _kora_script name of a library file.
+func packLibraryRowName(name string) string {
+	return "lib_" + name
+}
+
 // packScriptBinding supports an explicit scripts/<DocType>/<event>.js path.
-// Flat scripts/<name>.js packages keep their historic unbound metadata.
+// Flat scripts/<name>.js packages keep their historic unbound metadata, and
+// scripts/lib/ holds libraries, which are never bound to a doctype.
 func packScriptBinding(path string) (doctypeName, eventName string) {
 	parts := strings.Split(filepath.ToSlash(path), "/")
-	if len(parts) != 3 || parts[0] != "scripts" || parts[1] == "" {
+	if len(parts) != 3 || parts[0] != "scripts" || parts[1] == "" || parts[1] == packLibraryDir {
 		return "", ""
 	}
 	eventName = strings.TrimSuffix(parts[2], ".js")
