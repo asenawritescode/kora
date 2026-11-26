@@ -37,12 +37,8 @@ var datediffPattern = regexp.MustCompile(`DATEDIFF\(\s*([^,]+?)\s*,\s*([^)]+?)\s
 
 // cfInfo holds metadata about a computed field for dependency ordering.
 type cfInfo struct {
-	field       *Field
-	expr        string
-	hasSum      bool
-	hasRound    bool
-	hasCount    bool
-	hasDateDiff bool
+	field *Field
+	expr  string
 }
 
 // ComputeFields evaluates all computed fields on a document and sets their values.
@@ -62,12 +58,7 @@ func ComputeFieldsWithHook(dt *DocType, doc *Document, hook ComputedScriptHook) 
 	for i := range dt.Fields {
 		f := &dt.Fields[i]
 		if f.Computed != "" && f.Fieldtype != "Table" {
-			cf := cfInfo{field: f, expr: f.Computed}
-			cf.hasSum = sumPattern.MatchString(f.Computed)
-			cf.hasRound = roundPattern.MatchString(f.Computed)
-			cf.hasCount = countPattern.MatchString(f.Computed)
-			cf.hasDateDiff = datediffPattern.MatchString(f.Computed)
-			computed = append(computed, cf)
+			computed = append(computed, cfInfo{field: f, expr: f.Computed})
 		}
 	}
 
@@ -115,38 +106,85 @@ func ComputeFieldsWithHook(dt *DocType, doc *Document, hook ComputedScriptHook) 
 		defer sandbox.Close()
 	}
 
-	// Evaluate expression-based computed fields in dependency order:
-	// 1. SUM/COUNT fields first (aggregate child data)
-	// 2. DATEDIFF/ROUND fields (depend on other fields)
-	// 3. Simple arithmetic fields last
-	passes := [][]cfInfo{
-		filterCF(exprOnly, func(cf cfInfo) bool { return (cf.hasSum || cf.hasCount) && !cf.hasRound && !cf.hasDateDiff }),
-		filterCF(exprOnly, func(cf cfInfo) bool { return cf.hasRound || cf.hasDateDiff }),
-		filterCF(exprOnly, func(cf cfInfo) bool { return !cf.hasSum && !cf.hasCount && !cf.hasRound && !cf.hasDateDiff }),
-	}
-
-	for _, pass := range passes {
-		for _, cf := range pass {
-			if numeric.IsDecimalFieldtype(cf.field.Fieldtype) {
-				sexpr := cf.expr
-				if !strings.HasPrefix(sexpr, "(") {
-					sexpr = InfixToSExpr(sexpr)
-				}
-				if exact, ok := evalDecimalSExpr(sexpr, doc); ok {
-					doc.Set(cf.field.Fieldname, numeric.Number(exact))
-					continue
-				}
+	// Expression fields run after the computed fields they read, so a chain such as
+	// total = subtotal and base_total = total * rate settles in one pass.
+	for _, cf := range computeOrder(exprOnly) {
+		if numeric.IsDecimalFieldtype(cf.field.Fieldtype) {
+			sexpr := cf.expr
+			if !strings.HasPrefix(sexpr, "(") {
+				sexpr = InfixToSExpr(sexpr)
 			}
-			val, err := evalComputedWithCtx(cf.expr, dt, doc, sandbox)
-			if err != nil {
-				slog.Warn("computed field evaluation failed", "field", cf.field.Fieldname, "expr", cf.expr, "error", err)
+			if exact, ok := evalDecimalSExpr(sexpr, doc); ok {
+				doc.Set(cf.field.Fieldname, numeric.Number(exact))
 				continue
 			}
-			doc.Set(cf.field.Fieldname, val)
 		}
+		val, err := evalComputedWithCtx(cf.expr, dt, doc, sandbox)
+		if err != nil {
+			slog.Warn("computed field evaluation failed", "field", cf.field.Fieldname, "expr", cf.expr, "error", err)
+			continue
+		}
+		doc.Set(cf.field.Fieldname, val)
 	}
 
 	return nil
+}
+
+// identPattern matches a bare identifier in an expression.
+var identPattern = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
+
+// computeOrder orders expression fields so each comes after the computed fields its
+// expression reads. Among the ready fields the earliest declared goes first; a field
+// in a cycle is taken in declaration order once nothing else is ready.
+func computeOrder(fields []cfInfo) []cfInfo {
+	index := make(map[string]int, len(fields))
+	for i, cf := range fields {
+		index[cf.field.Fieldname] = i
+	}
+	deps := make([][]int, len(fields))
+	for i, cf := range fields {
+		for _, loc := range identPattern.FindAllStringIndex(cf.expr, -1) {
+			if loc[0] > 0 && cf.expr[loc[0]-1] == '.' {
+				continue // a child-table column such as items.line_total
+			}
+			if j, ok := index[cf.expr[loc[0]:loc[1]]]; ok && j != i {
+				deps[i] = append(deps[i], j)
+			}
+		}
+	}
+	done := make([]bool, len(fields))
+	ordered := make([]cfInfo, 0, len(fields))
+	for len(ordered) < len(fields) {
+		next := nextComputeField(deps, done)
+		done[next] = true
+		ordered = append(ordered, fields[next])
+	}
+	return ordered
+}
+
+// nextComputeField returns the earliest unfinished field whose inputs are finished, or
+// the earliest unfinished field when every remaining field waits on another (a cycle).
+func nextComputeField(deps [][]int, done []bool) int {
+	first := -1
+	for i := range deps {
+		if done[i] {
+			continue
+		}
+		if first < 0 {
+			first = i
+		}
+		ready := true
+		for _, j := range deps[i] {
+			if !done[j] {
+				ready = false
+				break
+			}
+		}
+		if ready {
+			return i
+		}
+	}
+	return first
 }
 
 func filterCF(items []cfInfo, fn func(cfInfo) bool) []cfInfo {

@@ -1052,9 +1052,9 @@
    "cognitive": 21
   },
   "internal/doctype::ComputeFieldsWithHook": {
-   "cognitive": 46,
-   "cyclomatic": 29,
-   "statements": 52
+   "cognitive": 36,
+   "cyclomatic": 21,
+   "statements": 45
   },
   "internal/doctype::ConvertConfigChanges": {
    "cognitive": 25,
@@ -1779,9 +1779,8 @@
    "statements": 46
   },
   "internal/orm::insertChildrenBatch": {
-   "cognitive": 32,
-   "cyclomatic": 18,
-   "statements": 43
+   "cognitive": 27,
+   "cyclomatic": 16
   },
   "internal/orm::normalizeSQLValue": {
    "cognitive": 21
