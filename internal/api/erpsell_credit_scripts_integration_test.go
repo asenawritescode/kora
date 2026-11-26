@@ -235,6 +235,27 @@ func TestPackScriptsSellingCredit(t *testing.T) {
 			creditMoney(f, "Customer", customer, "outstanding_balance", 200)
 		})
 
+		f.run("a draft entered as Awaiting Payment becomes a credit sale and owes its customer", func(f *packFixture) {
+			customer, product := creditSeed(f)
+			sale := f.create("Sale", creditSaleBody("Draft", customer, product, 3, 100, nil))
+			creditFlag(f, "Sale", sale, "on_credit", false)
+			creditMoney(f, "Customer", customer, "outstanding_balance", 0)
+			f.update("Sale", sale, `{"status":"Awaiting Payment"}`)
+			creditFlag(f, "Sale", sale, "on_credit", true)
+			creditMoney(f, "Sale", sale, "base_outstanding", 300)
+			creditMoney(f, "Customer", customer, "outstanding_balance", 300)
+			f.create("Payment", creditPaymentBody(sale, "Received", 100, nil))
+			f.expect("Sale", sale, "status", "Partially Paid")
+			creditMoney(f, "Customer", customer, "outstanding_balance", 200)
+		})
+
+		f.run("a draft cannot become a credit sale without a customer", func(f *packFixture) {
+			_, product := creditSeed(f)
+			sale := f.create("Sale", creditSaleBody("Draft", "", product, 3, 100, nil))
+			f.refused(httpMethodPut, "Sale", sale, `{"status":"Awaiting Payment"}`, "A sale on credit needs a customer.")
+			creditFlag(f, "Sale", sale, "on_credit", false)
+		})
+
 		f.run("a payment on a register sale changes nothing", func(f *packFixture) {
 			customer, product := creditSeed(f)
 			sale := f.create("Sale", creditSaleBody("Paid", customer, product, 3, 100, map[string]any{

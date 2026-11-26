@@ -11,7 +11,8 @@ function money(value) {
 }
 
 // lineTotal is what one sale line charges: quantity times price, less its discount, plus tax.
-// The engine stores line totals after this script runs on a new sale, so the total is worked out here.
+// The engine stores line totals after this script runs on a new sale, so the total is worked out
+// here until the engine derives child fields before before_save (#824, DERIVE-CHILDREN).
 function lineTotal(line) {
   return money(Number(line.quantity || 0) * Number(line.unit_price || 0) -
     Number(line.discount_amount || 0) + Number(line.tax_amount || 0));
@@ -49,8 +50,15 @@ function adjustCustomer(name, delta) {
 var ref = doc.reference || doc.name || "This sale";
 var customer = String(doc.customer || "");
 
+// A sale becomes a credit sale when a person enters it as Awaiting Payment and it has no
+// Sale Payment lines (those are register sales). That happens on create, or when a Draft
+// is entered as Awaiting Payment.
+function entersCredit(sale) {
+  return sale.status === "Awaiting Payment" && (sale.payments || []).length === 0;
+}
+
 if (!oldDoc) {
-  doc.on_credit = doc.status === "Awaiting Payment" ? 1 : 0;
+  doc.on_credit = entersCredit(doc) ? 1 : 0;
   if (doc.on_credit === 1) {
     doc.base_amount_paid = 0;
   } else if (doc.status === "Paid" || doc.status === "Return") {
@@ -61,9 +69,13 @@ if (!oldDoc) {
 }
 
 var credit = Number(oldDoc.on_credit || 0) === 1;
+var enters = !credit && oldDoc.status === "Draft" && entersCredit(doc);
 var paidBefore = money(oldDoc.base_amount_paid);
 var statusChanged = doc.status !== oldDoc.status;
-doc.on_credit = credit ? 1 : 0;
+doc.on_credit = credit || enters ? 1 : 0;
+if (enters) {
+  doc.base_amount_paid = 0;
+}
 
 if (credit) {
   // Only the payment script changes base_amount_paid, in the same save as the status.
