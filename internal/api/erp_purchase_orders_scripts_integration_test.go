@@ -133,6 +133,35 @@ func TestPackScriptsPurchaseOrders(t *testing.T) {
 			f.refused(httpMethodPut, "Purchase Order", po12, `{"status":"Draft"}`, "PO-12 cannot change from Partly Received to Draft.")
 			f.expect("Purchase Order", po12, "status", "Partly Received")
 		})
+		f.run("a line's quantity cannot go below what it received; an increase is allowed", func(f *packFixture) {
+			po20 := order("PO-20", "Ordered", orderLine(flour, "10"))
+			f.create("Goods Receipt", receiptBody("GR-20", po20, supplier, receiptLine(flour, "5")))
+			row := orderLines(f, po20)[0]
+			change := func(quantity string) string {
+				return `{"items":[{"name":"` + row.name + `","product":"` + flour + `","quantity":` + quantity + `,"unit_cost":2}]}`
+			}
+			f.refused(httpMethodPut, "Purchase Order", po20, change("4"), "cannot go below the 5 received.")
+			f.update("Purchase Order", po20, change("12"))
+			if lines := orderLines(f, po20); len(lines) != 1 || lines[0].quantity != 12 || lines[0].received != 5 {
+				f.t.Fatalf("lines = %+v, want quantity 12 with 5 received", lines)
+			}
+			f.expect("Purchase Order", po20, "status", "Partly Received")
+		})
+		f.run("a buyer's edit of received quantities has no effect and cannot set Received", func(f *packFixture) {
+			buyer := f.as("Buyer")
+			po21 := order("PO-21", "Ordered", orderLine(flour, "4"))
+			row := orderLines(f, po21)[0]
+			forged := `{"name":"` + row.name + `","product":"` + flour + `","quantity":4,"unit_cost":2,"received_qty":4}`
+			buyer.update("Purchase Order", po21, `{"items":[`+forged+`]}`)
+			if lines := orderLines(f, po21); len(lines) != 1 || lines[0].received != 0 {
+				f.t.Fatalf("lines = %+v, want nothing received after a forged edit", lines)
+			}
+			buyer.refused(httpMethodPut, "Purchase Order", po21, `{"status":"Received","items":[`+forged+`]}`, "An order is received through goods receipts.")
+			f.expect("Purchase Order", po21, "status", "Ordered")
+			if got := orderLines(f, po21)[0].received; got != 0 {
+				f.t.Fatalf("received = %v after refused forged edit, want 0", got)
+			}
+		})
 		f.run("a product change on an order with goods received is refused", func(f *packFixture) {
 			po13 := order("PO-13", "Ordered", orderLine(flour, "10"))
 			f.create("Goods Receipt", receiptBody("GR-13", po13, supplier, receiptLine(flour, "5")))
@@ -215,6 +244,7 @@ func TestPackScriptsPurchaseOrders(t *testing.T) {
 
 // poLine is one line of an order as stored.
 type poLine struct {
+	name     string
 	product  string
 	quantity float64
 	received float64
@@ -224,7 +254,7 @@ type poLine struct {
 func orderLines(f *packFixture, po string) []poLine {
 	f.t.Helper()
 	dl := kdb.Resolve(f.dialect)
-	query := "SELECT product, quantity, received_qty FROM " + dl.QuoteIdent("tabPurchase Order__items") + " WHERE parent = ? ORDER BY idx"
+	query := "SELECT name, product, quantity, received_qty FROM " + dl.QuoteIdent("tabPurchase Order__items") + " WHERE parent = ? ORDER BY idx"
 	rows, err := f.db.Query(kdb.Rebind(dl, query), po)
 	if err != nil {
 		f.t.Fatalf("read order lines: %v", err)
@@ -232,11 +262,11 @@ func orderLines(f *packFixture, po string) []poLine {
 	defer rows.Close()
 	var out []poLine
 	for rows.Next() {
-		var product, quantity, received sql.NullString
-		if err := rows.Scan(&product, &quantity, &received); err != nil {
+		var name, product, quantity, received sql.NullString
+		if err := rows.Scan(&name, &product, &quantity, &received); err != nil {
 			f.t.Fatalf("scan order line: %v", err)
 		}
-		out = append(out, poLine{product: product.String, quantity: parseFloatOrZero(f, quantity.String), received: parseFloatOrZero(f, received.String)})
+		out = append(out, poLine{name: name.String, product: product.String, quantity: parseFloatOrZero(f, quantity.String), received: parseFloatOrZero(f, received.String)})
 	}
 	if err := rows.Err(); err != nil {
 		f.t.Fatalf("iterate order lines: %v", err)
