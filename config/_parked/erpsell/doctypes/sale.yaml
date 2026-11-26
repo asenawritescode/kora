@@ -1,5 +1,6 @@
 name: Sale
 module: Selling
+naming_series: SALE-.YYYY.-.#####
 quantity_effect:
   target_doctype: Product
   target_quantity_field: stock_qty
