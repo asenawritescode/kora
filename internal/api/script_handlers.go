@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -382,4 +383,15 @@ func containsIgnoreCase(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// executeWithLibraries loads the site's library scripts into the request and runs it.
+// A failed library read fails the run like a failed script.
+func executeWithLibraries(ctx context.Context, runner script.Runner, store *script.Store, req script.ExecuteRequest) (*script.ExecuteResult, error) {
+	libraries, err := store.LoadLibraries(ctx, req.Site)
+	if err != nil {
+		return nil, err
+	}
+	req.Libraries = libraries
+	return runner.Execute(ctx, req)
 }

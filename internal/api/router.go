@@ -1682,7 +1682,7 @@ func (h *Handler) HandleMethod(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(rec.TimeoutMs)*time.Millisecond)
 	defer cancel()
 
-	result, err := h.ScriptRunner.Execute(ctx, execReq)
+	result, err := executeWithLibraries(ctx, h.ScriptRunner, store, execReq)
 	durationMs := 0
 	if result != nil {
 		durationMs = int(result.Duration.Milliseconds())

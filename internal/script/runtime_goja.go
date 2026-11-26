@@ -210,8 +210,7 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 				err = fmt.Errorf("script: runtime panic: %v", rec)
 			}
 		}()
-		script := r.wrapScript(req)
-		val, err = vm.RunString(script)
+		val, err = runWithLibraries(vm, req.Libraries, r.wrapScript(req))
 	}()
 	duration := time.Since(start)
 
@@ -247,6 +246,26 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 	}
 
 	return result, nil
+}
+
+// runWithLibraries evaluates the libraries, then the wrapped script, in one VM.
+func runWithLibraries(vm *goja.Runtime, libraries []Library, script string) (goja.Value, error) {
+	if err := runLibraries(vm, libraries); err != nil {
+		return nil, err
+	}
+	return vm.RunString(script)
+}
+
+// runLibraries evaluates each library at global scope, in order, so the
+// declarations it makes are visible to the script that follows. A library that
+// throws fails the run with its name in the error.
+func runLibraries(vm *goja.Runtime, libraries []Library) error {
+	for _, lib := range libraries {
+		if _, err := vm.RunString(lib.Source); err != nil {
+			return fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+		}
+	}
+	return nil
 }
 
 // wrapScript wraps the user's script in an async IIFE with the kora API injected.

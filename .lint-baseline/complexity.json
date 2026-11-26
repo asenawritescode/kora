@@ -1734,16 +1734,13 @@
    "cognitive": 48,
    "cyclomatic": 36
   },
-  "internal/orm::(*TxManager).computedScriptHook": {
-   "cognitive": 33
-  },
   "internal/orm::(*TxManager).rowScopePredicate": {
    "cognitive": 22,
    "cyclomatic": 20
   },
   "internal/orm::(*TxManager).runHooks": {
-   "cognitive": 90,
-   "cyclomatic": 54
+   "cognitive": 89,
+   "cyclomatic": 52
   },
   "internal/orm::(*TxManager).selectLifecycleScripts": {
    "cognitive": 22,
@@ -2258,8 +2255,8 @@
    "cyclomatic": 36
   },
   "internal/site::(packResourceNames).add": {
-   "cognitive": 37,
-   "cyclomatic": 28
+   "cognitive": 35,
+   "cyclomatic": 27
   },
   "internal/site::BootstrapSystemTables": {
    "cognitive": 91,
@@ -2336,7 +2333,7 @@
    "statements": 67
   },
   "internal/site::add": {
-   "statements": 65
+   "statements": 62
   },
   "internal/site::addPackCommands": {
    "cognitive": 22,
@@ -2380,9 +2377,9 @@
    "cyclomatic": 16
   },
   "internal/site::parseConfigPack": {
-   "cognitive": 81,
-   "cyclomatic": 54,
-   "statements": 113
+   "cognitive": 78,
+   "cyclomatic": 53,
+   "statements": 108
   },
   "internal/site::parsePackSnapshot": {
    "cognitive": 17,

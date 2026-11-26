@@ -159,8 +159,9 @@ func extensibilityScriptTables(dialect string) []string {
 }
 
 // installPackScripts stores every scripts/<DocType>/<event>.js of a pack as an active
-// document-event script, the rows the Engine writes when a pack is activated. A pack
-// without a scripts directory installs nothing.
+// document-event script, and every scripts/lib/<name>.js as an active library, the rows
+// the Engine writes when a pack is activated. A pack without a scripts directory
+// installs nothing.
 func installPackScripts(t *testing.T, store *script.Store, site, root string) {
 	t.Helper()
 	if _, err := os.Stat(root); errors.Is(err, fs.ErrNotExist) {
@@ -180,6 +181,12 @@ func installPackScripts(t *testing.T, store *script.Store, site, root string) {
 		}
 		doctypeName := filepath.Dir(rel)
 		event := strings.TrimSuffix(filepath.Base(rel), ".js")
+		if doctypeName == "lib" {
+			return store.Insert(script.Record{
+				Name: "lib_" + event, Site: site, ScriptType: script.TypeLibrary, IsActive: true,
+				Script: string(body), TimeoutMs: 5000, CreatedBy: "pack", UpdatedBy: "pack",
+			})
+		}
 		return store.Insert(script.Record{
 			Name: doctypeName + " " + event, Site: site, ScriptType: script.TypeDocEvent,
 			DocType: doctypeName, Event: script.Event(event), IsActive: true,

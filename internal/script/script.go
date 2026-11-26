@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,6 +22,9 @@ const (
 	TypeDocEvent  Type = "doc_event"
 	TypeAPIMethod Type = "api_method"
 	TypeScheduled Type = "scheduled"
+	// TypeLibrary is shared code evaluated at global scope before the other
+	// scripts of its site run. It has no doctype or event and never runs alone.
+	TypeLibrary Type = "library"
 )
 
 // Event is the lifecycle hook point.
@@ -44,6 +48,12 @@ const (
 	EventPayment Event = "payment"
 )
 
+// Library is a shared script that loads ahead of the scripts that call it.
+type Library struct {
+	Name   string
+	Source string
+}
+
 // ExecuteRequest carries all context for a single script execution.
 type ExecuteRequest struct {
 	Script        string         // JavaScript source
@@ -58,6 +68,7 @@ type ExecuteRequest struct {
 	Site          string         // site hostname
 	Timeout       time.Duration  // per-execution timeout
 	Deterministic bool           // disables wall-clock and random JS sources
+	Libraries     []Library      // active library scripts of the site, in load order
 
 	// Provider bridges the JS runtime to the Kigae engine.
 	// If nil, kora.getDoc/kora.saveDoc etc. return safe defaults.
@@ -212,7 +223,7 @@ func (t *scriptTimestamp) parse(value string) error {
 
 // LoadActiveScripts returns all active scripts for a site, filtered by optional doctype+event.
 func (s *Store) LoadActiveScripts(site string, doctype string, event Event) ([]Record, error) {
-	return s.loadActiveScripts(context.Background(), s.DB, site, doctype, event)
+	return s.loadActiveScripts(context.Background(), s.DB, activeScriptFilter{site: site, scriptType: TypeDocEvent, doctype: doctype, event: event})
 }
 
 // LoadActiveScriptsTx selects lifecycle scripts through the caller's tenant
@@ -223,20 +234,56 @@ func (s *Store) LoadActiveScriptsTx(ctx context.Context, tx *sql.Tx, site string
 	if ctx == nil || tx == nil {
 		return nil, fmt.Errorf("script: transaction-bound load requires context and transaction")
 	}
-	return s.loadActiveScripts(ctx, tx, site, doctype, event)
+	return s.loadActiveScripts(ctx, tx, activeScriptFilter{site: site, scriptType: TypeDocEvent, doctype: doctype, event: event})
+}
+
+// LoadLibraries returns the site's active library scripts ordered by name.
+func (s *Store) LoadLibraries(ctx context.Context, site string) ([]Library, error) {
+	return s.loadLibraries(ctx, s.DB, site)
+}
+
+// LoadLibrariesTx selects library scripts through the caller's tenant transaction.
+func (s *Store) LoadLibrariesTx(ctx context.Context, tx *sql.Tx, site string) ([]Library, error) {
+	if ctx == nil || tx == nil {
+		return nil, fmt.Errorf("script: transaction-bound library load requires context and transaction")
+	}
+	return s.loadLibraries(ctx, tx, site)
+}
+
+func (s *Store) loadLibraries(ctx context.Context, queryer activeScriptQueryer, site string) ([]Library, error) {
+	records, err := s.loadActiveScripts(ctx, queryer, activeScriptFilter{site: site, scriptType: TypeLibrary})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].Name < records[j].Name })
+	libraries := make([]Library, 0, len(records))
+	for _, r := range records {
+		libraries = append(libraries, Library{Name: r.Name, Source: r.Script})
+	}
+	return libraries, nil
 }
 
 type activeScriptQueryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-func (s *Store) loadActiveScripts(ctx context.Context, queryer activeScriptQueryer, site string, doctype string, event Event) ([]Record, error) {
+// activeScriptFilter selects the active scripts of one site. Empty doctype or event
+// leaves that column unfiltered.
+type activeScriptFilter struct {
+	site       string
+	scriptType Type
+	doctype    string
+	event      Event
+}
+
+func (s *Store) loadActiveScripts(ctx context.Context, queryer activeScriptQueryer, filter activeScriptFilter) ([]Record, error) {
+	site, scriptType, doctype, event := filter.site, filter.scriptType, filter.doctype, filter.event
 	query := `SELECT name, site, script_type, doctype, event, method_path, schedule,
 		priority, is_active, run_as, timeout_ms, script, compiled_at, compile_error,
 		created_by, updated_by, creation, modified
 		FROM _kora_script
 		WHERE site = ? AND is_active = ? AND script_type = ?`
-	args := []any{site, true, string(TypeDocEvent)}
+	args := []any{site, true, string(scriptType)}
 
 	if doctype != "" {
 		query += " AND doctype = ?"

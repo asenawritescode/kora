@@ -189,7 +189,7 @@ func processOneDurableLifecycleHook(ctx context.Context, w *lifecycleHookPass) (
 	}
 	record := invocation.Record
 	started := time.Now()
-	result, runErr := executeDurableLifecycleHookSafely(w.Runner, callCtx, script.ExecuteRequest{
+	result, runErr := w.executeWithLibraries(callCtx, execTx, script.ExecuteRequest{
 		Script: record.Script, ScriptType: record.ScriptType, ScriptName: record.Name,
 		DocType: invocation.Doctype, Event: invocation.Event, Document: document,
 		OldDocument: oldDocument, User: user, UserRoles: append([]string(nil), actor.Roles...),
@@ -234,6 +234,17 @@ func processOneDurableLifecycleHook(ctx context.Context, w *lifecycleHookPass) (
 	tm.PostCommitHooks = nil
 	w.logExecution(invocation, user, duration, "success", "")
 	return true, nil
+}
+
+// executeWithLibraries loads the site's libraries through the hook's transaction,
+// then runs the hook.
+func (w *LifecycleHookWorker) executeWithLibraries(ctx context.Context, tx *sql.Tx, req script.ExecuteRequest) (*script.ExecuteResult, error) {
+	libraries, err := w.Store.LoadLibrariesTx(ctx, tx, w.Site)
+	if err != nil {
+		return nil, err
+	}
+	req.Libraries = libraries
+	return executeDurableLifecycleHookSafely(w.Runner, ctx, req)
 }
 
 func executeDurableLifecycleHookSafely(runner script.Runner, ctx context.Context, request script.ExecuteRequest) (result *script.ExecuteResult, err error) {
