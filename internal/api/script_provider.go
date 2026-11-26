@@ -93,6 +93,12 @@ func (p *scriptProvider) GetDoc(doctypeName, name string) (map[string]any, error
 	return projectScriptReadDocument(dt, p.registry, doc.ToMap()), nil
 }
 
+// HasDocType reports whether the record type is installed in the tenant registry.
+// It needs no permission: it reveals only that the type name exists.
+func (p *scriptProvider) HasDocType(name string) bool {
+	return p.registry.Get(name) != nil
+}
+
 // GetList fetches documents with optional filters, ordering, and pagination.
 func (p *scriptProvider) GetList(doctypeName string, filters map[string]any, orderBy string, limit, offset int) ([]map[string]any, error) {
 	dt := p.registry.Get(doctypeName)

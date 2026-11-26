@@ -1723,8 +1723,8 @@
    "cyclomatic": 56
   },
   "internal/orm::(*TxManager).InsertInTx": {
-   "cognitive": 43,
-   "cyclomatic": 25
+   "cognitive": 41,
+   "cyclomatic": 24
   },
   "internal/orm::(*TxManager).MatchingNamesLocked": {
    "cognitive": 18,
@@ -1763,7 +1763,7 @@
    "statements": 94
   },
   "internal/orm::InsertInTx": {
-   "statements": 70
+   "statements": 66
   },
   "internal/orm::SaveInTxWithScope": {
    "statements": 73
@@ -2201,8 +2201,8 @@
    "cyclomatic": 17
   },
   "internal/script::(*koraAPI).buildObject": {
-   "cognitive": 70,
-   "cyclomatic": 34
+   "cognitive": 47,
+   "cyclomatic": 24
   },
   "internal/script::ClaimAsyncHooks": {
    "statements": 60
@@ -2218,7 +2218,7 @@
    "statements": 54
   },
   "internal/script::buildObject": {
-   "lines": 197
+   "lines": 142
   },
   "internal/site::(*CommonConfig).ApplyEnvOverrides": {
    "cognitive": 23,

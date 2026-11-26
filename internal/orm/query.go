@@ -324,9 +324,13 @@ func (w wakingWriter) Append(ctx context.Context, dbTx *sql.Tx, event contract.E
 	return nil
 }
 
-// PrepareInsert runs the before_insert and before_save lifecycle hooks. It is
-// used by kernel transactions so hooks run once.
-func (tx *TxManager) PrepareInsert(dt *doctype.DocType, doc *doctype.Document) error {
+// PrepareInsert runs the before_insert and before_save lifecycle hooks inside
+// dbTx. It is used by kernel transactions so hooks run once. A record whose name
+// does not read its fields is numbered first, so the hooks see doc.Name.
+func (tx *TxManager) PrepareInsert(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Document) error {
+	if err := tx.allocateEarlyName(dbTx, dt, doc); err != nil {
+		return err
+	}
 	if err := tx.runHooks(dt, script.EventBeforeInsert, doc, nil); err != nil {
 		return err
 	}
@@ -340,6 +344,24 @@ func (tx *TxManager) CompleteInsert(dt *doctype.DocType, doc *doctype.Document) 
 	_ = tx.runHooks(dt, script.EventAfterSave, doc, nil)
 }
 
+// documentIndex returns the idx of a new record and names it when it has no
+// name yet. A name numbered before the before hooks ran (allocateEarlyName)
+// keeps its counter.
+func (tx *TxManager) documentIndex(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Document) (int, error) {
+	if doc.Name != "" {
+		if doc.SeriesNumber > 0 {
+			return int(doc.SeriesNumber), nil
+		}
+		return 1, nil
+	}
+	name, allocated, err := AllocateDocumentName(dbTx, tx.Dialect, dt, doc.Fields, time.Now().UTC())
+	if err != nil {
+		return 0, err
+	}
+	doc.Name = name
+	return int(allocated), nil
+}
+
 // InsertInTx persists a new business record inside the operation kernel's
 // transaction. It never begins or commits a transaction; the kernel owns the
 // business write together with its receipt, audit row, and outbox events.
@@ -350,14 +372,9 @@ func (tx *TxManager) InsertInTx(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.
 	if err := tx.validateEntityReferences(dbTx, dt, doc); err != nil {
 		return err
 	}
-	nextNum := 1
-	if doc.Name == "" {
-		name, allocated, err := AllocateDocumentName(dbTx, tx.Dialect, dt, doc.Fields, time.Now().UTC())
-		if err != nil {
-			return err
-		}
-		nextNum = int(allocated)
-		doc.Name = name
+	nextNum, err := tx.documentIndex(dbTx, dt, doc)
+	if err != nil {
+		return err
 	}
 
 	// Match the precision persisted by the supported SQL dialects so the

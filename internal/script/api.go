@@ -65,6 +65,9 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 		return vm.ToValue(jsValue(doc))
 	})
 
+	// kora.hasDocType(doctype) → boolean; reveals only whether the record type is installed
+	obj.Set("hasDocType", func(call goja.FunctionCall) goja.Value { return api.hasDocType(vm, call) })
+
 	// kora.getList(doctype, {filters, orderBy, limit, offset}) → array
 	obj.Set("getList", func(call goja.FunctionCall) goja.Value {
 		if api.docProvider == nil {
@@ -166,7 +169,13 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 	})
 	obj.Set("secrets", secretsObj)
 
-	// kora.http — external HTTP requests
+	obj.Set("http", api.httpObject(vm))
+
+	return obj
+}
+
+// httpObject builds the kora.http global: outbound requests through the HTTP provider.
+func (api *koraAPI) httpObject(vm *goja.Runtime) goja.Value {
 	httpObj := vm.NewObject()
 	httpObj.Set("fetch", func(call goja.FunctionCall) goja.Value {
 		if api.httpProvider == nil {
@@ -202,35 +211,49 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 			panic(vm.ToValue(fmt.Sprintf("kora.http.fetch error: %v", err)))
 		}
 
-		// Return a response-like object.
-		respObj := vm.NewObject()
-		respObj.Set("status", resp.Status)
-		respObj.Set("statusText", resp.StatusText)
-		respObj.Set("ok", resp.Status >= 200 && resp.Status < 300)
-		respObj.Set("body", string(resp.Body))
-
-		// json() method
-		respObj.Set("json", func() goja.Value {
-			// Simple JSON parse — for production, use a proper parser.
-			// The caller should catch errors if the body isn't valid JSON.
-			val, err := vm.RunString("JSON.parse")
-			if err != nil {
-				panic(vm.ToValue("failed to parse JSON"))
-			}
-			if fn, ok := goja.AssertFunction(val); ok {
-				result, err := fn(goja.Undefined(), vm.ToValue(string(resp.Body)))
-				if err != nil {
-					panic(vm.ToValue("JSON parse error: " + err.Error()))
-				}
-				return result
-			}
-			return goja.Null()
-		})
-		return respObj
+		return api.httpResponseObject(vm, resp)
 	})
-	obj.Set("http", httpObj)
+	return httpObj
+}
 
-	return obj
+// httpResponseObject wraps an outbound response as the object scripts receive from kora.http.fetch.
+func (api *koraAPI) httpResponseObject(vm *goja.Runtime, resp *HTTPResponse) goja.Value {
+	respObj := vm.NewObject()
+	respObj.Set("status", resp.Status)
+	respObj.Set("statusText", resp.StatusText)
+	respObj.Set("ok", resp.Status >= 200 && resp.Status < 300)
+	respObj.Set("body", string(resp.Body))
+
+	// json() method
+	respObj.Set("json", func() goja.Value {
+		// Simple JSON parse — for production, use a proper parser.
+		// The caller should catch errors if the body isn't valid JSON.
+		val, err := vm.RunString("JSON.parse")
+		if err != nil {
+			panic(vm.ToValue("failed to parse JSON"))
+		}
+		if fn, ok := goja.AssertFunction(val); ok {
+			result, err := fn(goja.Undefined(), vm.ToValue(string(resp.Body)))
+			if err != nil {
+				panic(vm.ToValue("JSON parse error: " + err.Error()))
+			}
+			return result
+		}
+		return goja.Null()
+	})
+	return respObj
+}
+
+// hasDocType answers kora.hasDocType(doctype). Without a DocTypeChecker provider it is false.
+func (api *koraAPI) hasDocType(vm *goja.Runtime, call goja.FunctionCall) goja.Value {
+	if len(call.Arguments) < 1 {
+		panic(vm.ToValue("kora.hasDocType requires 1 argument: doctype"))
+	}
+	checker, ok := api.docProvider.(DocTypeChecker)
+	if !ok {
+		return vm.ToValue(false)
+	}
+	return vm.ToValue(checker.HasDocType(call.Arguments[0].String()))
 }
 
 func (api *koraAPI) log(level string, call goja.FunctionCall) {

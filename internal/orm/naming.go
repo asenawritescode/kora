@@ -45,6 +45,33 @@ func AllocateDocumentName(dbTx *sql.Tx, dialect db.Dialect, dt *doctype.DocType,
 	return series.Format(prefix, n), n, nil
 }
 
+// allocateEarlyName numbers a new record before its before hooks run, when its
+// name does not read document fields, so the hooks see doc.Name. A name that
+// reads a field keeps its numbering after the hooks, so a hook may still set
+// that field. The allocation runs in dbTx: a refused save rolls it back.
+func (tx *TxManager) allocateEarlyName(dbTx *sql.Tx, dt *doctype.DocType, doc *doctype.Document) error {
+	if doc.Name != "" || !nameIndependentOfFields(dt) {
+		return nil
+	}
+	name, n, err := AllocateDocumentName(dbTx, tx.Dialect, dt, doc.Fields, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	doc.Name = name
+	doc.SeriesNumber = n
+	return nil
+}
+
+// nameIndependentOfFields reports whether a record's name is known without its
+// fields. An unparsable series is reported when the name is allocated, as before.
+func nameIndependentOfFields(dt *doctype.DocType) bool {
+	if dt.NamingSeries == "" {
+		return true
+	}
+	series, err := doctype.ParseNamingSeries(dt.NamingSeries)
+	return err == nil && !series.UsesFields()
+}
+
 // DocumentValues decodes a JSON payload for naming-series field tokens.
 func DocumentValues(raw json.RawMessage) map[string]any {
 	values := map[string]any{}

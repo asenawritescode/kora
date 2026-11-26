@@ -94,11 +94,12 @@ func TestSavedRecordOutboxRowPublishedPromptly(t *testing.T) {
 				Outbox: outbox.NewSQLWriter(d), OutboxWake: wake}
 			doc := doctype.NewDocument("Visit")
 			doc.Set("code", "V-1")
-			if err := tx.PrepareInsert(dt, doc); err != nil {
-				t.Fatal(err)
-			}
 			dbTx, err := conn.BeginTx(ctx, nil)
 			if err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.PrepareInsert(dbTx, dt, doc); err != nil {
+				_ = dbTx.Rollback()
 				t.Fatal(err)
 			}
 			if err := tx.InsertInTx(dbTx, dt, doc, "u1", "u1"); err != nil {

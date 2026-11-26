@@ -90,9 +90,6 @@ func insertVisitForZone(t *testing.T, conn *sql.DB, d kdb.Dialect, reg *doctype.
 	tx := &TxManager{DB: conn, Registry: reg, Dialect: d, SiteName: site}
 	doc := doctype.NewDocument("Visit")
 	doc.Set("code", code)
-	if err := tx.PrepareInsert(dt, doc); err != nil {
-		t.Fatal(err)
-	}
 	if err := insertDoc(conn, tx, dt, doc); err != nil {
 		t.Fatal(err)
 	}
@@ -108,6 +105,10 @@ func insertVisitForZone(t *testing.T, conn *sql.DB, d kdb.Dialect, reg *doctype.
 func insertDoc(conn *sql.DB, tx *TxManager, dt *doctype.DocType, doc *doctype.Document) error {
 	dbTx, err := conn.BeginTx(context.Background(), nil)
 	if err != nil {
+		return err
+	}
+	if err := tx.PrepareInsert(dbTx, dt, doc); err != nil {
+		_ = dbTx.Rollback()
 		return err
 	}
 	if err := tx.InsertInTx(dbTx, dt, doc, "u1", "u1"); err != nil {

@@ -398,7 +398,7 @@ func (m *mutation) validateItem(ctx context.Context, b *bundle, i int, resolver 
 		return validationContractError(verrs)
 	}
 	if oldDoc == nil {
-		if err := txMgr.PrepareInsert(recordDT, doc); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
+		if err := txMgr.PrepareInsert(m.run.Tx, recordDT, doc); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
 			return contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
 		return nil

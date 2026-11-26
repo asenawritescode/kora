@@ -197,7 +197,7 @@ func (m *mutation) prepareCreate(ctx context.Context, data json.RawMessage) (*do
 	if verrs := validateOperationDocument(txMgr, dt, doc, m.run.Reg, check); verrs.HasErrors() { //nolint:contextcheck // the context travels in txMgr.Context
 		return nil, validationContractError(verrs)
 	}
-	if err := txMgr.PrepareInsert(dt, doc); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
+	if err := txMgr.PrepareInsert(m.run.Tx, dt, doc); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
 		return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 	}
 	return doc, nil
