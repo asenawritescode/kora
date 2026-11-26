@@ -45,7 +45,7 @@ func TestERPPurchasingBuyToPayWorkflowOnMySQL(t *testing.T) {
 	}
 
 	supplier := create("Supplier", `{"supplier_name":"Dar Traders"}`)
-	order := create("Purchase Order", `{"reference":"PO-1","order_date":"2026-11-11","supplier":"`+supplier+`","items":[{"product":"PROD-001","quantity":10,"unit_cost":2}]}`)
+	order := create("Purchase Order", `{"reference":"PO-1","order_date":"2026-11-11","supplier":"`+supplier+`","status":"Ordered","items":[{"product":"PROD-001","quantity":10,"unit_cost":2}]}`)
 	var orderTotal float64
 	if err := db.QueryRow("SELECT total FROM `tabPurchase Order` WHERE name = ?", order).Scan(&orderTotal); err != nil || orderTotal != 20 {
 		t.Fatalf("order total = %v (%v), want 20", orderTotal, err)
@@ -54,7 +54,7 @@ func TestERPPurchasingBuyToPayWorkflowOnMySQL(t *testing.T) {
 		t.Fatalf("stock after only ordering = %v, want 0 (an order does not move stock)", got)
 	}
 
-	receipt := create("Goods Receipt", `{"reference":"GR-1","received_on":"2026-11-12","supplier":"`+supplier+`","purchase_order":"`+order+`","items":[{"product":"PROD-001","quantity":10}]}`)
+	receipt := create("Goods Receipt", `{"reference":"GR-1","received_on":"2026-11-12","supplier":"`+supplier+`","purchase_order":"`+order+`","items":[{"product":"PROD-001","quantity":10,"unit_cost":2}]}`)
 	if got := stock(); got != 10 {
 		t.Fatalf("stock after receiving 10 = %v, want 10", got)
 	}
