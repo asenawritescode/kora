@@ -212,6 +212,12 @@ func mapToFilterString(filters map[string]any) (string, error) {
 	return string(encoded), nil
 }
 
+// authorizeRead decides which rows a script read may see. Inside a document-event
+// (lifecycle) script the read belongs to the save the person is allowed to make, so
+// their role permissions and owner row scope do not filter it: a Clerk's Sale save
+// may read Accounts the Clerk cannot list. Module-owned types stay refused, entity-
+// owned business scope keeps its decision, and API-method and scheduled scripts (no
+// active hook) keep the person's permissions and row scope.
 func (p *scriptProvider) authorizeRead(dt *doctype.DocType) (policy.RowScope, error) {
 	if p == nil || p.tx == nil || p.registry == nil || dt == nil || !p.tx.Execution.Valid() {
 		return policy.RowScope{}, contract.NewError(contract.CodeUnauthenticated, "script record read requires verified execution identity")
@@ -222,6 +228,9 @@ func (p *scriptProvider) authorizeRead(dt *doctype.DocType) (policy.RowScope, er
 	actor := p.tx.Execution.Actor()
 	if actor.Site != p.site {
 		return policy.RowScope{}, contract.NewError(contract.CodePermissionDenied, "script provider tenant does not match verified execution")
+	}
+	if len(p.activeHooks) > 0 && dt.BusinessScopePolicy != contract.ScopeEntityOwned {
+		return policy.RowScope{Business: p.tx.BusinessScope}, nil
 	}
 	decision, err := policy.DecideForBusinessScope(p.tx.Execution, p.registry, dt.Name, "read", p.tx.BusinessScope, dt.BusinessScopePolicy == contract.ScopeEntityOwned)
 	if err != nil {
