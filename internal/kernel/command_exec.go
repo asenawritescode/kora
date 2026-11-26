@@ -533,7 +533,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 		step = resolved
 		switch {
 		case step.Reserve != nil:
-			outcome, reserveErr := k.execReserveStep(dbTx, reg, step, env, stepNames)
+			outcome, reserveErr := writes.reserve(reg, step, env, stepNames, len(outcomes))
 			if reserveErr != nil {
 				return nil, reserveErr
 			}
