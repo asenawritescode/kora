@@ -1729,8 +1729,8 @@
    "cyclomatic": 56
   },
   "internal/orm::(*TxManager).InsertInTx": {
-   "cognitive": 43,
-   "cyclomatic": 25
+   "cognitive": 41,
+   "cyclomatic": 24
   },
   "internal/orm::(*TxManager).MatchingNamesLocked": {
    "cognitive": 18,
@@ -1769,7 +1769,7 @@
    "statements": 94
   },
   "internal/orm::InsertInTx": {
-   "statements": 70
+   "statements": 66
   },
   "internal/orm::SaveInTxWithScope": {
    "statements": 88

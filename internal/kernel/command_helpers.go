@@ -107,7 +107,7 @@ func bindStepName(stepNames map[string]string, as, name string) {
 
 // prepareCreateDocument scopes, defaults, validates and prepares a document a
 // create step is about to insert.
-func prepareCreateDocument(txMgr *orm.TxManager, reg *doctype.Registry, op Operation, dt *doctype.DocType, doc *doctype.Document) *contract.Error {
+func prepareCreateDocument(txMgr *orm.TxManager, dbTx *sql.Tx, op Operation, dt *doctype.DocType, doc *doctype.Document) *contract.Error {
 	if err := dt.BindBusinessScope(doc, txMgr.BusinessScope, true, nil); err != nil {
 		return contract.NewError(contract.CodePermissionDenied, err.Error())
 	}
@@ -115,10 +115,10 @@ func prepareCreateDocument(txMgr *orm.TxManager, reg *doctype.Registry, op Opera
 	if err := txMgr.RunHooksForValidate(dt, doc, nil); err != nil {
 		return contract.NewError(contract.CodeValidationFailed, err.Error())
 	}
-	if verrs := validateOperationDocument(txMgr, dt, doc, reg, documentCheck{Old: nil, References: op.Context.BusinessReferenceValidator, Snapshots: op.Context.HistoricalSnapshotValidator}); verrs.HasErrors() { //nolint:contextcheck // the context travels in txMgr.Context
+	if verrs := validateOperationDocument(txMgr, dt, doc, txMgr.Registry, documentCheck{Old: nil, References: op.Context.BusinessReferenceValidator, Snapshots: op.Context.HistoricalSnapshotValidator}); verrs.HasErrors() { //nolint:contextcheck // the context travels in txMgr.Context
 		return validationContractError(verrs)
 	}
-	if err := txMgr.PrepareInsert(dt, doc); err != nil {
+	if err := txMgr.PrepareInsert(dbTx, dt, doc); err != nil {
 		return contract.NewError(contract.CodeValidationFailed, err.Error())
 	}
 	return nil
