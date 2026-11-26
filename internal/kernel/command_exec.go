@@ -549,7 +549,7 @@ func (k *Kernel) execDefinedCommand(ctx context.Context, run txRun, op Operation
 			if valueErr != nil {
 				return nil, valueErr
 			}
-			if prepErr := prepareCreateDocument(txMgr, reg, op, dt, doc); prepErr != nil { //nolint:contextcheck // the context travels in txMgr.Context
+			if prepErr := prepareCreateDocument(txMgr, dbTx, op, dt, doc); prepErr != nil { //nolint:contextcheck // the context travels in txMgr.Context
 				return nil, prepErr
 			}
 			if cerr := k.claimFirstWriteReceipt(dbTx, op, def, opID, len(outcomes)); cerr != nil {

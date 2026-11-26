@@ -94,7 +94,7 @@ func (k *Kernel) executeScriptMutationInTx(ctx context.Context, dbTx *sql.Tx, tx
 		if validation := validateOperationDocument(txMgr, dt, doc, txMgr.Registry, documentCheck{Old: nil, References: op.Context.BusinessReferenceValidator, Snapshots: op.Context.HistoricalSnapshotValidator}); validation.HasErrors() { //nolint:contextcheck // the context travels in txMgr.Context
 			return nil, validationContractError(validation)
 		}
-		if err := txMgr.PrepareInsert(dt, doc); err != nil {
+		if err := txMgr.PrepareInsert(dbTx, dt, doc); err != nil { //nolint:contextcheck // the context travels in txMgr.Context
 			return nil, contract.NewError(contract.CodeValidationFailed, err.Error())
 		}
 		afterHash := CanonicalDocHash(doc.Fields)

@@ -14,6 +14,10 @@ type Document struct {
 	IsNew     bool
 	DocStatus int
 	Revision  uint64
+	// SeriesNumber is the counter a generated name was issued before the
+	// record's before hooks ran; InsertInTx writes it to idx. Zero when the name
+	// was not numbered early.
+	SeriesNumber int64
 }
 
 // NewDocument creates a new empty document for the given DocType.
