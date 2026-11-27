@@ -174,7 +174,7 @@ func TestPackScriptsSellingPosting(t *testing.T) {
 			_, product := creditSeed(f)
 			draft := f.create("Sale", sellPostingSaleBody("Draft", "", product, 1, 100, 0, nil))
 			sellPostingNoEntry(f, "Sale", draft)
-			f.refused(httpMethodPut, "Sale", draft, `{"status":"Paid"}`, "add up to 0, not the sale total 100")
+			f.refused(httpMethodPut, "Sale", draft, `{"status":"Paid"}`, "needs its payment lines")
 			f.update("Sale", draft, `{"status":"Paid","payments":[{"method":"Cash","amount":100}]}`)
 			sellPostingEntry(f, "Sale", draft, "Sale")
 			f.update("Sale", draft, `{"status":"Paid"}`)

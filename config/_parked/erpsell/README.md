@@ -122,7 +122,7 @@ When the books (`erp-accounting`) are installed, each money event posts a balanc
 - Expense recorded: Dr Expenses, Cr the account it was paid from. Edits do not post again.
 - Cash in and float top-up: Dr Cash, Cr Cash Clearing. Cash out: the reverse. Safe drop posts nothing.
 
-A sale whose payment lines do not add up to its total is refused, and so is any entry the books' own rules refuse (a closed period, an inactive account).
+A sale marked paid with no payment lines, or whose payment lines do not add up to its total, is refused, and so is any entry the books' own rules refuse (a closed period, an inactive account).
 
 ## Checks
 
