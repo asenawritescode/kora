@@ -25,7 +25,7 @@ Standing rules for every agent ticket (source: the M1 tracker, #123). They overr
 - Push only to the `kora-upstream` remote. In the local clone, `origin` points at a different repo (kora-ui); never push there.
 - Never force-push. Never delete branches you did not create.
 - No attribution: never add `Co-authored-by` trailers, "Generated with" lines or any tool/agent credit to commits, PR or issue text, code comments or docs. Commits carry the repository owner's own identity only.
-- Never merge on a red or pending Go check, even when the failure looks unrelated.
+- Never merge on a red or pending `Go`, `Integration (MySQL)` or `Integration (Postgres)` check, even when the failure looks unrelated.
 - kora-ui merges also require the `contracts` check (lint ratchet: no new `any`, `react-refresh/only-export-components`, set-state-in-effect).
 - Never run the contract sync script with default paths; it writes into the user's real sibling clones. Point `KORA_PROJECTS_ROOT` at a scratch directory. After 3 failed fix rounds, comment the blocker on the ticket, label it `blocked`, close the PR.
 - PR title `<ticket-id>: <title>`, body ≤10 lines with `Closes #N`.
@@ -494,6 +494,8 @@ Pushing the tag starts the Release workflow:
 - Require status checks (`Go`) to pass
 - Block force pushes
 - Require linear history (rebase/squash, no merge commits)
+
+No ruleset or branch protection is configured on GitHub today; the merge rule in Agent Rules is enforced by process.
 
 ### Docker Release (Manual — not in CI yet)
 
