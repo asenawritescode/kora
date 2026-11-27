@@ -28,8 +28,8 @@ const countMismatchMessage = "Counted notes and coins don't add up to the total.
 // stored in their own child table, and a session without lines is not checked.
 func TestPOSCountDrawerAcrossDialects(t *testing.T) {
 	for _, tc := range []struct{ driver, env string }{
-		{"mysql", "KORA_POS_E2E_MYSQL_DSN"},
-		{"postgres", "KORA_POS_E2E_POSTGRES_DSN"},
+		{"mysql", "KORA_SITE_DISPOSABLE_MYSQL_DSN"},
+		{"postgres", "KORA_SITE_DISPOSABLE_POSTGRES_DSN"},
 	} {
 		t.Run(tc.driver, func(t *testing.T) {
 			dsn := os.Getenv(tc.env)

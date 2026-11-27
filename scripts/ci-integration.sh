@@ -72,7 +72,26 @@ case "$dialect" in
 esac
 
 failed=()
+# KORA_IT_SHARD=i/n (1-based i) runs only the packages whose 0-based position in the
+# sorted package list satisfies position % n == i-1. Unset: every package (local use).
+shard_index=""
+shard_count=""
+if [ -n "${KORA_IT_SHARD:-}" ]; then
+  if [[ ! "$KORA_IT_SHARD" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] || [ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]; then
+    echo "KORA_IT_SHARD must be i/n with 1 <= i <= n, got: $KORA_IT_SHARD" >&2
+    exit 2
+  fi
+  shard_index=$((BASH_REMATCH[1] - 1))
+  shard_count=${BASH_REMATCH[2]}
+fi
+
+failed=()
+position=-1
 while read -r pkg dir <&3; do
+  position=$((position + 1))
+  if [ -n "$shard_count" ] && [ $((position % shard_count)) -ne "$shard_index" ]; then
+    continue
+  fi
   if ! prepare_package "$dir"; then
     failed+=("$pkg (database setup)")
     continue
@@ -81,7 +100,7 @@ while read -r pkg dir <&3; do
   if ! go test -tags integration -count=1 -timeout 20m "$pkg" </dev/null; then
     failed+=("$pkg")
   fi
-done 3< <(go list -tags integration -f '{{.ImportPath}} {{.Dir}}' ./...)
+done 3< <(go list -tags integration -f '{{.ImportPath}} {{.Dir}}' ./... | sort)
 
 if [ "${#failed[@]}" -gt 0 ]; then
   printf 'Failed packages:\n'; printf '  %s\n' "${failed[@]}"
