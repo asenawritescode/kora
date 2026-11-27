@@ -3,6 +3,33 @@
 // product may exceed what is still due. The order's lines then take the quantities in line
 // order, and the order's status follows (the Purchase Order script).
 var doc = __kora_event__.doc;
+var oldDoc = __kora_event__.oldDoc;
+
+// booksReady is true only when the books (the lib_books library shipped by
+// erp-accounting) are loaded; purchasing posts to the books then, and saves
+// fine without them (nothing posts).
+function booksReady() {
+  return typeof booksInstalled === "function" && booksInstalled();
+}
+
+// A goods receipt brings stock in at its base value: Dr Inventory, Cr Goods
+// Received Not Billed (the holding account cleared when the supplier's bill posts).
+// Posted once, on receipt; the receipt is append-only.
+if (!oldDoc && booksReady()) {
+  // Worked out from the receipt's own lines (quantity x unit cost), so it does not
+  // wait on the engine deriving the receipt total.
+  var receiptCost = 0;
+  (doc.items || []).forEach(function (line) {
+    receiptCost = receiptCost + Number(line.quantity || 0) * Number(line.unit_cost || 0);
+  });
+  var grValue = postingMoney(receiptCost * Number(doc.exchange_rate || 1));
+  if (grValue !== 0) {
+    postEntry("Goods Receipt", doc.name, new Date().toISOString().slice(0, 10), "Goods receipt", [
+      { role: "Inventory", debit: grValue, credit: 0 },
+      { role: "Goods Received Not Billed", debit: 0, credit: grValue }
+    ]);
+  }
+}
 
 if (!doc.purchase_order) {
   return { doc: doc };

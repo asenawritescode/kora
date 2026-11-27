@@ -8,6 +8,13 @@ function money(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
+// booksReady is true only when the books (the lib_books library shipped by
+// erp-accounting) are loaded; purchasing posts to the books then, and saves
+// fine without them (nothing posts).
+function booksReady() {
+  return typeof booksInstalled === "function" && booksInstalled();
+}
+
 var paid = money(doc.amount_paid);
 var oldPaid = oldDoc ? money(oldDoc.amount_paid) : 0;
 var ref = doc.reference || doc.name || "This bill";
@@ -118,5 +125,24 @@ function checkOrder(doc, ref, receipt) {
 
 var receiptRecord = checkReceipt(doc, ref);
 checkOrder(doc, ref, receiptRecord);
+
+// The books: a recognized bill owes the supplier. A bill against a goods receipt
+// clears the receipt's holding account (Dr Goods Received Not Billed); a bill with
+// no receipt is an expense (Dr Expenses). Either way Cr Payable, in the base
+// currency. A cancelled (unpaid) bill reverses. Posted once, by posting role.
+if (booksReady()) {
+  var billBase = baseOf(doc.amount, doc.exchange_rate);
+  var recognized = doc.status === "Open" || doc.status === "Partly Paid" || doc.status === "Paid";
+  if (recognized && billBase !== 0) {
+    var debitRole = String(doc.goods_receipt || "") !== "" ? "Goods Received Not Billed" : "Expenses";
+    postEntry("Supplier Bill", doc.name, String(doc.bill_date || "").slice(0, 10), "Supplier bill", [
+      { role: debitRole, debit: billBase, credit: 0 },
+      { role: "Payable", debit: 0, credit: billBase }
+    ]);
+  }
+  if (doc.status === "Cancelled") {
+    reverseEntry("Supplier Bill", doc.name, "Supplier bill");
+  }
+}
 
 return { doc: doc };
