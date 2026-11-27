@@ -5,7 +5,9 @@ package qjs
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	_ "embed"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -84,6 +86,21 @@ func newRuntime(ctx context.Context, limits Limits) (wazero.Runtime, error) {
 	return rt, nil
 }
 
+// wasmPageBytes is the wasm linear-memory page size.
+const wasmPageBytes = 64 << 10
+
+// snapshotGlobals are the mutable wasm globals a snapshot must carry. The reactor keeps
+// its shadow stack pointer in a global, outside linear memory.
+var snapshotGlobals = []string{"__stack_pointer"}
+
+// Snapshot is the state of one initialised instance: its whole linear memory and the
+// mutable globals in snapshotGlobals. It is never mutated after Snapshot returns, so
+// any number of instances can be restored from it.
+type Snapshot struct {
+	memory  []byte
+	globals map[string]uint64
+}
+
 // Close releases the runtime and every instance it created.
 func (e *Engine) Close(ctx context.Context) error {
 	return e.rt.Close(ctx)
@@ -104,10 +121,9 @@ type Instance struct {
 // NewInstance creates a fresh QuickJS runtime with the engine's limits. It has no
 // handler yet: a host call made before SetHandler throws.
 func (e *Engine) NewInstance(ctx context.Context) (*Instance, error) {
-	cfg := wazero.NewModuleConfig().WithName("").WithSysWalltime().WithSysNanotime()
-	mod, err := e.rt.InstantiateModule(ctx, e.compiled, cfg)
+	mod, err := e.instantiate(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("instantiate: %w", err)
+		return nil, err
 	}
 	inst, err := initInstance(ctx, mod, e.limits)
 	if err != nil {
@@ -115,6 +131,16 @@ func (e *Engine) NewInstance(ctx context.Context) (*Instance, error) {
 		return nil, err
 	}
 	return inst, nil
+}
+
+// instantiate creates a wasm module instance from the compiled reactor, without running it.
+func (e *Engine) instantiate(ctx context.Context) (api.Module, error) {
+	cfg := wazero.NewModuleConfig().WithName("").WithSysWalltime().WithSysNanotime()
+	mod, err := e.rt.InstantiateModule(ctx, e.compiled, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("instantiate: %w", err)
+	}
+	return mod, nil
 }
 
 // initInstance resolves the reactor exports and runs QuickJS init under the limits.
@@ -125,6 +151,18 @@ func initInstance(ctx context.Context, mod api.Module, lim Limits) (*Instance, e
 			return nil, fmt.Errorf("_initialize: %w", err)
 		}
 	}
+	inst, err := bindInstance(mod)
+	if err != nil {
+		return nil, err
+	}
+	if err := runInit(ctx, mod, lim); err != nil {
+		return nil, err
+	}
+	return inst, nil
+}
+
+// bindInstance resolves the reactor exports an Instance calls.
+func bindInstance(mod api.Module) (*Instance, error) {
 	inst := &Instance{mod: mod}
 	exports := map[string]*api.Function{
 		"eval":           &inst.eval,
@@ -139,10 +177,96 @@ func initInstance(ctx context.Context, mod api.Module, lim Limits) (*Instance, e
 		}
 		*dst = fn
 	}
-	if err := runInit(ctx, mod, lim); err != nil {
+	return inst, nil
+}
+
+// Snapshot captures the instance's linear memory and snapshotGlobals. Take it from an
+// instance that has finished its setup and is idle; Restore resumes from it without
+// running init again.
+func (i *Instance) Snapshot() (*Snapshot, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	mem := i.mod.Memory()
+	view, ok := mem.Read(0, mem.Size())
+	if !ok {
+		return nil, errors.New("qjs: read guest memory for snapshot")
+	}
+	snap := &Snapshot{memory: bytes.Clone(view), globals: make(map[string]uint64, len(snapshotGlobals))}
+	for _, name := range snapshotGlobals {
+		g := i.mod.ExportedGlobal(name)
+		if g == nil {
+			return nil, fmt.Errorf("qjs: guest global %q is not exported", name)
+		}
+		snap.globals[name] = g.Get()
+	}
+	return snap, nil
+}
+
+// Restore creates an instance from a snapshot instead of running init: the snapshot
+// already holds the initialised runtime. The instance gets its own Math.random seed,
+// because the snapshot copies the generator state.
+func (e *Engine) Restore(ctx context.Context, snap *Snapshot) (*Instance, error) {
+	mod, err := e.instantiate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	inst, err := restoreInstance(ctx, mod, snap)
+	if err != nil {
+		_ = mod.Close(ctx) // best effort: the restore error is the one to report
 		return nil, err
 	}
 	return inst, nil
+}
+
+// restoreInstance writes the snapshot into a fresh module instance and reseeds it.
+func restoreInstance(ctx context.Context, mod api.Module, snap *Snapshot) (*Instance, error) {
+	mem := mod.Memory()
+	size := uint32(len(snap.memory))
+	if mem.Size() > size {
+		return nil, errors.New("qjs: snapshot is smaller than the module memory")
+	}
+	if grow := (size - mem.Size()) / wasmPageBytes; grow > 0 {
+		if _, ok := mem.Grow(grow); !ok {
+			return nil, errors.New("qjs: grow guest memory for snapshot")
+		}
+	}
+	if !mem.Write(0, snap.memory) {
+		return nil, errors.New("qjs: write snapshot to guest memory")
+	}
+	for name, v := range snap.globals {
+		g, ok := mod.ExportedGlobal(name).(api.MutableGlobal)
+		if !ok {
+			return nil, fmt.Errorf("qjs: guest global %q is not mutable", name)
+		}
+		g.Set(v)
+	}
+	inst, err := bindInstance(mod)
+	if err != nil {
+		return nil, err
+	}
+	if err := reseedRandom(ctx, mod); err != nil {
+		return nil, err
+	}
+	return inst, nil
+}
+
+// reseedRandom gives the restored runtime a fresh Math.random sequence.
+func reseedRandom(ctx context.Context, mod api.Module) error {
+	var seed [8]byte
+	if _, err := rand.Read(seed[:]); err != nil {
+		return fmt.Errorf("qjs: random seed: %w", err)
+	}
+	fn, err := exported(mod, "reseed")
+	if err != nil {
+		return err
+	}
+	_, err = fn.Call(ctx,
+		uint64(binary.LittleEndian.Uint32(seed[:4])),
+		uint64(binary.LittleEndian.Uint32(seed[4:])))
+	if err != nil {
+		return fmt.Errorf("reseed: %w", err)
+	}
+	return nil
 }
 
 // runInit calls the guest init(heap, stack); non-zero means QuickJS could not start.

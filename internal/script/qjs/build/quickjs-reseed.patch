@@ -1,0 +1,16 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -49108,6 +49108,13 @@
+     return js_float64(u.d - 1.0);
+ }
+ 
++/* Kora: reseed Math.random after a snapshot restore (the state is copied with the
++ * snapshot). A zero seed would stick the generator at zero, so it maps to 1. */
++void JS_KoraReseedRandom(JSContext *ctx, uint64_t seed)
++{
++    ctx->random_state = seed ? seed : 1;
++}
++
+ /* use local wrappers for math functions to
+    - avoid initializing data with dynamic library entry points.
+    - avoid some overhead if the call can be inlined at compile or link time.

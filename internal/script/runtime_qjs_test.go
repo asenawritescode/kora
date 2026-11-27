@@ -206,3 +206,21 @@ func TestQJSValidate(t *testing.T) {
 		})
 	}
 }
+
+// Each execution runs on a runtime restored from the same snapshot, so each must still
+// draw its own Math.random sequence.
+func TestQJSExecutionsDrawDifferentRandom(t *testing.T) {
+	runner := newQJSTestRunner(t, EmbeddedConfig{PoolSize: 1, Timeout: 5 * time.Second})
+	var first any
+	for i := range 2 {
+		res, err := runner.Execute(context.Background(), ExecuteRequest{Script: `return {result: Math.random()};`})
+		if err != nil {
+			t.Fatalf("Execute %d: %v", i, err)
+		}
+		if i == 0 {
+			first = res.Result
+		} else if reflect.DeepEqual(first, res.Result) {
+			t.Fatalf("two executions returned the same Math.random value %v", first)
+		}
+	}
+}

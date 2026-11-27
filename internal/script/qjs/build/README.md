@@ -16,6 +16,14 @@ WASI reactor. It is vendored and CI checks that it is the build of the pinned so
 - `eval(len, flags) -> i32`: flags 1 = compile only, 2 = JSON result.
   0 ok, 1 JS exception, -2 not initialised.
 - `output() -> ptr`, `output_len() -> i32`: the result or exception text of the last eval.
+- `reseed(lo, hi)`: sets the context's `Math.random` state. Called on every instance restored from a
+  snapshot (the snapshot copies the generator state, so each instance reseeds from crypto/rand).
+- Exported mutable global `__stack_pointer` (`-Wl,--export=__stack_pointer`): saved and restored with the
+  snapshot together with linear memory. It is the only mutable wasm global (`wasm-objdump -x` lists it).
+
+## Patched sources
+`quickjs-reseed.patch` adds `JS_KoraReseedRandom` to `quickjs.c` (the `JSContext` is opaque to the reactor).
+`build.sh` applies it with `git apply` after cloning, so the pinned tag plus this patch is the build input.
 
 ## Imports (host, module `kora_host`)
 - `call(ptr, len) -> respLen`: one synchronous JSON request; `-1` means failed.
@@ -27,7 +35,8 @@ internal/script/qjs/build/build.sh <workdir> internal/script/qjs/testdata/qjs.wa
 ```
 
 `build.sh` downloads wasi-sdk 34.0 (sha256 pinned, skipped when `WASI_SDK` is set),
-clones quickjs-ng v0.18.0, copies `qjs_reactor.c` in and runs the clang command above.
+clones quickjs-ng v0.18.0 (commit d7215b0ad3fc2c562e8317fd9bca058fd4863804), applies
+`quickjs-reseed.patch`, copies `qjs_reactor.c` in and runs the clang command above.
 CI (`WASM build` job in `.github/workflows/ci.yml`) rebuilds the file and fails if its
 sha256 differs from `testdata/qjs.wasm`.
 

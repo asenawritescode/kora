@@ -2,9 +2,13 @@
  * no quickjs-libc, so no WASI environ/signal gaps. The host talks to the guest
  * through one input buffer, one output buffer, and one imported call that
  * carries a JSON request and returns a JSON response. */
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include "quickjs.h"
+
+/* Added to quickjs.c by build/quickjs-reseed.patch (applied by build.sh). */
+void JS_KoraReseedRandom(JSContext *ctx, uint64_t seed);
 
 __attribute__((import_module("kora_host"), import_name("call")))
 extern int host_call(const char *req, int len);
@@ -73,6 +77,12 @@ int init(unsigned int mem_limit, unsigned int stack_size) {
   JS_SetPropertyStr(ctx, g, "__kora_host", JS_NewCFunction(ctx, js_host, "__kora_host", 1));
   JS_FreeValue(ctx, g);
   return 0;
+}
+
+/* reseed(lo, hi): a fresh Math.random sequence for a runtime restored from a snapshot. */
+__attribute__((export_name("reseed")))
+void reseed(unsigned int lo, unsigned int hi) {
+  if (ctx) JS_KoraReseedRandom(ctx, ((uint64_t)hi << 32) | lo);
 }
 
 #define EVAL_COMPILE_ONLY 1

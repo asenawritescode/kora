@@ -12,6 +12,7 @@ WASI_SHA256=b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4
 WASI_TARBALL=wasi-sdk-${WASI_VERSION}-x86_64-linux.tar.gz
 WASI_URL=https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/${WASI_TARBALL}
 QJS_TAG=v0.18.0
+QJS_COMMIT=d7215b0ad3fc2c562e8317fd9bca058fd4863804 # commit the tag must point at
 QJS_URL=https://github.com/quickjs-ng/quickjs.git
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,6 +55,11 @@ fi
 rm -rf "$work/quickjs"
 git clone --depth 1 --branch "$QJS_TAG" "$QJS_URL" "$work/quickjs"
 cp "$here/qjs_reactor.c" "$work/quickjs/"
+if [ "$(git -C "$work/quickjs" rev-parse HEAD)" != "$QJS_COMMIT" ]; then
+	echo "build.sh: $QJS_TAG is $(git -C "$work/quickjs" rev-parse HEAD), want $QJS_COMMIT" >&2
+	exit 1
+fi
+git -C "$work/quickjs" apply "$here/quickjs-reseed.patch"
 
 # Compile from inside the source tree so __FILE__ paths stay relative.
 cd "$work/quickjs"
@@ -61,6 +67,7 @@ cd "$work/quickjs"
 	--sysroot="$WASI_SDK/share/wasi-sysroot" \
 	-mexec-model=reactor -O2 -DQUICKJS_NG_BUILD \
 	-Wl,-z,stack-size=1048576 \
+	-Wl,--export=__stack_pointer \
 	-o qjs.wasm \
 	qjs_reactor.c quickjs.c dtoa.c libregexp.c libunicode.c -lm
 

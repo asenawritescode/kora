@@ -31,6 +31,7 @@ const (
 // leaks between executions, and a used instance is always closed.
 type EmbeddedRunner struct {
 	engine    *qjs.Engine
+	snapshot  *qjs.Snapshot      // the hardened template every prewarmed instance restores
 	ready     chan *qjs.Instance // prewarmed instances, PoolSize at most
 	slots     chan struct{}      // PoolSize concurrent executions
 	admission chan struct{}      // PoolSize*2, same as goja
@@ -56,8 +57,14 @@ func NewEmbeddedRunner(cfg EmbeddedConfig) *EmbeddedRunner {
 	if err != nil {
 		panic(fmt.Errorf("script: qjs engine: %w", err))
 	}
+	snapshot, err := buildTemplate(context.Background(), engine)
+	if err != nil {
+		_ = engine.Close(context.Background()) // best effort: the template error is the one to report
+		panic(fmt.Errorf("script: qjs template: %w", err))
+	}
 	r := &EmbeddedRunner{
 		engine:    engine,
+		snapshot:  snapshot,
 		ready:     make(chan *qjs.Instance, cfg.PoolSize),
 		slots:     make(chan struct{}, cfg.PoolSize),
 		admission: make(chan struct{}, cfg.PoolSize*2),
@@ -75,18 +82,25 @@ func NewEmbeddedRunner(cfg EmbeddedConfig) *EmbeddedRunner {
 	return r
 }
 
-// newPrewarmed builds an instance that has run the sandbox hardening, so an execution
-// starts from frozen prototypes.
-func (r *EmbeddedRunner) newPrewarmed(ctx context.Context) (*qjs.Instance, error) {
-	inst, err := r.engine.NewInstance(ctx)
+// buildTemplate runs QuickJS init and the sandbox hardening once, then captures the
+// result. Every prewarmed instance restores from it, so the hardened prototypes are
+// frozen in the snapshot rather than rebuilt per instance.
+func buildTemplate(ctx context.Context, engine *qjs.Engine) (*qjs.Snapshot, error) {
+	inst, err := engine.NewInstance(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = inst.Close(ctx) }() // best effort: the snapshot is already taken or the error is reported
 	if err = evalSetup(ctx, inst, freezePrototypesSource); err != nil {
-		_ = inst.Close(context.WithoutCancel(ctx)) // best effort: the hardening error is the one to report
 		return nil, fmt.Errorf("script sandbox hardening failed: %w", err)
 	}
-	return inst, nil
+	return inst.Snapshot()
+}
+
+// newPrewarmed restores an instance from the hardened template, so an execution starts
+// from frozen prototypes.
+func (r *EmbeddedRunner) newPrewarmed(ctx context.Context) (*qjs.Instance, error) {
+	return r.engine.Restore(ctx, r.snapshot)
 }
 
 // takeInstance returns the instance for one execution: a prewarmed one when the pool
