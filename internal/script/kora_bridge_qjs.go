@@ -27,12 +27,19 @@ func (b koraBridge) handle(_ context.Context, raw []byte) []byte {
 	if err != nil {
 		return throwJSON(err.Error())
 	}
-	body, err := json.Marshal(map[string]any{"ok": out})
+	value, err := json.Marshal(out)
 	if err != nil {
 		return throwJSON(fmt.Sprintf("kora: result not encodable: %v", err))
 	}
-	return body
+	// The same bytes json.Marshal gives map[string]any{"ok": out}, without the map.
+	body := make([]byte, 0, len(value)+len(okPrefix)+1)
+	body = append(body, okPrefix...)
+	body = append(body, value...)
+	return append(body, '}')
 }
+
+// okPrefix opens the success response of koraBridge.handle.
+const okPrefix = `{"ok":`
 
 // dispatch decodes one request and runs the op it names.
 func (b koraBridge) dispatch(raw []byte) (any, error) {

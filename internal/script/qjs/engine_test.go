@@ -3,6 +3,7 @@ package qjs
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -375,5 +376,33 @@ func TestCompileSyntaxErrorReturnsNoBytecode(t *testing.T) {
 func TestBuildIDIsStable(t *testing.T) {
 	if BuildID() != BuildID() || BuildID() == [32]byte{} {
 		t.Fatal("BuildID must be a stable, non-zero digest of the reactor")
+	}
+}
+
+// TestHostResponseBuffer checks both answers of the host call: a response that fits the
+// guest's response buffer comes back in one crossing, a larger one is copied in after the
+// buffer grew to fit. The guest reads the text raw, not through JSON.parse.
+func TestHostResponseBuffer(t *testing.T) {
+	tests := []struct {
+		name string
+		size int
+	}{
+		{name: "fits the default buffer", size: 16},
+		{name: "fits the buffer after a larger answer", size: 4000},
+		{name: "larger than the default buffer", size: 9000},
+		{name: "larger than the buffer it grew to", size: 40000},
+	}
+	eng := newTestEngine(t)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			answer := strings.Repeat("a", tc.size)
+			inst := newTestInstance(t, eng, func(context.Context, []byte) []byte { return []byte(answer) })
+			for range 2 {
+				res, err := inst.Eval(context.Background(), `__kora_host("{}").length`, ModeJSONResult)
+				if err != nil || res.Thrown || res.Output != strconv.Itoa(tc.size) {
+					t.Fatalf("host answer length = %+v, %v; want %d", res, err, tc.size)
+				}
+			}
+		})
 	}
 }

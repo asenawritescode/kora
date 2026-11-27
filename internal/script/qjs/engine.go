@@ -519,9 +519,11 @@ func stateFrom(ctx context.Context) *callState {
 	return st
 }
 
-// hostCall is the guest's kora_host.call(ptr, len) -> respLen. It returns -1 when
-// the request cannot be read; the guest then throws.
-func hostCall(ctx context.Context, m api.Module, ptr, n uint32) int32 {
+// hostCall is the guest's kora_host.call(ptr, len, dst, cap) -> respLen. It answers the
+// request and, when the response fits the guest buffer at dst (cap bytes), writes it
+// there and returns its length. A larger response stays pending for hostTake. It
+// returns -1 when the request cannot be read; the guest then throws.
+func hostCall(ctx context.Context, m api.Module, ptr, n, dst, capacity uint32) int32 {
 	st := stateFrom(ctx)
 	req, ok := m.Memory().Read(ptr, n)
 	if st == nil || !ok {
@@ -532,7 +534,16 @@ func hostCall(ctx context.Context, m api.Module, ptr, n uint32) int32 {
 		st.pending = nil
 		return -1
 	}
-	return int32(len(st.pending))
+	size := len(st.pending)
+	if uint64(size) <= uint64(capacity) {
+		// The guest sized dst for this answer; a failed write leaves it empty.
+		if !m.Memory().Write(dst, st.pending) {
+			st.pending = nil
+			return -1
+		}
+		st.pending = nil
+	}
+	return int32(size)
 }
 
 // hostTake is the guest's kora_host.take(dst): it copies the pending response into

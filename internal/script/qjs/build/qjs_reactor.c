@@ -11,12 +11,17 @@
 void JS_KoraReseedRandom(JSContext *ctx, uint64_t seed);
 
 __attribute__((import_module("kora_host"), import_name("call")))
-extern int host_call(const char *req, int len);
+extern int host_call(const char *req, int len, char *dst, int cap);
 __attribute__((import_module("kora_host"), import_name("take")))
 extern void host_take(char *dst);
 
+/* Preallocated in init, so the snapshot carries both buffers and a run never grows them. */
+#define IN_BUF_BYTES (64 * 1024)
+#define RESP_BUF_BYTES 4096
 static char *in_buf;
 static int in_cap;
+static char *resp_buf;
+static int resp_cap;
 static char *out_buf;
 static int out_len;
 static JSRuntime *rt;
@@ -49,26 +54,35 @@ static void set_output(const char *s, size_t n) {
   out_len = (int)n;
 }
 
-/* __kora_host(requestJSON) -> responseJSON: one synchronous host call. */
+/* __kora_host(requestJSON) -> responseJSON: one synchronous host call. The host writes
+ * the response into resp_buf when it fits (one crossing); a larger response is returned
+ * by length only, so the buffer grows to it and host_take copies it in. */
 static JSValue js_host(JSContext *c, JSValueConst this_val, int argc, JSValueConst *argv) {
   size_t n;
   const char *req = JS_ToCStringLen(c, &n, argc > 0 ? argv[0] : JS_UNDEFINED);
   if (!req) return JS_EXCEPTION;
-  int rn = host_call(req, (int)n);
+  int rn = host_call(req, (int)n, resp_buf, resp_cap);
   JS_FreeCString(c, req);
   if (rn < 0) return JS_ThrowInternalError(c, "host call failed");
-  char *resp = js_malloc(c, (size_t)rn + 1);
-  if (!resp) return JS_EXCEPTION;
-  host_take(resp);
-  JSValue v = JS_NewStringLen(c, resp, (size_t)rn);
-  js_free(c, resp);
-  return v;
+  if (rn > resp_cap) {
+    char *p = realloc(resp_buf, (size_t)rn + 1);
+    if (!p) return JS_ThrowInternalError(c, "host response buffer");
+    resp_buf = p;
+    resp_cap = rn;
+    host_take(resp_buf);
+  }
+  return JS_NewStringLen(c, resp_buf, (size_t)rn);
 }
 
 __attribute__((export_name("init")))
 int init(unsigned int mem_limit, unsigned int stack_size) {
   rt = JS_NewRuntime();
   if (!rt) return -1;
+  in_buf = malloc(IN_BUF_BYTES);
+  resp_buf = malloc(RESP_BUF_BYTES);
+  if (!in_buf || !resp_buf) return -1;
+  in_cap = IN_BUF_BYTES;
+  resp_cap = RESP_BUF_BYTES;
   if (mem_limit) JS_SetMemoryLimit(rt, (size_t)mem_limit);
   if (stack_size) JS_SetMaxStackSize(rt, (size_t)stack_size);
   ctx = JS_NewContext(rt);

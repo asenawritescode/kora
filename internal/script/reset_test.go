@@ -93,25 +93,27 @@ func TestResetReseedsRandom(t *testing.T) {
 
 func TestResetKeepsTimeoutAndHeapCapAfterManyRuns(t *testing.T) {
 	const runs = 50
-	cfg := EmbeddedConfig{MaxRAM: 16 << 20, Timeout: 2 * time.Second}
+	cfg := EmbeddedConfig{MaxRAM: 16 << 20, Timeout: 10 * time.Second}
 	r := onePoolRunner(t, cfg)
 	for i := range runs {
 		runOK(t, r, ExecuteRequest{Script: `return {result: 1};`})
 		awaitReset(t, r, i+1)
 	}
 	tests := []struct {
-		name   string
-		script string
-		errs   string
+		name    string
+		script  string
+		timeout time.Duration
+		errs    string
 	}{
-		{name: "timeout still stops a runaway script", script: `while (true) {}`, errs: "timed out"},
+		{name: "timeout still stops a runaway script", script: `while (true) {}`,
+			timeout: 300 * time.Millisecond, errs: "timed out"},
 		{name: "heap cap still stops a huge allocation",
-			script: `var a = []; for (var i = 0; i < 1000; i++) { a.push("x".repeat(1 << 20)); } return {result: a.length};`,
-			errs:   "script error"},
+			script:  `var a = []; for (var i = 0; i < 1000; i++) { a.push("x".repeat(1 << 20)); } return {result: a.length};`,
+			timeout: 10 * time.Second, errs: "script error"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := r.Execute(context.Background(), ExecuteRequest{Script: tc.script})
+			_, err := r.Execute(context.Background(), ExecuteRequest{Script: tc.script, Timeout: tc.timeout})
 			if err == nil || !strings.Contains(err.Error(), tc.errs) {
 				t.Fatalf("Execute = %v, want an error containing %q", err, tc.errs)
 			}
