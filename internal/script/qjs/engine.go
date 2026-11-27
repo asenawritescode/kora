@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/binary"
 	"errors"
@@ -21,6 +22,14 @@ import (
 //
 //go:embed testdata/qjs.wasm
 var module []byte
+
+// BuildID identifies the reactor build. Bytecode from Compile is only valid for the
+// build that produced it, so callers key any cache of bytecode by this value.
+func BuildID() [sha256.Size]byte {
+	return buildID
+}
+
+var buildID = sha256.Sum256(module)
 
 // ErrSourceTooLarge is returned when a source does not fit the guest's i32 length ABI.
 var ErrSourceTooLarge = errors.New("qjs: source exceeds the i32 length limit")
@@ -111,13 +120,15 @@ func (e *Engine) Close(ctx context.Context) error {
 // Instance is one isolated QuickJS runtime. Eval calls on one instance are
 // serialised; different instances evaluate independently.
 type Instance struct {
-	mu        sync.Mutex
-	mod       api.Module
-	h         Handler
-	eval      api.Function
-	reserve   api.Function
-	outputPtr api.Function
-	outputLen api.Function
+	mu           sync.Mutex
+	mod          api.Module
+	h            Handler
+	eval         api.Function
+	compile      api.Function
+	evalBytecode api.Function
+	reserve      api.Function
+	outputPtr    api.Function
+	outputLen    api.Function
 }
 
 // NewInstance creates a fresh QuickJS runtime with the engine's limits. It has no
@@ -168,6 +179,8 @@ func bindInstance(mod api.Module) (*Instance, error) {
 	inst := &Instance{mod: mod}
 	exports := map[string]*api.Function{
 		"eval":           &inst.eval,
+		"compile":        &inst.compile,
+		"eval_bytecode":  &inst.evalBytecode,
 		"buffer_reserve": &inst.reserve,
 		"output":         &inst.outputPtr,
 		"output_len":     &inst.outputLen,
@@ -337,6 +350,29 @@ type Result struct {
 // script exception is a Result with Thrown set. Callers check ctx.Err() to tell a
 // timeout from another failure.
 func (i *Instance) Eval(ctx context.Context, src string, mode Mode) (Result, error) {
+	return i.call(ctx, i.eval, src, uint64(mode))
+}
+
+// Compile parses src as a global script without running it, and returns its bytecode.
+// A syntax error is a Result with Thrown set and no bytecode. The bytecode runs on any
+// instance of this build through EvalBytecode.
+func (i *Instance) Compile(ctx context.Context, src string) ([]byte, Result, error) {
+	res, err := i.call(ctx, i.compile, src)
+	if err != nil || res.Thrown {
+		return nil, res, err
+	}
+	return []byte(res.Output), res, nil
+}
+
+// EvalBytecode runs bytecode that Compile produced on this build, with the same mode
+// and result semantics as Eval. The bytecode is trusted: it comes only from Compile.
+func (i *Instance) EvalBytecode(ctx context.Context, code []byte, mode Mode) (Result, error) {
+	return i.call(ctx, i.evalBytecode, string(code), uint64(mode))
+}
+
+// call writes src into the guest input buffer and calls one reactor entry point on it
+// with the given flags. The entry points share the answer protocol of eval.
+func (i *Instance) call(ctx context.Context, fn api.Function, src string, flags ...uint64) (Result, error) {
 	if uint64(len(src)) > maxInt32-1 {
 		return Result{}, ErrSourceTooLarge
 	}
@@ -359,7 +395,8 @@ func (i *Instance) Eval(ctx context.Context, src string, mode Mode) (Result, err
 		h = noHandler
 	}
 	evalCtx := context.WithValue(ctx, stateKey{}, &callState{h: h})
-	res, err := i.eval.Call(evalCtx, uint64(len(src)), uint64(mode))
+	args := append([]uint64{uint64(len(src))}, flags...)
+	res, err := fn.Call(evalCtx, args...)
 	if err != nil {
 		return Result{}, fmt.Errorf("eval: %w", err)
 	}

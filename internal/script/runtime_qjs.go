@@ -263,11 +263,15 @@ func (r *EmbeddedRunner) run(ctx context.Context, inst *qjs.Instance, req Execut
 		return "", fmt.Errorf("script: setup failed: %w", err)
 	}
 	for _, lib := range req.Libraries {
-		if err = evalSetup(ctx, inst, lib.Source); err != nil {
+		res, err := r.evalCached(ctx, inst, lib.Source, 0)
+		if err != nil {
 			return "", fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
 		}
+		if res.Thrown {
+			return "", fmt.Errorf("script: library %q failed to load: %w", lib.Name, errors.New(res.Output))
+		}
 	}
-	res, err := inst.Eval(ctx, wrapScript(req.Script), qjs.ModeJSONResult)
+	res, err := r.evalCached(ctx, inst, wrapScript(req.Script), qjs.ModeJSONResult)
 	if err != nil {
 		return "", fmt.Errorf("script error: %w", err)
 	}

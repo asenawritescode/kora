@@ -327,3 +327,53 @@ func TestRestoredInstancesAreIsolatedAndReseeded(t *testing.T) {
 		t.Fatalf("restored instances share a Math.random sequence: both %q", ra.Output)
 	}
 }
+
+func TestCompiledBytecodeRunsOnAnotherInstance(t *testing.T) {
+	const src = `var shared = 40; shared + 2;`
+	tests := []struct {
+		name string
+		mode Mode
+		want string
+	}{
+		{name: "value as JSON", mode: ModeJSONResult, want: "42"},
+		{name: "no completion value", mode: 0, want: ""},
+	}
+	eng := newTestEngine(t)
+	snap := snapshotOf(t, eng)
+	compiler := restoredInstance(t, eng, snap)
+	code, res, err := compiler.Compile(context.Background(), src)
+	if err != nil || res.Thrown || len(code) == 0 {
+		t.Fatalf("Compile: code %d bytes, res %+v, err %v", len(code), res, err)
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			inst := restoredInstance(t, eng, snap)
+			got, err := inst.EvalBytecode(context.Background(), code, tc.mode)
+			if err != nil || got.Thrown || got.Output != tc.want {
+				t.Fatalf("EvalBytecode = %+v, %v; want output %q", got, err, tc.want)
+			}
+			check, err := inst.Eval(context.Background(), "shared", ModeJSONResult)
+			if err != nil || check.Output != "40" {
+				t.Fatalf("global after bytecode = %+v, %v; want 40", check, err)
+			}
+		})
+	}
+}
+
+func TestCompileSyntaxErrorReturnsNoBytecode(t *testing.T) {
+	eng := newTestEngine(t)
+	inst := restoredInstance(t, eng, snapshotOf(t, eng))
+	code, res, err := inst.Compile(context.Background(), `var = ;`)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if !res.Thrown || !strings.Contains(res.Output, "SyntaxError") || code != nil {
+		t.Fatalf("Compile(bad) = code %v, res %+v; want SyntaxError and no bytecode", code, res)
+	}
+}
+
+func TestBuildIDIsStable(t *testing.T) {
+	if BuildID() != BuildID() || BuildID() == [32]byte{} {
+		t.Fatal("BuildID must be a stable, non-zero digest of the reactor")
+	}
+}

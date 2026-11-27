@@ -88,15 +88,10 @@ void reseed(unsigned int lo, unsigned int hi) {
 #define EVAL_COMPILE_ONLY 1
 #define EVAL_JSON_RESULT 2
 
-/* eval the first `len` bytes of the input buffer as a global script.
- * 0 ok (output = JSON of the completion value when EVAL_JSON_RESULT, empty
- * when that value has no JSON form), 1 JS exception (output = its message),
- * -2 not initialised. */
-__attribute__((export_name("eval")))
-int eval(int len, int flags) {
-  if (!ctx) return -2;
-  int jsflags = JS_EVAL_TYPE_GLOBAL | ((flags & EVAL_COMPILE_ONLY) ? JS_EVAL_FLAG_COMPILE_ONLY : 0);
-  JSValue v = JS_Eval(ctx, in_buf, (size_t)len, "<script>", jsflags);
+/* finish turns the value of one evaluation into the reactor's answer (see eval). It
+ * consumes v: 0 with output = JSON of the value (EVAL_JSON_RESULT) or its string,
+ * 1 with output = the exception message. */
+static int finish(JSValue v, int flags) {
   if (!JS_IsException(v) && (flags & EVAL_JSON_RESULT)) {
     JSValue s = JS_JSONStringify(ctx, v, JS_UNDEFINED, JS_UNDEFINED);
     JS_FreeValue(ctx, v);
@@ -119,4 +114,43 @@ int eval(int len, int flags) {
   }
   JS_FreeValue(ctx, v);
   return 0;
+}
+
+/* eval the first `len` bytes of the input buffer as a global script.
+ * 0 ok (output = JSON of the completion value when EVAL_JSON_RESULT, empty
+ * when that value has no JSON form), 1 JS exception (output = its message),
+ * -2 not initialised. */
+__attribute__((export_name("eval")))
+int eval(int len, int flags) {
+  if (!ctx) return -2;
+  int jsflags = JS_EVAL_TYPE_GLOBAL | ((flags & EVAL_COMPILE_ONLY) ? JS_EVAL_FLAG_COMPILE_ONLY : 0);
+  return finish(JS_Eval(ctx, in_buf, (size_t)len, "<script>", jsflags), flags);
+}
+
+/* compile the first `len` bytes of the input buffer as a global script, without running
+ * it. 0 ok (output = the bytecode, binary), 1 syntax error (output = its message),
+ * -2 not initialised. The bytecode is only read back by eval_bytecode of this build. */
+__attribute__((export_name("compile")))
+int compile(int len) {
+  if (!ctx) return -2;
+  JSValue f = JS_Eval(ctx, in_buf, (size_t)len, "<script>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+  if (JS_IsException(f)) return finish(f, 0);
+  size_t n = 0;
+  uint8_t *bc = JS_WriteObject(ctx, &n, f, JS_WRITE_OBJ_BYTECODE);
+  JS_FreeValue(ctx, f);
+  if (!bc) return finish(JS_ThrowInternalError(ctx, "bytecode write failed"), 0);
+  set_output((const char *)bc, n);
+  js_free(ctx, bc);
+  return 0;
+}
+
+/* eval_bytecode runs the bytecode in the first `len` bytes of the input buffer, as eval
+ * runs source (same flags and answers). The bytecode must come from compile of this
+ * build: the host only feeds it bytes it compiled itself. */
+__attribute__((export_name("eval_bytecode")))
+int eval_bytecode(int len, int flags) {
+  if (!ctx) return -2;
+  JSValue f = JS_ReadObject(ctx, (const uint8_t *)in_buf, (size_t)len, JS_READ_OBJ_BYTECODE);
+  if (JS_IsException(f)) return finish(f, 0);
+  return finish(JS_EvalFunction(ctx, f), flags);
 }
