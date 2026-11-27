@@ -1,3 +1,5 @@
+//go:build !qjsscript
+
 // Package script provides the JavaScript runtime using goja (pure Go ES5.1+).
 // A build tag switches to QJS+Wazero when available.
 package script
@@ -24,22 +26,6 @@ type EmbeddedRunner struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	active    sync.WaitGroup
-}
-
-// EmbeddedConfig configures the embedded runner.
-type EmbeddedConfig struct {
-	PoolSize int           // number of prewarmed runtimes (default: 15)
-	MaxRAM   int64         // advisory target only; Goja has no enforced heap limit
-	Timeout  time.Duration // default execution timeout
-}
-
-// DefaultEmbeddedConfig returns sensible defaults.
-func DefaultEmbeddedConfig() EmbeddedConfig {
-	return EmbeddedConfig{
-		PoolSize: 15,
-		MaxRAM:   128 * 1024 * 1024, // 128 MB
-		Timeout:  5 * time.Second,
-	}
 }
 
 // NewEmbeddedRunner creates a runner with a pool of prewarmed goja runtimes.
@@ -81,23 +67,7 @@ func (r *EmbeddedRunner) newRuntime() *goja.Runtime {
 // freezePrototypesProgram freezes the built-in prototypes and disables __proto__ so scripts cannot
 // pollute them. It is compiled once at startup, so a syntax error fails fast instead of silently
 // leaving runtimes unhardened.
-var freezePrototypesProgram = goja.MustCompile("freeze-prototypes.js", `
-		(function() {
-			var frozen = [Object.prototype, Array.prototype, String.prototype,
-				Number.prototype, Boolean.prototype, Function.prototype,
-				Error.prototype, RegExp.prototype, Date.prototype];
-			for (var i = 0; i < frozen.length; i++) {
-				try { Object.freeze(frozen[i]); } catch(e) {}
-			}
-			// Block access to __proto__
-			try {
-				Object.defineProperty(Object.prototype, '__proto__', {
-					get: function() { return undefined; },
-					set: function() { throw new Error('__proto__ is disabled'); }
-				});
-			} catch(e) {}
-		})();
-	`, false)
+var freezePrototypesProgram = goja.MustCompile("freeze-prototypes.js", freezePrototypesSource, false)
 
 // freezePrototypes prevents scripts from modifying built-in prototypes. Failing to harden a runtime
 // is an invariant violation, so it fails closed rather than running scripts in an open sandbox.
@@ -175,16 +145,8 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 	defer stopExecutionInterrupt()
 
 	// Inject the kora API into the runtime.
-	api := &koraAPI{
-		req:    req,
-		runner: r,
-		logs:   make([]LogEntry, 0),
-	}
-	if req.Provider != nil {
-		api.docProvider = req.Provider
-		api.secretProvider = req.Provider
-	}
-	api.httpProvider = outboundHTTPProvider(ctx, req.Provider)
+	ops := newKoraOps(ctx, req)
+	api := &koraAPI{req: req, ops: ops}
 	vm.Set("kora", api.buildObject(vm))
 
 	vm.Set("__kora_event__", map[string]any{
@@ -196,7 +158,7 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 		if mathValue := vm.Get("Math"); mathValue != nil && !goja.IsUndefined(mathValue) {
 			_ = mathValue.ToObject(vm).Set("random", goja.Undefined())
 		}
-		_, _ = vm.RunString("Object.defineProperty(globalThis, 'Date', {value: undefined, writable: false, configurable: false}); Object.freeze(Math)")
+		_, _ = vm.RunString(deterministicSource)
 	}
 
 	start := time.Now()
@@ -210,7 +172,7 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 				err = fmt.Errorf("script: runtime panic: %v", rec)
 			}
 		}()
-		val, err = runWithLibraries(vm, req.Libraries, r.wrapScript(req))
+		val, err = runWithLibraries(vm, req.Libraries, wrapScript(req.Script))
 	}()
 	duration := time.Since(start)
 
@@ -221,7 +183,7 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 
 	result := &ExecuteResult{
 		Duration: duration,
-		Logs:     api.logs,
+		Logs:     ops.logs,
 	}
 
 	if err != nil {
@@ -230,19 +192,7 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 
 	// If the script returned an object with a 'doc' property, use it as the modified document.
 	if val != nil && !goja.IsUndefined(val) && !goja.IsNull(val) {
-		if obj, ok := val.Export().(map[string]any); ok {
-			if modifiedDoc, ok := obj["doc"]; ok {
-				if doc, ok := modifiedDoc.(map[string]any); ok {
-					result.Document = doc
-					result.Modified = true
-				}
-			}
-			if returnVal, ok := obj["result"]; ok {
-				result.Result = returnVal
-			}
-		} else {
-			result.Result = val.Export()
-		}
+		applyReturn(result, val.Export())
 	}
 
 	return result, nil
@@ -268,16 +218,6 @@ func runLibraries(vm *goja.Runtime, libraries []Library) error {
 	return nil
 }
 
-// wrapScript wraps the user's script in an async IIFE with the kora API injected.
-func (r *EmbeddedRunner) wrapScript(req ExecuteRequest) string {
-	return fmt.Sprintf(`
-		(function() {
-			var event = __kora_event__;
-			%s
-		})();
-	`, req.Script)
-}
-
 // Validate checks that a script compiles without running it.
 func (r *EmbeddedRunner) Validate(script string) error {
 	r.mu.Lock()
@@ -301,14 +241,14 @@ func (r *EmbeddedRunner) Validate(script string) error {
 	vm.Set("kora", stubKora)
 
 	// First, try to compile without running to catch syntax errors.
-	_, err := goja.Compile("script", r.wrapScript(ExecuteRequest{Script: script}), false)
+	_, err := goja.Compile("script", wrapScript(script), false)
 	if err != nil {
 		return fmt.Errorf("script: syntax error: %w", err)
 	}
 
 	// Then run to catch reference errors (undefined variables, etc.).
 	// Runtime errors (throw, TypeError, etc.) are expected — they happen during real execution too.
-	_, runErr := vm.RunString(r.wrapScript(ExecuteRequest{Script: script}))
+	_, runErr := vm.RunString(wrapScript(script))
 	if runErr != nil {
 		// Only fail on compilation-level errors (ReferenceError, SyntaxError).
 		// Runtime throw/new Error is valid — scripts throw to reject operations.

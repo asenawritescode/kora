@@ -1,43 +1,14 @@
+//go:build !qjsscript
+
 package script
 
-import (
-	"encoding/json"
-	"errors"
-	"fmt"
+import "github.com/dop251/goja"
 
-	"github.com/asenawritescode/kora/contract"
-	"github.com/dop251/goja"
-)
-
-// isEmptyReadError reports whether a provider read error means "no visible result"
-// (the record does not exist, or this reader may not see it). Those are legitimate
-// empty results for a script. Any other error is an infrastructure failure and must throw.
-func isEmptyReadError(err error) bool {
-	var ce *contract.Error
-	if !errors.As(err, &ce) {
-		return false
-	}
-	return ce.Type == contract.CodeNotFound || ce.Type == contract.CodePermissionDenied || ce.Type == contract.CodeUnauthenticated
-}
-
-// readFailure returns empty for a read that found nothing visible, and throws for any
-// other provider error so the script fails and the save rolls back.
-func readFailure(vm *goja.Runtime, err error, empty goja.Value, what string) goja.Value {
-	if isEmptyReadError(err) {
-		return empty
-	}
-	panic(vm.ToValue(fmt.Sprintf("%s failed: %v", what, err)))
-}
-
-// koraAPI is the JavaScript-accessible API injected into every script.
-// It bridges script calls to the KoraProvider sub-interfaces.
+// koraAPI is the JavaScript-accessible 'kora' binding injected into every script.
+// It checks arguments and converts JS values; the kora.* semantics live in koraOps.
 type koraAPI struct {
-	req            ExecuteRequest
-	runner         *EmbeddedRunner
-	logs           []LogEntry
-	docProvider    DocProvider
-	secretProvider SecretProvider
-	httpProvider   HTTPProvider
+	req ExecuteRequest
+	ops *koraOps
 }
 
 // buildObject constructs the JavaScript 'kora' global object.
@@ -68,7 +39,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 
 	// kora.getDoc(doctype, name) → document or null
 	obj.Set("getDoc", func(call goja.FunctionCall) goja.Value {
-		if api.docProvider == nil {
+		if !api.ops.hasDocs() {
 			return goja.Null()
 		}
 		if len(call.Arguments) < 2 {
@@ -76,14 +47,14 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 		}
 		doctype := call.Arguments[0].String()
 		name := call.Arguments[1].String()
-		doc, err := api.docProvider.GetDoc(doctype, name)
+		doc, err := api.ops.getDoc(doctype, name)
 		if err != nil {
-			return readFailure(vm, err, goja.Null(), fmt.Sprintf("kora.getDoc(%q, %q)", doctype, name))
+			panic(vm.ToValue(err.Error()))
 		}
 		if doc == nil {
 			return goja.Null()
 		}
-		return vm.ToValue(jsValue(doc))
+		return vm.ToValue(doc)
 	})
 
 	// kora.hasDocType(doctype) → boolean; reveals only whether the record type is installed
@@ -91,7 +62,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 
 	// kora.getList(doctype, {filters, orderBy, limit, offset}) → array
 	obj.Set("getList", func(call goja.FunctionCall) goja.Value {
-		if api.docProvider == nil {
+		if !api.ops.hasDocs() {
 			return vm.ToValue([]any{})
 		}
 		if len(call.Arguments) < 1 {
@@ -104,21 +75,16 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 				opts = o
 			}
 		}
-		filters, _ := opts["filters"].(map[string]any)
-		orderBy, _ := opts["orderBy"].(string)
-		limit := toInt(opts["limit"], 50)
-		offset := toInt(opts["offset"], 0)
-
-		docs, err := api.docProvider.GetList(doctype, filters, orderBy, limit, offset)
+		docs, err := api.ops.getList(doctype, opts)
 		if err != nil {
-			return readFailure(vm, err, vm.ToValue([]any{}), fmt.Sprintf("kora.getList(%q)", doctype))
+			panic(vm.ToValue(err.Error()))
 		}
-		return vm.ToValue(jsValue(docs))
+		return vm.ToValue(docs)
 	})
 
 	// kora.saveDoc(doctype, doc) → document
 	obj.Set("saveDoc", func(call goja.FunctionCall) goja.Value {
-		if api.docProvider == nil {
+		if !api.ops.hasDocs() {
 			return goja.Null()
 		}
 		if len(call.Arguments) < 2 {
@@ -129,15 +95,16 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 		if !ok {
 			panic(vm.ToValue("kora.saveDoc: second argument must be an object"))
 		}
-		if err := api.docProvider.SaveDoc(doctype, doc, api.req.User); err != nil {
-			panic(vm.ToValue(fmt.Sprintf("kora.saveDoc(%q) error: %v", doctype, err)))
+		saved, err := api.ops.saveDoc(doctype, doc)
+		if err != nil {
+			panic(vm.ToValue(err.Error()))
 		}
-		return vm.ToValue(jsValue(doc))
+		return vm.ToValue(saved)
 	})
 
 	// kora.createDoc(doctype, doc) → document
 	obj.Set("createDoc", func(call goja.FunctionCall) goja.Value {
-		if api.docProvider == nil {
+		if !api.ops.hasDocs() {
 			return goja.Null()
 		}
 		if len(call.Arguments) < 2 {
@@ -148,16 +115,16 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 		if !ok {
 			panic(vm.ToValue("kora.createDoc: second argument must be an object"))
 		}
-		created, err := api.docProvider.CreateDoc(doctype, doc, api.req.User, api.req.User)
+		created, err := api.ops.createDoc(doctype, doc)
 		if err != nil {
-			panic(vm.ToValue(fmt.Sprintf("kora.createDoc(%q) error: %v", doctype, err)))
+			panic(vm.ToValue(err.Error()))
 		}
 		return vm.ToValue(created)
 	})
 
 	// kora.deleteDoc(doctype, name) → void
 	obj.Set("deleteDoc", func(call goja.FunctionCall) goja.Value {
-		if api.docProvider == nil {
+		if !api.ops.hasDocs() {
 			return goja.Undefined()
 		}
 		if len(call.Arguments) < 2 {
@@ -165,8 +132,8 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 		}
 		doctype := call.Arguments[0].String()
 		name := call.Arguments[1].String()
-		if err := api.docProvider.DeleteDoc(doctype, name); err != nil {
-			panic(vm.ToValue(fmt.Sprintf("kora.deleteDoc(%q, %q) error: %v", doctype, name, err)))
+		if err := api.ops.deleteDoc(doctype, name); err != nil {
+			panic(vm.ToValue(err.Error()))
 		}
 		return goja.Undefined()
 	})
@@ -174,15 +141,14 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 	// kora.secrets.get(key) → string
 	secretsObj := vm.NewObject()
 	secretsObj.Set("get", func(call goja.FunctionCall) goja.Value {
-		if api.secretProvider == nil {
+		if !api.ops.hasSecrets() {
 			return goja.Null()
 		}
 		if len(call.Arguments) < 1 {
 			panic(vm.ToValue("kora.secrets.get requires 1 argument: key"))
 		}
-		val, err := api.secretProvider.GetSecret(call.Arguments[0].String())
-		if err != nil {
-			api.logMsg("warn", fmt.Sprintf("kora.secrets.get error: %v", err))
+		val := api.ops.getSecret(call.Arguments[0].String())
+		if val == nil {
 			return goja.Null()
 		}
 		return vm.ToValue(val)
@@ -198,7 +164,7 @@ func (api *koraAPI) buildObject(vm *goja.Runtime) goja.Value {
 func (api *koraAPI) httpObject(vm *goja.Runtime) goja.Value {
 	httpObj := vm.NewObject()
 	httpObj.Set("fetch", func(call goja.FunctionCall) goja.Value {
-		if api.httpProvider == nil {
+		if !api.ops.hasHTTP() {
 			panic(vm.ToValue("kora.http.fetch: provider not available"))
 		}
 		if len(call.Arguments) < 2 {
@@ -210,25 +176,9 @@ func (api *koraAPI) httpObject(vm *goja.Runtime) goja.Value {
 			panic(vm.ToValue("kora.http.fetch: second argument must be an options object"))
 		}
 
-		method, _ := opts["method"].(string)
-		if method == "" {
-			method = "GET"
-		}
-		headers, _ := opts["headers"].(map[string]any)
-		hdr := make(map[string]string)
-		for k, v := range headers {
-			hdr[k] = fmt.Sprint(v)
-		}
-		body, _ := opts["body"].(string)
-
-		resp, err := api.httpProvider.DoHTTP(&HTTPRequest{
-			Method:  method,
-			URL:     url,
-			Headers: hdr,
-			Body:    body,
-		})
+		resp, err := api.ops.fetch(url, opts)
 		if err != nil {
-			panic(vm.ToValue(fmt.Sprintf("kora.http.fetch error: %v", err)))
+			panic(vm.ToValue(err.Error()))
 		}
 
 		return api.httpResponseObject(vm, resp)
@@ -269,11 +219,7 @@ func (api *koraAPI) hasDocType(vm *goja.Runtime, call goja.FunctionCall) goja.Va
 	if len(call.Arguments) < 1 {
 		panic(vm.ToValue("kora.hasDocType requires 1 argument: doctype"))
 	}
-	checker, ok := api.docProvider.(DocTypeChecker)
-	if !ok {
-		return vm.ToValue(false)
-	}
-	return vm.ToValue(checker.HasDocType(call.Arguments[0].String()))
+	return vm.ToValue(api.ops.hasDocType(call.Arguments[0].String()))
 }
 
 func (api *koraAPI) log(level string, call goja.FunctionCall) {
@@ -281,25 +227,5 @@ func (api *koraAPI) log(level string, call goja.FunctionCall) {
 	if len(call.Arguments) > 0 {
 		msg = call.Arguments[0].String()
 	}
-	api.logMsg(level, msg)
-}
-
-func (api *koraAPI) logMsg(level, msg string) {
-	api.logs = append(api.logs, LogEntry{Level: level, Message: msg})
-}
-
-func toInt(v any, defaultVal int) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case json.Number:
-		if f, err := n.Float64(); err == nil {
-			return int(f)
-		}
-	case float64:
-		return int(n)
-	}
-	return defaultVal
+	api.ops.log(level, msg)
 }

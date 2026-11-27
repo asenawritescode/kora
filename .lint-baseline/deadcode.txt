@@ -223,6 +223,11 @@ internal/script/inventory.go::LifecycleInventoryError.Error
 internal/script/inventory.go::LifecycleInventoryError.Unwrap
 internal/script/inventory.go::failedLifecycleInventory
 internal/script/inventory.go::knownLifecycleEvent
+internal/script/js_export.go::decodeJSValue
+internal/script/js_export.go::exportMap
+internal/script/js_export.go::exportNumber
+internal/script/js_export.go::exportNumbers
+internal/script/js_export.go::exportSlice
 internal/script/provider.go::NoopProvider.CreateDoc
 internal/script/provider.go::NoopProvider.DeleteDoc
 internal/script/provider.go::NoopProvider.DoHTTP
