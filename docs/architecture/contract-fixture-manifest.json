@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "snapshot_date": "2026-11-13",
+  "snapshot_date": "2026-11-27",
   "release_status": "unreleased-working-tree-snapshot",
   "fixtures": [
     {
@@ -45,26 +45,26 @@
     {
       "version": "v1",
       "schema": "kora/contract/schema/engine-v1.json",
-      "schema_sha256": "9d56ea85961d45009615545f2a9ee15ca7874e751e93b950c202a76bf8862ff5",
+      "schema_sha256": "13bf2edcd5bed608569b41836c6878cb0d4f5788e3d8f6628e2403230540040d",
       "typescript": "kora/contract/generated/engine-v1.ts",
-      "typescript_sha256": "fa551819dc6fd6f8e5ff0e8cde8855f2ad33ecfa141f7429e410973816b8d219"
+      "typescript_sha256": "58ea5b16ef0b9521c8fae2c6229ed3afdb91158d0296a56b1a2d5ef06c6bb942"
     },
     {
       "version": "v2",
       "schema": "kora/contract/schema/engine-v2.json",
-      "schema_sha256": "5c8ff139a013ea82eef631b4e5464c9856d1727a00948057b37382d67cbbf932",
+      "schema_sha256": "42e7f0c264aeaec1a75a8c7dad9fc87f37ef0a4853dfb6dbfa3811550a4ac757",
       "typescript": "kora/contract/generated/engine-v2.ts",
-      "typescript_sha256": "d504bdb6ebff90409bec88588683de502d8dd9b642bbecf889f7e84e1ef95e1e",
+      "typescript_sha256": "5a59ff0b3577b18b92c474a62fdbc254cfb3bd192afdf82b4f66530e94edb13c",
       "studio_copy": "kora-studio-mvp/src/generated/engine-v2.ts",
-      "studio_copy_sha256": "d504bdb6ebff90409bec88588683de502d8dd9b642bbecf889f7e84e1ef95e1e",
+      "studio_copy_sha256": "5a59ff0b3577b18b92c474a62fdbc254cfb3bd192afdf82b4f66530e94edb13c",
       "sdk_copy": "kora-ts-sdk/src/generated/engine-v2.ts",
-      "sdk_copy_sha256": "d504bdb6ebff90409bec88588683de502d8dd9b642bbecf889f7e84e1ef95e1e",
+      "sdk_copy_sha256": "5a59ff0b3577b18b92c474a62fdbc254cfb3bd192afdf82b4f66530e94edb13c",
       "android_schema": "kora-mobile-app/app/src/main/assets/contracts/engine-v2.json",
-      "android_schema_sha256": "5c8ff139a013ea82eef631b4e5464c9856d1727a00948057b37382d67cbbf932",
+      "android_schema_sha256": "42e7f0c264aeaec1a75a8c7dad9fc87f37ef0a4853dfb6dbfa3811550a4ac757",
       "android_manifest": "kora-mobile-app/app/src/main/java/com/kora/mobile/generated/EngineContractManifest.kt",
-      "android_manifest_sha256": "bafae681e242fb16fdd4980d46500db5d3467c64440d0258958094e63ebc2665",
+      "android_manifest_sha256": "669263e253b58c870e40dc5e49f20e543afb05be4418b915d43756e5a786813e",
       "cloud_manifest": "kora-cloud/contract-fixtures/engine-v2-manifest.json",
-      "cloud_manifest_sha256": "5a9ee91e10ec2540219e180f4673b9dbf341fd5533cbcbc48879ba8347435ed7"
+      "cloud_manifest_sha256": "498e89fcf5e88b9f535ed5b3f79bdf3eb1e80626c841d60b2d77547ebf1f6c4a"
     }
   ]
 }
