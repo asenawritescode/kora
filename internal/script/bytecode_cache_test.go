@@ -12,7 +12,7 @@ import (
 )
 
 func TestBytecodeCacheEviction(t *testing.T) {
-	key := func(s string) bytecodeKey { return keyFor(s) }
+	key := keyFor
 	tests := []struct {
 		name     string
 		max      int

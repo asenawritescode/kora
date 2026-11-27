@@ -259,7 +259,7 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 	start := time.Now()
 	out, err := r.run(execCtx, inst, req, ops)
 	duration := time.Since(start)
-	r.release(inst, err == nil && execCtx.Err() == nil)
+	r.release(inst, err == nil && execCtx.Err() == nil) //nolint:contextcheck // the reset and refill are bound to r.ctx, not the request
 
 	// Check for context cancellation first, as the goja runner does.
 	if execCtx.Err() != nil {
@@ -292,12 +292,8 @@ func (r *EmbeddedRunner) run(ctx context.Context, inst *qjs.Instance, req Execut
 		return "", fmt.Errorf("script: setup failed: %w", err)
 	}
 	for _, lib := range req.Libraries {
-		res, err := r.evalCached(ctx, inst, lib.Source, 0)
-		if err != nil {
-			return "", fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
-		}
-		if res.Thrown {
-			return "", fmt.Errorf("script: library %q failed to load: %w", lib.Name, errors.New(res.Output))
+		if loadErr := r.loadLibrary(ctx, inst, lib); loadErr != nil {
+			return "", loadErr
 		}
 	}
 	res, err := r.evalCached(ctx, inst, wrapScript(req.Script), qjs.ModeJSONResult)
@@ -308,6 +304,19 @@ func (r *EmbeddedRunner) run(ctx context.Context, inst *qjs.Instance, req Execut
 		return "", fmt.Errorf("script error: %w", errors.New(res.Output))
 	}
 	return res.Output, nil
+}
+
+// loadLibrary evaluates one library for its declarations; a compile error or a throw is
+// returned as an error naming the library.
+func (r *EmbeddedRunner) loadLibrary(ctx context.Context, inst *qjs.Instance, lib Library) error {
+	res, err := r.evalCached(ctx, inst, lib.Source, 0)
+	if err != nil {
+		return fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+	}
+	if res.Thrown {
+		return fmt.Errorf("script: library %q failed to load: %w", lib.Name, errors.New(res.Output))
+	}
+	return nil
 }
 
 // evalSetup runs one source for its effect; a throw is returned as an error.

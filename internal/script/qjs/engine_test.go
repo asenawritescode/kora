@@ -374,7 +374,8 @@ func TestCompileSyntaxErrorReturnsNoBytecode(t *testing.T) {
 }
 
 func TestBuildIDIsStable(t *testing.T) {
-	if BuildID() != BuildID() || BuildID() == [32]byte{} {
+	first, second := BuildID(), BuildID()
+	if first != second || first == [32]byte{} {
 		t.Fatal("BuildID must be a stable, non-zero digest of the reactor")
 	}
 }
@@ -389,6 +390,8 @@ func TestHostResponseBuffer(t *testing.T) {
 	}{
 		{name: "fits the default buffer", size: 16},
 		{name: "fits the buffer after a larger answer", size: 4000},
+		{name: "largest answer written in the crossing", size: 4096},
+		{name: "first answer copied by take", size: 4097},
 		{name: "larger than the default buffer", size: 9000},
 		{name: "larger than the buffer it grew to", size: 40000},
 	}

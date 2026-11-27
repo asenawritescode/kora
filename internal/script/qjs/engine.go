@@ -519,11 +519,15 @@ func stateFrom(ctx context.Context) *callState {
 	return st
 }
 
-// hostCall is the guest's kora_host.call(ptr, len, dst, cap) -> respLen. It answers the
-// request and, when the response fits the guest buffer at dst (cap bytes), writes it
-// there and returns its length. A larger response stays pending for hostTake. It
-// returns -1 when the request cannot be read; the guest then throws.
-func hostCall(ctx context.Context, m api.Module, ptr, n, dst, capacity uint32) int32 {
+// respBufBytes is the largest answer hostCall writes in the same crossing. The guest's
+// response buffer (RESP_BUF_BYTES in qjs_reactor.c) must be at least this big.
+const respBufBytes = 4096
+
+// hostCall is the guest's kora_host.call(ptr, len, dst) -> respLen. It answers the
+// request and, when the answer fits respBufBytes, writes it at dst and returns its length.
+// A larger answer stays pending for hostTake. It returns -1 when the request cannot be
+// read; the guest then throws.
+func hostCall(ctx context.Context, m api.Module, ptr, n, dst uint32) int32 {
 	st := stateFrom(ctx)
 	req, ok := m.Memory().Read(ptr, n)
 	if st == nil || !ok {
@@ -535,8 +539,8 @@ func hostCall(ctx context.Context, m api.Module, ptr, n, dst, capacity uint32) i
 		return -1
 	}
 	size := len(st.pending)
-	if uint64(size) <= uint64(capacity) {
-		// The guest sized dst for this answer; a failed write leaves it empty.
+	if size <= respBufBytes {
+		// The guest's response buffer holds respBufBytes; a failed write leaves it empty.
 		if !m.Memory().Write(dst, st.pending) {
 			st.pending = nil
 			return -1
