@@ -1,4 +1,4 @@
-//go:build qjsscript
+//go:build !gojascript
 
 package script
 

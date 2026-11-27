@@ -169,6 +169,10 @@ jobs:
       - name: Build
         run: go build -o /dev/null ./cmd/kora
 
+      # goja is the fallback runtime behind -tags gojascript for one release; remove with it.
+      - name: Test goja fallback runtime
+        run: go test -tags gojascript ./internal/script/... -count=1
+
       - name: Test release tooling
         run: make release-test
 

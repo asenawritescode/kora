@@ -2,6 +2,7 @@
 
 `testdata/qjs.wasm` is a pinned, reproducible build of `qjs_reactor.c`, a QuickJS
 WASI reactor. It is vendored and CI checks that it is the build of the pinned sources below.
+It is the production script runtime (the default build of `internal/script`), so a rebuild is a release change.
 
 ## Inputs (pinned)
 - **quickjs-ng v0.18.0**: core sources only (`quickjs.c dtoa.c libregexp.c libunicode.c`;

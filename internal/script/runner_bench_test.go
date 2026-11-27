@@ -15,8 +15,8 @@ func benchRunner(b *testing.B) *EmbeddedRunner {
 	return r
 }
 
-// BenchmarkExecute measures one Execute per iteration on the active runner (goja by
-// default, QuickJS with -tags qjsscript). Each sub-benchmark covers one cost:
+// BenchmarkExecute measures one Execute per iteration on the active runner (QuickJS by
+// default, goja with -tags gojascript). Each sub-benchmark covers one cost:
 // the bare round trip, host reads, library loading and a large document.
 func BenchmarkExecute(b *testing.B) {
 	bigDoc := make(map[string]any, 50)

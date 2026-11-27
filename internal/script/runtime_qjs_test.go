@@ -1,4 +1,4 @@
-//go:build qjsscript
+//go:build !gojascript
 
 package script
 
@@ -189,6 +189,8 @@ func TestQJSValidate(t *testing.T) {
 		{name: "syntax error", script: `var x = ;`, wantErr: "syntax error"},
 		{name: "reference error", script: `return {result: missingName};`, wantErr: "compile error"},
 		{name: "runtime throw is valid", script: `throw new Error("reject");`},
+		// __kora_host must not be visible to a validated script: the call is a ReferenceError.
+		{name: "host function is not exposed", script: `__kora_host("{}"); return 1;`, wantErr: "compile error"},
 	}
 	runner := newQJSTestRunner(t, EmbeddedConfig{PoolSize: 1, Timeout: 5 * time.Second})
 	for _, tc := range tests {

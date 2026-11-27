@@ -1,5 +1,3 @@
-//go:build qjsscript
-
 package qjs
 
 import (
@@ -64,9 +62,13 @@ func NewEngine(ctx context.Context, limits Limits) (*Engine, error) {
 	return &Engine{rt: rt, compiled: compiled, limits: limits}, nil
 }
 
+// compileCache keeps the compiled QuickJS module in memory across every runtime in the
+// process, so only the first engine pays for compilation. It is in-memory only.
+var compileCache = wazero.NewCompilationCache()
+
 // newRuntime builds the wazero runtime with WASI and the kora_host imports.
 func newRuntime(ctx context.Context, limits Limits) (wazero.Runtime, error) {
-	cfg := wazero.NewRuntimeConfig().WithCloseOnContextDone(true)
+	cfg := wazero.NewRuntimeConfig().WithCloseOnContextDone(true).WithCompilationCache(compileCache)
 	if limits.MaxPages > 0 {
 		cfg = cfg.WithMemoryLimitPages(limits.MaxPages)
 	}

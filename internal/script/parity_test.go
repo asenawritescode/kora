@@ -10,7 +10,7 @@ import (
 )
 
 // This file is the parity contract between the embedded runtimes: each case runs through
-// NewEmbeddedRunner, so it runs on goja by default and on QuickJS under -tags qjsscript.
+// NewEmbeddedRunner, so it runs on QuickJS by default and on goja under -tags gojascript.
 
 func TestParityDocArgumentsMustBePlainObjects(t *testing.T) {
 	const msg = "second argument must be an object"

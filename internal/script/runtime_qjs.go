@@ -1,4 +1,4 @@
-//go:build qjsscript
+//go:build !gojascript
 
 package script
 
@@ -332,16 +332,15 @@ func (r *EmbeddedRunner) Validate(script string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), r.config.Timeout)
 	defer cancel()
-	inst, err := r.engine.NewInstance(ctx)
+	// Restore from the template: it already froze the prototypes and deleted __kora_host
+	// from the global object. A fresh engine instance would expose the host function.
+	inst, err := r.newPrewarmed(ctx)
 	if err != nil {
 		return fmt.Errorf("script: new instance: %w", err)
 	}
 	defer func() { _ = inst.Close(ctx) }() // best effort: the check is already decided
 	inst.SetHandler(refuseHostCall)
 
-	if err = evalSetup(ctx, inst, freezePrototypesSource); err != nil {
-		return fmt.Errorf("script sandbox hardening failed: %w", err)
-	}
 	if err = evalSetup(ctx, inst, validateStubSource); err != nil {
 		return fmt.Errorf("script: validate setup failed: %w", err)
 	}

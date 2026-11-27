@@ -1,5 +1,9 @@
 // Package script provides the JavaScript runtime for Kigae's extensibility system.
 // It defines the Runner interface and types for script execution.
+//
+// The default runtime is QuickJS compiled to WebAssembly and run under wazero
+// (package qjs). Building with -tags gojascript selects the goja fallback, which
+// is removed one release after the switch.
 package script
 
 import (
