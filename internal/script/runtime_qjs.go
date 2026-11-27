@@ -15,6 +15,7 @@ import (
 	"github.com/asenawritescode/kora/internal/script/qjs"
 )
 
+// QuickJS under WASI reports UTC; production containers run UTC too, so goja matches (no change).
 const (
 	qjsStackBytes    = 1 << 20  // JS stack cap per instance
 	qjsHeadroomBytes = 32 << 20 // wasm pages beyond the JS heap: input buffer, wasm stack, static data
