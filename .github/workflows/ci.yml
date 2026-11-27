@@ -31,27 +31,27 @@ jobs:
         with:
           repository: asenawritescode/kora-cloud
           # Consumer revision that carries the synced contract; bump it when a consumer syncs a newer one.
-          ref: 25d5fff968852a52bb3172aa6d63e9b40c543b07
+          ref: 6df3b1e97e9194475c1aa9dfc2bc240b4929045f
           path: kora-cloud
           ssh-key: ${{ secrets.KORA_CLOUD_READONLY_DEPLOY_KEY }}
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-ui
           # Consumer revision that carries the synced contract; bump it when a consumer syncs a newer one.
-          ref: 677c3f95815557d6420ce03b98b0fdee875f1e1d
+          ref: fd24736ec29bfe174e632fb79afc0de21435176f
           path: kora-studio-mvp
           ssh-key: ${{ secrets.KORA_UI_READONLY_DEPLOY_KEY }}
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-ts-extension-sdk
           # Consumer revision that carries the synced contract; bump it when a consumer syncs a newer one.
-          ref: 3cc7e063dd5e667e0d045e6fbea1fea0ceb68e7f
+          ref: 0f86894145dbb8284b0b10ad11e518260edcaced
           path: kora-ts-sdk
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-mobile-app
           # Consumer revision that carries the synced contract; bump it when a consumer syncs a newer one.
-          ref: 177d9e642447efaab145ae4fa8ac88adcf40f292
+          ref: 23dab6715695509a33b913be06974b20ef35ce37
           path: kora-mobile
       - uses: actions/setup-go@v5
         with:
