@@ -115,6 +115,12 @@ function salePayments(sale, sign) {
   if (rows.length === 0 && sign < 0) {
     return [saleLine("Cash", sign * total)];
   }
+  // A sale marked Paid is paid through its payment lines: with none and a non-zero
+  // total there is nothing to say how it was paid, so refuse it (a zero-total sale
+  // falls through and posts stock only).
+  if (rows.length === 0 && sign > 0 && total !== 0) {
+    throw new Error("A paid sale needs its payment lines: record how " + (sale.reference || sale.name) + " was paid.");
+  }
   var amounts = [];
   var sum = 0;
   var largest = 0;
