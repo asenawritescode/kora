@@ -78,13 +78,11 @@ func qjsLimits(maxRAM int64) qjs.Limits {
 	}
 }
 
-// refuseHostCall answers the guest's host calls. kora.* is not wired yet (#864), so every call is refused.
+// refuseHostCall answers the guest's host calls during Validate. Validate runs no kora
+// code (its stub replaces kora), so any host call is refused.
 func refuseHostCall(context.Context, []byte) []byte {
 	return []byte(`{"error":"kora host calls are not available"}`)
 }
-
-// installKora is the hook where the kora.* shim is evaluated. #864 fills it; until then it installs nothing.
-func installKora(context.Context, *qjs.Instance, ExecuteRequest) {}
 
 // Execute runs a script in a fresh QuickJS instance.
 func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*ExecuteResult, error) {
@@ -131,14 +129,15 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 	stopRunnerCancellation := context.AfterFunc(r.ctx, cancel) //nolint:contextcheck // runner-wide context: Close cancels every execution
 	defer stopRunnerCancellation()
 
-	inst, err := r.engine.NewInstance(execCtx, refuseHostCall)
+	ops := newKoraOps(ctx, req)
+	inst, err := r.engine.NewInstance(execCtx, koraBridge{ops: ops}.handle)
 	if err != nil {
 		return nil, fmt.Errorf("script: new instance: %w", err)
 	}
 	defer func() { _ = inst.Close(context.WithoutCancel(ctx)) }() // best effort: the outcome is already decided
 
 	start := time.Now()
-	out, err := r.run(execCtx, inst, req)
+	out, err := r.run(execCtx, inst, req, ops)
 	duration := time.Since(start)
 
 	// Check for context cancellation first, as the goja runner does.
@@ -149,7 +148,7 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 		return nil, err
 	}
 
-	result := &ExecuteResult{Duration: duration, Logs: []LogEntry{}}
+	result := &ExecuteResult{Duration: duration, Logs: ops.logs}
 	if out == "" { // the script has no completion value
 		return result, nil
 	}
@@ -163,11 +162,13 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 
 // run evaluates the setup steps, the libraries and then the script, returning the
 // JSON of the script's completion value.
-func (r *EmbeddedRunner) run(ctx context.Context, inst *qjs.Instance, req ExecuteRequest) (string, error) {
+func (r *EmbeddedRunner) run(ctx context.Context, inst *qjs.Instance, req ExecuteRequest, ops *koraOps) (string, error) {
 	if err := evalSetup(ctx, inst, freezePrototypesSource); err != nil {
 		return "", fmt.Errorf("script sandbox hardening failed: %w", err)
 	}
-	installKora(ctx, inst, req)
+	if err := installKora(ctx, inst, ops, req); err != nil {
+		return "", fmt.Errorf("script: kora setup failed: %w", err)
+	}
 	event, err := eventSource(req)
 	if err != nil {
 		return "", err
