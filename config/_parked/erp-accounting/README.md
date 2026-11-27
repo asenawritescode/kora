@@ -21,8 +21,12 @@ Rules the scripts keep (`scripts/`):
   Cash Clearing, Sales, Cost of Sales, Stock Adjustments, Expenses). One active account per role,
   of the role's type, taking postings.
 
+- Posting library: this pack ships `scripts/lib/books.js` (installed as the `lib_books` library),
+  the one shared posting block the selling, stock and purchasing packs call to write a balanced
+  Posted journal entry per money or stock event, by posting role, once (#815).
+
 Not here yet: sales, bills, payments and stock changes posting on their own (#815, built in the
-selling, purchasing and stock packs on these roles). No trial balance.
+selling, purchasing and stock packs on these roles, calling `lib_books`). No trial balance.
 
 Checks: `go test ./doctype -run TestERP`, `go test ./site -run Pack`, and
 `go test -tags integration ./api -run 'TestPackScriptsAccounting|TestERP'` (needs MySQL and Postgres, see `KORA_PACK_SCRIPTS_DISPOSABLE_MYSQL_DSN` and `KORA_PACK_SCRIPTS_DISPOSABLE_POSTGRES_DSN`).
