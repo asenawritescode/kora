@@ -94,6 +94,9 @@ func buildTemplate(ctx context.Context, engine *qjs.Engine) (*qjs.Snapshot, erro
 	if err = evalSetup(ctx, inst, freezePrototypesSource); err != nil {
 		return nil, fmt.Errorf("script sandbox hardening failed: %w", err)
 	}
+	if err = evalSetup(ctx, inst, koraDefineSource); err != nil {
+		return nil, fmt.Errorf("script: kora bridge define failed: %w", err)
+	}
 	return inst.Snapshot()
 }
 
@@ -252,20 +255,12 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 // run evaluates the setup steps, the libraries and then the script, returning the
 // JSON of the script's completion value. The instance arrives already hardened.
 func (r *EmbeddedRunner) run(ctx context.Context, inst *qjs.Instance, req ExecuteRequest, ops *koraOps) (string, error) {
-	if err := installKora(ctx, inst, ops, req); err != nil {
-		return "", fmt.Errorf("script: kora setup failed: %w", err)
-	}
-	event, err := eventSource(req)
+	setup, err := setupSource(req, ops)
 	if err != nil {
 		return "", err
 	}
-	if err = evalSetup(ctx, inst, event); err != nil {
+	if err = evalSetup(ctx, inst, setup); err != nil {
 		return "", fmt.Errorf("script: setup failed: %w", err)
-	}
-	if req.Deterministic {
-		if err = evalSetup(ctx, inst, deterministicSource); err != nil {
-			return "", fmt.Errorf("script: setup failed: %w", err)
-		}
 	}
 	for _, lib := range req.Libraries {
 		if err = evalSetup(ctx, inst, lib.Source); err != nil {
@@ -292,6 +287,25 @@ func evalSetup(ctx context.Context, inst *qjs.Instance, src string) error {
 		return errors.New(res.Output)
 	}
 	return nil
+}
+
+// setupSource is the single setup evaluation of an execution: it builds kora, binds the
+// event and, when the request is deterministic, removes the clock and random sources.
+// The steps run in that order, before the libraries, as they did when evaluated apart.
+func setupSource(req ExecuteRequest, ops *koraOps) (string, error) {
+	install, err := koraInstallSource(ops, req)
+	if err != nil {
+		return "", err
+	}
+	event, err := eventSource(req)
+	if err != nil {
+		return "", err
+	}
+	parts := []string{install, event}
+	if req.Deterministic {
+		parts = append(parts, deterministicSource+";")
+	}
+	return strings.Join(parts, "\n"), nil
 }
 
 // eventSource binds __kora_event__ to the document and the old document, as JSON.
