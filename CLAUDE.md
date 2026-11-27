@@ -433,7 +433,6 @@ No YAML files for site config. `CommonConfigFromEnv()` builds all config from `K
 
 Key environment variables for extensibility and analytics:
 - `KORA_SCRIPTS_ENABLED` — Enable the JS script engine (default: `false`)
-- `KORA_SCRIPTS_MAX_RAM` — Max RAM per script in MB (default: `64`)
 - `KORA_ANALYTICS_CHANNEL_SIZE` — Per-tenant in-memory change-event queue capacity (default: `1000`, max `10000`)
 - `KORA_ANALYTICS_MAX_EVENT_BYTES` — Largest encoded change event accepted by the bus (default: `1048576`)
 - `KORA_ANALYTICS_MAX_SUBSCRIBERS` — Process-wide listener limit on the in-memory bus (default: `4096`)
