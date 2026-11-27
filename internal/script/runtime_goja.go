@@ -1,7 +1,7 @@
-//go:build !qjsscript
+//go:build gojascript
 
-// Package script provides the JavaScript runtime using goja (pure Go ES5.1+).
-// A build tag switches to QJS+Wazero when available.
+// Runtime on goja (pure Go ES5.1+): the fallback selected by -tags gojascript.
+
 package script
 
 import (

@@ -1,4 +1,4 @@
-//go:build qjsscript
+//go:build !gojascript
 
 package script
 
@@ -15,22 +15,26 @@ import (
 	"github.com/asenawritescode/kora/internal/script/qjs"
 )
 
+// QuickJS under WASI reports UTC; production containers run UTC too, so goja matches (no change).
 const (
-	qjsStackBytes    = 1 << 20  // JS stack cap per instance
-	qjsHeadroomBytes = 32 << 20 // wasm pages beyond the JS heap: input buffer, wasm stack, static data
-	qjsPageBytes     = 64 << 10 // wasm linear-memory page size
+	qjsStackBytes    = 768 << 10 // JS stack cap per instance; below the 1 MiB wasm stack so QuickJS throws first
+	qjsHeadroomBytes = 32 << 20  // wasm pages beyond the JS heap: input buffer, wasm stack, static data
+	qjsPageBytes     = 64 << 10  // wasm linear-memory page size
 	qjsDefaultHeap   = 128 << 20
 
 	// validateStubSource gives a script under Validate the globals it may reference.
 	validateStubSource = `var __kora_event__ = {doc: {}, oldDoc: null}; var kora = {log: {info: function(){}, warn: function(){}, error: function(){}}, hasDocType: function(){ return false; }};`
 )
 
-// EmbeddedRunner executes scripts in-process on QuickJS (wazero). Each execution
-// runs in a fresh instance, so no state leaks between executions.
+// EmbeddedRunner executes scripts in-process on QuickJS (wazero). Instances are
+// prewarmed off the request path, and each serves exactly one execution: no state
+// leaks between executions, and a used instance is always closed.
 type EmbeddedRunner struct {
 	engine    *qjs.Engine
-	slots     chan struct{} // PoolSize concurrent executions
-	admission chan struct{} // PoolSize*2, same as goja
+	snapshot  *qjs.Snapshot      // the hardened template every prewarmed instance restores
+	ready     chan *qjs.Instance // prewarmed instances, PoolSize at most
+	slots     chan struct{}      // PoolSize concurrent executions
+	admission chan struct{}      // PoolSize*2, same as goja
 	config    EmbeddedConfig
 	mu        sync.Mutex
 	closed    bool
@@ -53,15 +57,102 @@ func NewEmbeddedRunner(cfg EmbeddedConfig) *EmbeddedRunner {
 	if err != nil {
 		panic(fmt.Errorf("script: qjs engine: %w", err))
 	}
+	snapshot, err := buildTemplate(context.Background(), engine)
+	if err != nil {
+		_ = engine.Close(context.Background()) // best effort: the template error is the one to report
+		panic(fmt.Errorf("script: qjs template: %w", err))
+	}
 	r := &EmbeddedRunner{
 		engine:    engine,
+		snapshot:  snapshot,
+		ready:     make(chan *qjs.Instance, cfg.PoolSize),
 		slots:     make(chan struct{}, cfg.PoolSize),
 		admission: make(chan struct{}, cfg.PoolSize*2),
 		config:    cfg,
 		stop:      make(chan struct{}),
 	}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
+	for range cfg.PoolSize {
+		inst, err := r.newPrewarmed(r.ctx)
+		if err != nil {
+			panic(fmt.Errorf("script: prewarm qjs instance: %w", err))
+		}
+		r.ready <- inst
+	}
 	return r
+}
+
+// buildTemplate runs QuickJS init and the sandbox hardening once, then captures the
+// result. Every prewarmed instance restores from it, so the hardened prototypes are
+// frozen in the snapshot rather than rebuilt per instance.
+func buildTemplate(ctx context.Context, engine *qjs.Engine) (*qjs.Snapshot, error) {
+	inst, err := engine.NewInstance(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = inst.Close(ctx) }() // best effort: the snapshot is already taken or the error is reported
+	if err = evalSetup(ctx, inst, freezePrototypesSource); err != nil {
+		return nil, fmt.Errorf("script sandbox hardening failed: %w", err)
+	}
+	if err = evalSetup(ctx, inst, koraDefineSource); err != nil {
+		return nil, fmt.Errorf("script: kora bridge define failed: %w", err)
+	}
+	return inst.Snapshot()
+}
+
+// newPrewarmed restores an instance from the hardened template, so an execution starts
+// from frozen prototypes.
+func (r *EmbeddedRunner) newPrewarmed(ctx context.Context) (*qjs.Instance, error) {
+	return r.engine.Restore(ctx, r.snapshot)
+}
+
+// takeInstance returns the instance for one execution: a prewarmed one when the pool
+// has one, else one built inline. It never waits for a refill. Each call starts one
+// refill, so the pool recovers even when it was empty.
+func (r *EmbeddedRunner) takeInstance(ctx context.Context) (*qjs.Instance, error) {
+	r.refillAsync() //nolint:contextcheck // the refill is bound to r.ctx, not the request, so Close cancels and waits for it
+	select {
+	case inst := <-r.ready:
+		return inst, nil
+	default:
+		inst, err := r.newPrewarmed(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("script: new instance: %w", err)
+		}
+		return inst, nil
+	}
+}
+
+// refillAsync prewarms one replacement in the background, bounded by the runner
+// context. It is tracked by active, so it starts only inside an Execute (which holds
+// active), and Close waits for it.
+func (r *EmbeddedRunner) refillAsync() {
+	r.active.Add(1)
+	go func() {
+		defer r.active.Done()
+		inst, err := r.newPrewarmed(r.ctx)
+		if err != nil {
+			return // no replacement: the next execution builds inline
+		}
+		select {
+		case r.ready <- inst:
+		default:
+			_ = inst.Close(context.Background()) // the pool is full: drop the surplus instance
+		}
+	}()
+}
+
+// drainReady closes the prewarmed instances that no execution will take. Call it only
+// after active.Wait, so no refill can still send to ready.
+func (r *EmbeddedRunner) drainReady() {
+	for {
+		select {
+		case inst := <-r.ready:
+			_ = inst.Close(context.Background()) // best effort at shutdown
+		default:
+			return
+		}
+	}
 }
 
 // qjsLimits derives the engine caps from the heap budget. The uint32 ABI bounds the heap,
@@ -130,11 +221,12 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 	defer stopRunnerCancellation()
 
 	ops := newKoraOps(ctx, req)
-	inst, err := r.engine.NewInstance(execCtx, koraBridge{ops: ops}.handle)
+	inst, err := r.takeInstance(execCtx)
 	if err != nil {
-		return nil, fmt.Errorf("script: new instance: %w", err)
+		return nil, err
 	}
 	defer func() { _ = inst.Close(context.WithoutCancel(ctx)) }() // best effort: the outcome is already decided
+	inst.SetHandler(koraBridge{ops: ops}.handle)
 
 	start := time.Now()
 	out, err := r.run(execCtx, inst, req, ops)
@@ -161,25 +253,14 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 }
 
 // run evaluates the setup steps, the libraries and then the script, returning the
-// JSON of the script's completion value.
+// JSON of the script's completion value. The instance arrives already hardened.
 func (r *EmbeddedRunner) run(ctx context.Context, inst *qjs.Instance, req ExecuteRequest, ops *koraOps) (string, error) {
-	if err := evalSetup(ctx, inst, freezePrototypesSource); err != nil {
-		return "", fmt.Errorf("script sandbox hardening failed: %w", err)
-	}
-	if err := installKora(ctx, inst, ops, req); err != nil {
-		return "", fmt.Errorf("script: kora setup failed: %w", err)
-	}
-	event, err := eventSource(req)
+	setup, err := setupSource(req, ops)
 	if err != nil {
 		return "", err
 	}
-	if err = evalSetup(ctx, inst, event); err != nil {
+	if err = evalSetup(ctx, inst, setup); err != nil {
 		return "", fmt.Errorf("script: setup failed: %w", err)
-	}
-	if req.Deterministic {
-		if err = evalSetup(ctx, inst, deterministicSource); err != nil {
-			return "", fmt.Errorf("script: setup failed: %w", err)
-		}
 	}
 	for _, lib := range req.Libraries {
 		if err = evalSetup(ctx, inst, lib.Source); err != nil {
@@ -208,6 +289,25 @@ func evalSetup(ctx context.Context, inst *qjs.Instance, src string) error {
 	return nil
 }
 
+// setupSource is the single setup evaluation of an execution: it builds kora, binds the
+// event and, when the request is deterministic, removes the clock and random sources.
+// The steps run in that order, before the libraries, as they did when evaluated apart.
+func setupSource(req ExecuteRequest, ops *koraOps) (string, error) {
+	install, err := koraInstallSource(ops, req)
+	if err != nil {
+		return "", err
+	}
+	event, err := eventSource(req)
+	if err != nil {
+		return "", err
+	}
+	parts := []string{install, event}
+	if req.Deterministic {
+		parts = append(parts, deterministicSource+";")
+	}
+	return strings.Join(parts, "\n"), nil
+}
+
 // eventSource binds __kora_event__ to the document and the old document, as JSON.
 func eventSource(req ExecuteRequest) (string, error) {
 	doc, err := json.Marshal(req.Document)
@@ -232,15 +332,15 @@ func (r *EmbeddedRunner) Validate(script string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), r.config.Timeout)
 	defer cancel()
-	inst, err := r.engine.NewInstance(ctx, refuseHostCall)
+	// Restore from the template: it already froze the prototypes and deleted __kora_host
+	// from the global object. A fresh engine instance would expose the host function.
+	inst, err := r.newPrewarmed(ctx)
 	if err != nil {
 		return fmt.Errorf("script: new instance: %w", err)
 	}
 	defer func() { _ = inst.Close(ctx) }() // best effort: the check is already decided
+	inst.SetHandler(refuseHostCall)
 
-	if err = evalSetup(ctx, inst, freezePrototypesSource); err != nil {
-		return fmt.Errorf("script sandbox hardening failed: %w", err)
-	}
 	if err = evalSetup(ctx, inst, validateStubSource); err != nil {
 		return fmt.Errorf("script: validate setup failed: %w", err)
 	}
@@ -279,6 +379,7 @@ func (r *EmbeddedRunner) Close() error {
 	r.mu.Unlock()
 	// Execute registers with active while holding mu, so no Add can race this Wait.
 	r.active.Wait()
+	r.drainReady()
 	return r.engine.Close(context.Background())
 }
 

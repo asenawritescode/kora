@@ -1,5 +1,3 @@
-//go:build qjsscript
-
 package qjs
 
 import (
@@ -11,8 +9,9 @@ import (
 	"time"
 )
 
-// testLimits is the cap shared by every test: 8 MiB JS heap, 1 MiB JS stack, 128 MiB wasm memory.
-var testLimits = Limits{HeapBytes: 8 << 20, StackBytes: 1 << 20, MaxPages: 2048}
+// testLimits is the cap shared by every test: 8 MiB JS heap, 768 KiB JS stack (below the
+// 1 MiB wasm stack, so QuickJS throws before the wasm stack overflows), 128 MiB wasm memory.
+var testLimits = Limits{HeapBytes: 8 << 20, StackBytes: 768 << 10, MaxPages: 2048}
 
 // newTestEngine returns an engine closed at test end.
 func newTestEngine(t *testing.T) *Engine {
@@ -28,12 +27,55 @@ func newTestEngine(t *testing.T) *Engine {
 // newTestInstance returns an instance closed at test end.
 func newTestInstance(t *testing.T, eng *Engine, h Handler) *Instance {
 	t.Helper()
-	inst, err := eng.NewInstance(context.Background(), h)
+	inst, err := eng.NewInstance(context.Background())
 	if err != nil {
 		t.Fatalf("NewInstance: %v", err)
 	}
 	t.Cleanup(func() { _ = inst.Close(context.Background()) })
+	inst.SetHandler(h)
 	return inst
+}
+
+func TestHostCallHandlerBinding(t *testing.T) {
+	const hostCall = `__kora_host("{}")`
+	tests := []struct {
+		name       string
+		setHandler bool
+		want       string
+		reached    bool
+	}{
+		{name: "host call before SetHandler throws", setHandler: false,
+			want: `{"throw":"kora host calls are not available"}`},
+		{name: "host call after SetHandler reaches the handler", setHandler: true,
+			want: `{"ok":1}`, reached: true},
+	}
+	eng := newTestEngine(t)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			inst, err := eng.NewInstance(context.Background())
+			if err != nil {
+				t.Fatalf("NewInstance: %v", err)
+			}
+			t.Cleanup(func() { _ = inst.Close(context.Background()) })
+			reached := false
+			if tc.setHandler {
+				inst.SetHandler(func(context.Context, []byte) []byte {
+					reached = true
+					return []byte(`{"ok":1}`)
+				})
+			}
+			res, err := inst.Eval(context.Background(), hostCall, 0)
+			if err != nil {
+				t.Fatalf("Eval: %v", err)
+			}
+			if res.Output != tc.want {
+				t.Fatalf("output = %q, want %q", res.Output, tc.want)
+			}
+			if reached != tc.reached {
+				t.Fatalf("handler reached = %v, want %v", reached, tc.reached)
+			}
+		})
+	}
 }
 
 // noHostCall fails the test if the guest makes a host call.
@@ -205,10 +247,83 @@ func TestRealClock(t *testing.T) {
 	}
 }
 
-func TestEvalRejectsOversizedSource(t *testing.T) {
+// A 3 MiB source, larger than the old fixed input buffer, grows the guest buffer and runs.
+func TestEvalGrowsBufferForLargeSource(t *testing.T) {
 	inst := newTestInstance(t, newTestEngine(t), noHostCall(t))
-	_, err := inst.Eval(context.Background(), strings.Repeat("a", 4*1024*1024), 0)
-	if !errors.Is(err, ErrSourceTooLarge) {
-		t.Fatalf("err = %v, want ErrSourceTooLarge", err)
+	src := "var s='" + strings.Repeat("a", 3<<20) + "'; s.length"
+	got, err := inst.Eval(context.Background(), src, ModeJSONResult)
+	if err != nil || got.Thrown || got.Output != "3145728" {
+		t.Fatalf("result = %+v, err %v; want 3145728", got, err)
+	}
+}
+
+// snapshotOf runs init on a template instance and captures it.
+func snapshotOf(t *testing.T, eng *Engine) *Snapshot {
+	t.Helper()
+	snap, err := newTestInstance(t, eng, noHostCall(t)).Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	return snap
+}
+
+// restoredInstance returns an instance restored from snap, closed at test end.
+func restoredInstance(t *testing.T, eng *Engine, snap *Snapshot) *Instance {
+	t.Helper()
+	inst, err := eng.Restore(context.Background(), snap)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	t.Cleanup(func() { _ = inst.Close(context.Background()) })
+	inst.SetHandler(noHostCall(t))
+	return inst
+}
+
+func TestRestoredInstanceMatchesFresh(t *testing.T) {
+	eng := newTestEngine(t)
+	tests := []struct {
+		name, src, want string
+	}{
+		{"arithmetic", `var x = 0; for (var i = 0; i < 1000; i++) x += i; x;`, "499500"},
+		{"json", `JSON.stringify({a: [1, 2], s: "x"})`, `"{\"a\":[1,2],\"s\":\"x\"}"`},
+		{"stack overflow is catchable", `function f() { return f() + 1; } try { f(); } catch (e) { "caught"; }`, `"caught"`},
+	}
+	snap := snapshotOf(t, eng)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fresh := newTestInstance(t, eng, noHostCall(t))
+			restored := restoredInstance(t, eng, snap)
+			for who, inst := range map[string]*Instance{"fresh": fresh, "restored": restored} {
+				got, err := inst.Eval(context.Background(), tc.src, ModeJSONResult)
+				if err != nil || got.Thrown || got.Output != tc.want {
+					t.Fatalf("%s: result = %+v, err %v; want %s", who, got, err, tc.want)
+				}
+			}
+		})
+	}
+}
+
+func TestRestoredInstancesAreIsolatedAndReseeded(t *testing.T) {
+	eng := newTestEngine(t)
+	snap := snapshotOf(t, eng)
+	a := restoredInstance(t, eng, snap)
+	b := restoredInstance(t, eng, snap)
+	if _, err := a.Eval(context.Background(), `globalThis.leak = 1`, 0); err != nil {
+		t.Fatalf("set in a: %v", err)
+	}
+	got, err := b.Eval(context.Background(), `typeof leak`, 0)
+	if err != nil || got.Output != "undefined" {
+		t.Fatalf("typeof leak in b = %+v, err %v; want undefined", got, err)
+	}
+	ra, err := a.Eval(context.Background(), `Math.random()`, ModeJSONResult)
+	if err != nil {
+		t.Fatalf("random in a: %v", err)
+	}
+	rb, err := b.Eval(context.Background(), `Math.random()`, ModeJSONResult)
+	if err != nil {
+		t.Fatalf("random in b: %v", err)
+	}
+	if ra.Output == rb.Output {
+		t.Fatalf("restored instances share a Math.random sequence: both %q", ra.Output)
 	}
 }

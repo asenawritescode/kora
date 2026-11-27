@@ -8,7 +8,7 @@ import (
 // EmbeddedConfig configures the embedded runner.
 type EmbeddedConfig struct {
 	PoolSize int           // number of prewarmed runtimes (default: 15)
-	MaxRAM   int64         // per-execution heap cap (QuickJS) or advisory target (goja)
+	MaxRAM   int64         // per-execution heap cap, enforced on QuickJS (default); advisory on the goja fallback
 	Timeout  time.Duration // default execution timeout
 }
 

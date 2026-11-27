@@ -2,24 +2,39 @@
  * no quickjs-libc, so no WASI environ/signal gaps. The host talks to the guest
  * through one input buffer, one output buffer, and one imported call that
  * carries a JSON request and returns a JSON response. */
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include "quickjs.h"
+
+/* Added to quickjs.c by build/quickjs-reseed.patch (applied by build.sh). */
+void JS_KoraReseedRandom(JSContext *ctx, uint64_t seed);
 
 __attribute__((import_module("kora_host"), import_name("call")))
 extern int host_call(const char *req, int len);
 __attribute__((import_module("kora_host"), import_name("take")))
 extern void host_take(char *dst);
 
-#define BUFCAP (4 * 1024 * 1024)
-static char input_buf[BUFCAP];
+static char *in_buf;
+static int in_cap;
 static char *out_buf;
 static int out_len;
 static JSRuntime *rt;
 static JSContext *ctx;
 
-__attribute__((export_name("buffer"))) char *buffer(void) { return input_buf; }
-__attribute__((export_name("buffer_cap"))) int buffer_cap(void) { return BUFCAP; }
+/* buffer_reserve(n) -> ptr: a heap input buffer of at least n+1 bytes (room for
+ * the NUL terminator). It keeps the current buffer when that is already big
+ * enough, and returns NULL when the allocation fails. */
+__attribute__((export_name("buffer_reserve")))
+char *buffer_reserve(int n) {
+  if (n < 0) return NULL;
+  if (n + 1 <= in_cap) return in_buf;
+  char *p = realloc(in_buf, (size_t)n + 1);
+  if (!p) return NULL;
+  in_buf = p;
+  in_cap = n + 1;
+  return in_buf;
+}
 __attribute__((export_name("output"))) char *output(void) { return out_buf; }
 __attribute__((export_name("output_len"))) int output_len(void) { return out_len; }
 
@@ -64,6 +79,12 @@ int init(unsigned int mem_limit, unsigned int stack_size) {
   return 0;
 }
 
+/* reseed(lo, hi): a fresh Math.random sequence for a runtime restored from a snapshot. */
+__attribute__((export_name("reseed")))
+void reseed(unsigned int lo, unsigned int hi) {
+  if (ctx) JS_KoraReseedRandom(ctx, ((uint64_t)hi << 32) | lo);
+}
+
 #define EVAL_COMPILE_ONLY 1
 #define EVAL_JSON_RESULT 2
 
@@ -75,7 +96,7 @@ __attribute__((export_name("eval")))
 int eval(int len, int flags) {
   if (!ctx) return -2;
   int jsflags = JS_EVAL_TYPE_GLOBAL | ((flags & EVAL_COMPILE_ONLY) ? JS_EVAL_FLAG_COMPILE_ONLY : 0);
-  JSValue v = JS_Eval(ctx, input_buf, (size_t)len, "<script>", jsflags);
+  JSValue v = JS_Eval(ctx, in_buf, (size_t)len, "<script>", jsflags);
   if (!JS_IsException(v) && (flags & EVAL_JSON_RESULT)) {
     JSValue s = JS_JSONStringify(ctx, v, JS_UNDEFINED, JS_UNDEFINED);
     JS_FreeValue(ctx, v);

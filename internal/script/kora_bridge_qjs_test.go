@@ -1,4 +1,4 @@
-//go:build qjsscript
+//go:build !gojascript
 
 package script
 
@@ -81,5 +81,35 @@ func TestKoraBridgeCollectsLogsInOrder(t *testing.T) {
 	want := []LogEntry{{Level: "warn", Message: "first"}, {Level: "error", Message: "second"}, {Level: "info", Message: ""}}
 	if !reflect.DeepEqual(result.Logs, want) {
 		t.Fatalf("Logs = %+v, want %+v", result.Logs, want)
+	}
+}
+
+func TestKoraBridgeHidesSetupGlobals(t *testing.T) {
+	tests := []struct {
+		name    string
+		script  string
+		want    any
+		wantErr string
+	}{
+		{name: "install function removed after setup", script: `return {result: typeof __kora_install};`, want: "undefined"},
+		{name: "host function removed", script: `return {result: typeof __kora_host};`, want: "undefined"},
+		{name: "install function cannot be called", script: `__kora_install({}); return {result: 1};`, wantErr: "__kora_install"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := runKora(t, context.Background(), ExecuteRequest{Script: tc.script})
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Execute error = %v, want it to mention %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if result.Result != tc.want {
+				t.Fatalf("result = %v, want %v", result.Result, tc.want)
+			}
+		})
 	}
 }
