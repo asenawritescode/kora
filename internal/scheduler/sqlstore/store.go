@@ -221,8 +221,13 @@ func (s *Store) ClaimDue(ctx context.Context, tenant, jobName, owner string, now
 		return nil, fmt.Errorf("begin scheduled occurrence claim: %w", err)
 	}
 	defer tx.Rollback()
+	// The definition row lock serializes claims for one job. Without it, two
+	// READ COMMITTED workers can both pass the running check below before either
+	// commits, and the second then materializes the next due slot. The lock is
+	// the first statement so MySQL REPEATABLE READ takes its snapshot after the
+	// wait. Lock order (definition, then module snapshot) matches RegisterDefinition.
 	var definitionJSON string
-	if err := tx.QueryRowContext(ctx, db.Rebind(s.dialect, `SELECT job_json FROM _kora_schedule_definition WHERE tenant_id=? AND job_name=?`), tenant, jobName).Scan(&definitionJSON); err != nil {
+	if err = tx.QueryRowContext(ctx, db.Rebind(s.dialect, `SELECT job_json FROM _kora_schedule_definition WHERE tenant_id=? AND job_name=?`+s.dialect.ExclusiveRowLock()), tenant, jobName).Scan(&definitionJSON); err != nil {
 		return nil, fmt.Errorf("load scheduled job owner for admission: %w", err)
 	}
 	var definition scheduler.JobConfig
