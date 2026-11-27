@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,50 @@ func newQJSTestRunner(t *testing.T, cfg EmbeddedConfig) *EmbeddedRunner {
 	runner := NewEmbeddedRunner(cfg)
 	t.Cleanup(func() { _ = runner.Close() })
 	return runner
+}
+
+// A prewarmed instance serves one execution: a global set by the first is gone in the second.
+func TestQJSPrewarmedInstanceNeverServesTwoExecutions(t *testing.T) {
+	runner := newQJSTestRunner(t, EmbeddedConfig{PoolSize: 1, Timeout: 5 * time.Second})
+	if _, err := runner.Execute(context.Background(), ExecuteRequest{Script: `globalThis.leak = 1;`}); err != nil {
+		t.Fatalf("first Execute: %v", err)
+	}
+	res, err := runner.Execute(context.Background(), ExecuteRequest{Script: `return {result: typeof leak};`})
+	if err != nil {
+		t.Fatalf("second Execute: %v", err)
+	}
+	if res.Result != "undefined" {
+		t.Fatalf("second execution saw leak as %v, want undefined", res.Result)
+	}
+}
+
+// Close drains a full pool and returns promptly, leaving no goroutine behind.
+func TestQJSCloseWithFullPoolReturnsPromptly(t *testing.T) {
+	before := runtime.NumGoroutine()
+	runner := NewEmbeddedRunner(EmbeddedConfig{PoolSize: 4, Timeout: 5 * time.Second})
+	if _, err := runner.Execute(context.Background(), ExecuteRequest{Script: `return {result: 1};`}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- runner.Close() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return within 5s")
+	}
+	if n := len(runner.ready); n != 0 {
+		t.Fatalf("ready holds %d instances after Close, want 0", n)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for runtime.NumGoroutine() > before {
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutines = %d after Close, want at most %d", runtime.NumGoroutine(), before)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestQJSExecuteReturnValues(t *testing.T) {

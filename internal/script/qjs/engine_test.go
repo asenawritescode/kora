@@ -28,12 +28,55 @@ func newTestEngine(t *testing.T) *Engine {
 // newTestInstance returns an instance closed at test end.
 func newTestInstance(t *testing.T, eng *Engine, h Handler) *Instance {
 	t.Helper()
-	inst, err := eng.NewInstance(context.Background(), h)
+	inst, err := eng.NewInstance(context.Background())
 	if err != nil {
 		t.Fatalf("NewInstance: %v", err)
 	}
 	t.Cleanup(func() { _ = inst.Close(context.Background()) })
+	inst.SetHandler(h)
 	return inst
+}
+
+func TestHostCallHandlerBinding(t *testing.T) {
+	const hostCall = `__kora_host("{}")`
+	tests := []struct {
+		name       string
+		setHandler bool
+		want       string
+		reached    bool
+	}{
+		{name: "host call before SetHandler throws", setHandler: false,
+			want: `{"throw":"kora host calls are not available"}`},
+		{name: "host call after SetHandler reaches the handler", setHandler: true,
+			want: `{"ok":1}`, reached: true},
+	}
+	eng := newTestEngine(t)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			inst, err := eng.NewInstance(context.Background())
+			if err != nil {
+				t.Fatalf("NewInstance: %v", err)
+			}
+			t.Cleanup(func() { _ = inst.Close(context.Background()) })
+			reached := false
+			if tc.setHandler {
+				inst.SetHandler(func(context.Context, []byte) []byte {
+					reached = true
+					return []byte(`{"ok":1}`)
+				})
+			}
+			res, err := inst.Eval(context.Background(), hostCall, 0)
+			if err != nil {
+				t.Fatalf("Eval: %v", err)
+			}
+			if res.Output != tc.want {
+				t.Fatalf("output = %q, want %q", res.Output, tc.want)
+			}
+			if reached != tc.reached {
+				t.Fatalf("handler reached = %v, want %v", reached, tc.reached)
+			}
+		})
+	}
 }
 
 // noHostCall fails the test if the guest makes a host call.

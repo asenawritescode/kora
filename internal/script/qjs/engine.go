@@ -103,18 +103,15 @@ type Instance struct {
 	outputLen api.Function
 }
 
-// NewInstance creates a fresh QuickJS runtime with the engine's limits. h answers
-// every __kora_host call the guest makes.
-func (e *Engine) NewInstance(ctx context.Context, h Handler) (*Instance, error) {
-	if h == nil {
-		return nil, errors.New("qjs: nil handler")
-	}
+// NewInstance creates a fresh QuickJS runtime with the engine's limits. It has no
+// handler yet: a host call made before SetHandler throws.
+func (e *Engine) NewInstance(ctx context.Context) (*Instance, error) {
 	cfg := wazero.NewModuleConfig().WithName("").WithSysWalltime().WithSysNanotime()
 	mod, err := e.rt.InstantiateModule(ctx, e.compiled, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("instantiate: %w", err)
 	}
-	inst, err := initInstance(ctx, mod, h, e.limits)
+	inst, err := initInstance(ctx, mod, e.limits)
 	if err != nil {
 		_ = mod.Close(ctx) // best effort: the init error is the one to report
 		return nil, err
@@ -123,14 +120,14 @@ func (e *Engine) NewInstance(ctx context.Context, h Handler) (*Instance, error) 
 }
 
 // initInstance resolves the reactor exports and runs QuickJS init under the limits.
-func initInstance(ctx context.Context, mod api.Module, h Handler, lim Limits) (*Instance, error) {
+func initInstance(ctx context.Context, mod api.Module, lim Limits) (*Instance, error) {
 	// A reactor may export _initialize (the WASI reactor constructor); call it when present.
 	if initFn := mod.ExportedFunction("_initialize"); initFn != nil {
 		if _, err := initFn.Call(ctx); err != nil {
 			return nil, fmt.Errorf("_initialize: %w", err)
 		}
 	}
-	inst := &Instance{mod: mod, h: h}
+	inst := &Instance{mod: mod}
 	for name, dst := range map[string]*api.Function{"eval": &inst.eval, "output": &inst.outputPtr, "output_len": &inst.outputLen} {
 		fn, err := exported(mod, name)
 		if err != nil {
@@ -200,6 +197,21 @@ func (i *Instance) Close(ctx context.Context) error {
 	return i.mod.Close(ctx)
 }
 
+// SetHandler sets the handler that answers the guest's host calls from the next Eval on.
+func (i *Instance) SetHandler(h Handler) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.h = h
+}
+
+// noHandlerAnswer makes the guest throw: a host call arrived before SetHandler.
+const noHandlerAnswer = `{"throw":"kora host calls are not available"}`
+
+// noHandler answers a host call made before SetHandler.
+func noHandler(context.Context, []byte) []byte {
+	return []byte(noHandlerAnswer)
+}
+
 // Mode is a bit set matching the reactor's eval flags.
 type Mode uint32
 
@@ -235,7 +247,11 @@ func (i *Instance) Eval(ctx context.Context, src string, mode Mode) (Result, err
 		return Result{}, errors.New("qjs: write source to guest memory")
 	}
 
-	evalCtx := context.WithValue(ctx, stateKey{}, &callState{h: i.h})
+	h := i.h
+	if h == nil {
+		h = noHandler
+	}
+	evalCtx := context.WithValue(ctx, stateKey{}, &callState{h: h})
 	res, err := i.eval.Call(evalCtx, uint64(len(src)), uint64(mode))
 	if err != nil {
 		return Result{}, fmt.Errorf("eval: %w", err)
