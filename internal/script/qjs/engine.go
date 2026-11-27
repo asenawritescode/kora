@@ -112,6 +112,11 @@ type Snapshot struct {
 	globals map[string]uint64
 }
 
+// MemoryBytes returns the size of the snapshot's linear memory.
+func (s *Snapshot) MemoryBytes() int {
+	return len(s.memory)
+}
+
 // Close releases the runtime and every instance it created.
 func (e *Engine) Close(ctx context.Context) error {
 	return e.rt.Close(ctx)
@@ -123,6 +128,7 @@ type Instance struct {
 	mu           sync.Mutex
 	mod          api.Module
 	h            Handler
+	reused       int // Reset calls since the instance was restored
 	eval         api.Function
 	compile      api.Function
 	evalBytecode api.Function
@@ -263,6 +269,57 @@ func restoreInstance(ctx context.Context, mod api.Module, snap *Snapshot) (*Inst
 		return nil, err
 	}
 	return inst, nil
+}
+
+// zeroPage is the source of the zeroing Reset does for pages a run grew.
+var zeroPage [wasmPageBytes]byte
+
+// Reset returns an instance that ran to completion to the state of snap, without
+// instantiating a new module. The snapshot is copied back over linear memory, the pages a
+// run grew beyond it are zeroed, the snapshot globals are restored, the handler is dropped
+// and Math.random is reseeded. Only an instance whose last Eval completed normally may be
+// reset: a run cut short (a timeout that closed the module, a trap) must be closed instead.
+func (i *Instance) Reset(ctx context.Context, snap *Snapshot) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	mem := i.mod.Memory()
+	size := uint32(len(snap.memory))
+	if mem.Size() < size {
+		return errors.New("qjs: module memory is smaller than the snapshot")
+	}
+	for off := size; off < mem.Size(); off += wasmPageBytes {
+		if !mem.Write(off, zeroPage[:]) {
+			return errors.New("qjs: zero guest memory on reset")
+		}
+	}
+	if !mem.Write(0, snap.memory) {
+		return errors.New("qjs: write snapshot to guest memory on reset")
+	}
+	for name, v := range snap.globals {
+		g, ok := i.mod.ExportedGlobal(name).(api.MutableGlobal)
+		if !ok {
+			return fmt.Errorf("qjs: guest global %q is not mutable", name)
+		}
+		g.Set(v)
+	}
+	i.h = nil
+	if err := reseedRandom(ctx, i.mod); err != nil {
+		return err
+	}
+	i.reused++
+	return nil
+}
+
+// Reused returns how many times the instance was reset since it was restored.
+func (i *Instance) Reused() int {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.reused
+}
+
+// MemoryBytes returns the instance's current linear-memory size.
+func (i *Instance) MemoryBytes() int {
+	return int(i.mod.Memory().Size())
 }
 
 // reseedRandom gives the restored runtime a fresh Math.random sequence.
