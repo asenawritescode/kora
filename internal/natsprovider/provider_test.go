@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,7 +17,45 @@ import (
 )
 
 func runEmbeddedServer(t *testing.T) (*server.Server, string) {
-	return runEmbeddedServerWithStoreDir(t, t.TempDir())
+	return runEmbeddedServerWithStoreDir(t, jetStreamStoreDir(t))
+}
+
+// jetStreamStoreDir returns a JetStream store directory for one test. It does
+// not use t.TempDir: its cleanup must tolerate a late consumer flush (see
+// removeStoreDir), so it is registered here, before the server's cleanup, which
+// LIFO runs first.
+func jetStreamStoreDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "natsprovider-store-")
+	if err != nil {
+		t.Fatalf("create JetStream store dir: %v", err)
+	}
+	t.Cleanup(func() { removeStoreDir(t, dir) })
+	return dir
+}
+
+// removeStoreDir removes a JetStream store dir after the server has shut down.
+// nats-server v2.14.5 consumerFileStore.flushLoop writes obs/<consumer>/index.db
+// outside any lock, and Stop waits at most 100 ms for an in-flight flush
+// (waitOnFlusher); Shutdown does not join the flusher. A write that lands during
+// the walk makes RemoveAll fail with "directory not empty", so the removal is
+// retried for a bounded time. Only the RemoveAll error is retried; if it still
+// fails at the bound, the test fails.
+func removeStoreDir(t *testing.T, dir string) {
+	t.Helper()
+	const bound = 2 * time.Second
+	deadline := time.Now().Add(bound)
+	for {
+		err := os.RemoveAll(dir)
+		if err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("remove JetStream store dir %s after %s: %v", dir, bound, err)
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }
 
 func runEmbeddedServerWithStoreDir(t *testing.T, storeDir string) (*server.Server, string) {
@@ -28,9 +67,8 @@ func runEmbeddedServerWithStoreDir(t *testing.T, storeDir string) (*server.Serve
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}
-	// Register shutdown after the caller's t.TempDir (LIFO cleanup) and wait for
-	// it: Shutdown alone returns while JetStream file-store goroutines may still
-	// write into storeDir, which races the TempDir RemoveAll.
+	// Register shutdown after the store dir cleanup (LIFO runs it first) and wait
+	// for it: Shutdown alone returns before JetStream stops every consumer.
 	t.Cleanup(func() {
 		s.Shutdown()
 		s.WaitForShutdown()
@@ -90,7 +128,7 @@ func TestBootstrapIsIdempotentAndRequestReplyWorks(t *testing.T) {
 }
 
 func TestFileBackedEventStreamSurvivesServerRestart(t *testing.T) {
-	storeDir := t.TempDir()
+	storeDir := jetStreamStoreDir(t)
 	server1, url1 := runEmbeddedServerWithStoreDir(t, storeDir)
 	provider1, err := New(context.Background(), Config{
 		Name: "kora-restart-test", ServerURLs: []string{url1}, StreamName: "KORA_RESTART_EVENTS",
