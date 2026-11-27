@@ -44,10 +44,22 @@ must come from its supplier, and the order's bills that are not Cancelled, compa
 the base currency, must not exceed the total of its goods receipts. A bill naming both
 must name a receipt that belongs to that order.
 
+**Posting to the books.** With `erp-accounting` installed, each purchase event posts a
+balanced entry in the same save, by posting role, once. A goods receipt: Dr Inventory,
+Cr Goods Received Not Billed (at the receipt's line cost). A recognized bill (Open or
+beyond): Dr Goods Received Not Billed when it names a receipt, otherwise Dr Expenses; Cr
+Payable; a cancelled unpaid bill reverses. A paid supplier payment: Dr Payable, Cr the
+account the money left (Cash, Bank or Cash Clearing by method); voiding it reverses.
+Amounts are in the base currency. Without the books, every document still saves and
+nothing posts.
+
 Not here yet:
-- No payable postings, no approvals. Matching is by amount and supplier, not by line.
+- Simplified posting: no input VAT, withholding tax, FX gain/loss, landed cost, supplier
+  advances, settlement discounts or debit notes, and no 3-way-match price variance. These
+  need fields the pack does not carry yet (#815 follow-ups).
+- No approvals. Matching is by amount and supplier, not by line.
 
 Checks: `go test ./internal/site -run Pack` and
-`go test -tags integration ./internal/api -run 'TestPackScripts(PurchasingPayments|PurchaseOrders)'`
+`go test -tags integration ./internal/api -run 'TestPackScripts(PurchasingPayments|PurchaseOrders|PurchasingPosting)'`
 (needs MySQL and PostgreSQL, see `KORA_PACK_SCRIPTS_DISPOSABLE_MYSQL_DSN` and
 `KORA_PACK_SCRIPTS_DISPOSABLE_POSTGRES_DSN`).

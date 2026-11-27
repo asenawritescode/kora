@@ -9,6 +9,23 @@ function money(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
+// booksReady is true only when the books (the lib_books library shipped by
+// erp-accounting) are loaded; purchasing posts to the books then, and saves
+// fine without them (nothing posts).
+function booksReady() {
+  return typeof booksInstalled === "function" && booksInstalled();
+}
+
+// paymentRole maps a payment method to the account the money left.
+function paymentRole(method) {
+  var roles = { "Cash": "Cash", "Bank Transfer": "Bank", "Card": "Bank", "Other": "Cash Clearing" };
+  var role = roles[String(method || "")];
+  if (!role) {
+    throw new Error("No account for payment method " + method + ".");
+  }
+  return role;
+}
+
 function rowsOf(payment) {
   var rows = payment.allocations || [];
   var out = [];
@@ -95,6 +112,15 @@ function applyPaid() {
   }
   doc.allocations = plan.rows;
   doc.unallocated_amount = money(money(doc.amount) - plan.total);
+  if (booksReady()) {
+    var payBase = money(money(doc.amount) * Number(doc.exchange_rate || 1));
+    if (payBase !== 0) {
+      postEntry("Supplier Payment", doc.name, String(doc.payment_date || "").slice(0, 10), "Supplier payment", [
+        { role: "Payable", debit: payBase, credit: 0 },
+        { role: paymentRole(doc.method), debit: 0, credit: payBase }
+      ]);
+    }
+  }
 }
 
 function reverseAllocations() {
@@ -105,6 +131,9 @@ function reverseAllocations() {
     kora.saveDoc("Supplier Bill", { name: name, amount_paid: left < 0 ? 0 : left });
   }
   doc.unallocated_amount = 0;
+  if (booksReady()) {
+    reverseEntry("Supplier Payment", doc.name, "Supplier payment");
+  }
 }
 
 if (!oldDoc) {
