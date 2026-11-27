@@ -134,6 +134,25 @@ func TestQJSHeapCapStopsAllocationAndRunnerStaysUsable(t *testing.T) {
 	}
 }
 
+// Unbounded recursion throws a catchable JS error, not a wasm trap, and the runner keeps working.
+func TestQJSDeepRecursionThrowsAndRunnerStaysUsable(t *testing.T) {
+	runner := newQJSTestRunner(t, EmbeddedConfig{PoolSize: 1, Timeout: 10 * time.Second})
+	_, err := runner.Execute(context.Background(), ExecuteRequest{Script: `function f(n){return f(n+1)} f(0)`})
+	if err == nil {
+		t.Fatal("unbounded recursion returned no error")
+	}
+	if msg := strings.ToLower(err.Error()); strings.Contains(msg, "wasm") || !strings.Contains(msg, "stack") {
+		t.Fatalf("recursion error = %q, want a JS stack error and no wasm trap", err)
+	}
+	res, err := runner.Execute(context.Background(), ExecuteRequest{Script: `return {result: 1};`})
+	if err != nil {
+		t.Fatalf("Execute after recursion: %v", err)
+	}
+	if res.Result != int64(1) {
+		t.Fatalf("result after recursion = %#v, want int64(1)", res.Result)
+	}
+}
+
 func TestQJSDocumentRoundTrip(t *testing.T) {
 	runner := newQJSTestRunner(t, EmbeddedConfig{PoolSize: 1, Timeout: 5 * time.Second})
 	doc := map[string]any{

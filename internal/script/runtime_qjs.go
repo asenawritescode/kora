@@ -17,9 +17,9 @@ import (
 
 // QuickJS under WASI reports UTC; production containers run UTC too, so goja matches (no change).
 const (
-	qjsStackBytes    = 1 << 20  // JS stack cap per instance
-	qjsHeadroomBytes = 32 << 20 // wasm pages beyond the JS heap: input buffer, wasm stack, static data
-	qjsPageBytes     = 64 << 10 // wasm linear-memory page size
+	qjsStackBytes    = 768 << 10 // JS stack cap per instance; below the 1 MiB wasm stack so QuickJS throws first
+	qjsHeadroomBytes = 32 << 20  // wasm pages beyond the JS heap: input buffer, wasm stack, static data
+	qjsPageBytes     = 64 << 10  // wasm linear-memory page size
 	qjsDefaultHeap   = 128 << 20
 
 	// validateStubSource gives a script under Validate the globals it may reference.
@@ -83,7 +83,7 @@ func (r *EmbeddedRunner) newPrewarmed(ctx context.Context) (*qjs.Instance, error
 		return nil, err
 	}
 	if err = evalSetup(ctx, inst, freezePrototypesSource); err != nil {
-		_ = inst.Close(context.Background()) // best effort: the hardening error is the one to report
+		_ = inst.Close(context.WithoutCancel(ctx)) // best effort: the hardening error is the one to report
 		return nil, fmt.Errorf("script sandbox hardening failed: %w", err)
 	}
 	return inst, nil
@@ -93,7 +93,7 @@ func (r *EmbeddedRunner) newPrewarmed(ctx context.Context) (*qjs.Instance, error
 // has one, else one built inline. It never waits for a refill. Each call starts one
 // refill, so the pool recovers even when it was empty.
 func (r *EmbeddedRunner) takeInstance(ctx context.Context) (*qjs.Instance, error) {
-	r.refillAsync()
+	r.refillAsync() //nolint:contextcheck // the refill is bound to r.ctx, not the request, so Close cancels and waits for it
 	select {
 	case inst := <-r.ready:
 		return inst, nil

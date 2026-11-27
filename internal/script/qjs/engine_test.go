@@ -11,8 +11,9 @@ import (
 	"time"
 )
 
-// testLimits is the cap shared by every test: 8 MiB JS heap, 1 MiB JS stack, 128 MiB wasm memory.
-var testLimits = Limits{HeapBytes: 8 << 20, StackBytes: 1 << 20, MaxPages: 2048}
+// testLimits is the cap shared by every test: 8 MiB JS heap, 768 KiB JS stack (below the
+// 1 MiB wasm stack, so QuickJS throws before the wasm stack overflows), 128 MiB wasm memory.
+var testLimits = Limits{HeapBytes: 8 << 20, StackBytes: 768 << 10, MaxPages: 2048}
 
 // newTestEngine returns an engine closed at test end.
 func newTestEngine(t *testing.T) *Engine {
@@ -248,10 +249,12 @@ func TestRealClock(t *testing.T) {
 	}
 }
 
-func TestEvalRejectsOversizedSource(t *testing.T) {
+// A 3 MiB source, larger than the old fixed input buffer, grows the guest buffer and runs.
+func TestEvalGrowsBufferForLargeSource(t *testing.T) {
 	inst := newTestInstance(t, newTestEngine(t), noHostCall(t))
-	_, err := inst.Eval(context.Background(), strings.Repeat("a", 4*1024*1024), 0)
-	if !errors.Is(err, ErrSourceTooLarge) {
-		t.Fatalf("err = %v, want ErrSourceTooLarge", err)
+	src := "var s='" + strings.Repeat("a", 3<<20) + "'; s.length"
+	got, err := inst.Eval(context.Background(), src, ModeJSONResult)
+	if err != nil || got.Thrown || got.Output != "3145728" {
+		t.Fatalf("result = %+v, err %v; want 3145728", got, err)
 	}
 }

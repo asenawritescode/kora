@@ -22,9 +22,8 @@ import (
 //go:embed testdata/qjs.wasm
 var module []byte
 
-// ErrSourceTooLarge is returned when a source (plus its NUL terminator) does not
-// fit the guest input buffer.
-var ErrSourceTooLarge = errors.New("qjs: source does not fit the input buffer")
+// ErrSourceTooLarge is returned when a source does not fit the guest's i32 length ABI.
+var ErrSourceTooLarge = errors.New("qjs: source exceeds the i32 length limit")
 
 // maxInt32 bounds the length a host call may return to the guest (i32 ABI).
 const maxInt32 = math.MaxInt32
@@ -96,9 +95,8 @@ type Instance struct {
 	mu        sync.Mutex
 	mod       api.Module
 	h         Handler
-	buf       uint32
-	bufCap    uint32
 	eval      api.Function
+	reserve   api.Function
 	outputPtr api.Function
 	outputLen api.Function
 }
@@ -128,7 +126,13 @@ func initInstance(ctx context.Context, mod api.Module, lim Limits) (*Instance, e
 		}
 	}
 	inst := &Instance{mod: mod}
-	for name, dst := range map[string]*api.Function{"eval": &inst.eval, "output": &inst.outputPtr, "output_len": &inst.outputLen} {
+	exports := map[string]*api.Function{
+		"eval":           &inst.eval,
+		"buffer_reserve": &inst.reserve,
+		"output":         &inst.outputPtr,
+		"output_len":     &inst.outputLen,
+	}
+	for name, dst := range exports {
 		fn, err := exported(mod, name)
 		if err != nil {
 			return nil, err
@@ -136,9 +140,6 @@ func initInstance(ctx context.Context, mod api.Module, lim Limits) (*Instance, e
 		*dst = fn
 	}
 	if err := runInit(ctx, mod, lim); err != nil {
-		return nil, err
-	}
-	if err := inst.resolveBuffer(ctx, mod); err != nil {
 		return nil, err
 	}
 	return inst, nil
@@ -157,29 +158,6 @@ func runInit(ctx context.Context, mod api.Module, lim Limits) error {
 	if rc := int32(res[0]); rc != 0 {
 		return fmt.Errorf("init returned %d", rc)
 	}
-	return nil
-}
-
-// resolveBuffer caches the guest input buffer address and capacity.
-func (i *Instance) resolveBuffer(ctx context.Context, mod api.Module) error {
-	bufFn, err := exported(mod, "buffer")
-	if err != nil {
-		return err
-	}
-	capFn, err := exported(mod, "buffer_cap")
-	if err != nil {
-		return err
-	}
-	bufRes, err := bufFn.Call(ctx)
-	if err != nil {
-		return fmt.Errorf("buffer: %w", err)
-	}
-	capRes, err := capFn.Call(ctx)
-	if err != nil {
-		return fmt.Errorf("buffer_cap: %w", err)
-	}
-	i.buf = uint32(bufRes[0])
-	i.bufCap = uint32(capRes[0])
 	return nil
 }
 
@@ -233,17 +211,20 @@ type Result struct {
 // script exception is a Result with Thrown set. Callers check ctx.Err() to tell a
 // timeout from another failure.
 func (i *Instance) Eval(ctx context.Context, src string, mode Mode) (Result, error) {
-	if uint64(len(src))+1 > uint64(i.bufCap) {
+	if uint64(len(src)) > maxInt32-1 {
 		return Result{}, ErrSourceTooLarge
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
+	buf, err := i.reserveBuffer(ctx, uint32(len(src)))
+	if err != nil {
+		return Result{}, err
+	}
 	// QuickJS reads its input up to the length given, but the NUL keeps stale
 	// bytes from an earlier, longer eval out of the parser.
-	payload := make([]byte, len(src)+1)
-	copy(payload, src)
-	if !i.mod.Memory().Write(i.buf, payload) {
+	mem := i.mod.Memory()
+	if !mem.WriteString(buf, src) || !mem.WriteByte(buf+uint32(len(src)), 0) {
 		return Result{}, errors.New("qjs: write source to guest memory")
 	}
 
@@ -265,6 +246,19 @@ func (i *Instance) Eval(ctx context.Context, src string, mode Mode) (Result, err
 	default:
 		return Result{}, fmt.Errorf("qjs: eval returned %d", rc)
 	}
+}
+
+// reserveBuffer has the guest hold an input buffer of at least n+1 bytes and returns
+// its address. The guest grows the buffer only when a source is larger than any before it.
+func (i *Instance) reserveBuffer(ctx context.Context, n uint32) (uint32, error) {
+	res, err := i.reserve.Call(ctx, uint64(n))
+	if err != nil {
+		return 0, fmt.Errorf("buffer_reserve: %w", err)
+	}
+	if ptr := uint32(res[0]); ptr != 0 {
+		return ptr, nil
+	}
+	return 0, errors.New("qjs: guest could not allocate the input buffer")
 }
 
 // readOutput copies the guest output buffer. The copy is needed: the guest reuses
