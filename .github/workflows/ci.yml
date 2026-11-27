@@ -90,8 +90,51 @@ jobs:
             ~/.cache/go-build
           key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
 
-  go:
-    name: Go
+  go-unit:
+    name: Go unit ${{ matrix.shard }}/3
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - name: Restore Go build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ matrix.shard }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            gobuild-${{ runner.os }}-${{ github.job }}-${{ matrix.shard }}-${{ hashFiles('**/go.sum') }}-
+            gobuild-${{ runner.os }}-${{ github.job }}-${{ matrix.shard }}-
+
+      # Same flags as the former single Test step; only the package list differs per shard.
+      - name: Test (shard ${{ matrix.shard }}/3)
+        env:
+          KORA_UNIT_SHARD: ${{ matrix.shard }}/3
+        run: |
+          pkgs="$(scripts/ci-unit-shard.sh)"
+          echo "$pkgs"
+          go test $pkgs -v -count=1
+
+      - name: Save Go build cache
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ matrix.shard }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+
+  go-checks:
+    name: Go checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -110,9 +153,6 @@ jobs:
           restore-keys: |
             gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-
             gobuild-${{ runner.os }}-${{ github.job }}-
-
-      - name: Test
-        run: go test ./... -v -count=1
 
       - name: Verify domain import boundary gate
         run: go test ./internal/application -run 'TestDomainPackagesDoNotImportOtherDomainInternals|TestDomainImportGateRejectsViolationFixture' -count=1
@@ -141,8 +181,59 @@ jobs:
             ~/.cache/go-build
           key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
 
-  lint:
-    name: Lint
+  # Gate for the unit shards and Go checks. Required check name: Go.
+  go:
+    name: Go
+    if: always()
+    needs: [go-unit, go-checks]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Go job to succeed
+        env:
+          UNIT: ${{ needs.go-unit.result }}
+          CHECKS: ${{ needs.go-checks.result }}
+        run: |
+          if [ "$UNIT" != "success" ] || [ "$CHECKS" != "success" ]; then
+            echo "::error::go-unit=$UNIT go-checks=$CHECKS"
+            exit 1
+          fi
+
+  lint-vet:
+    name: Lint vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - name: Restore Go build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-
+            gobuild-${{ runner.os }}-${{ github.job }}-
+
+      # Full-repository vet. golangci below only checks changed lines.
+      - name: Vet (all packages)
+        run: go vet ./...
+
+      - name: Save Go build cache
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+
+  lint-static:
+    name: Lint static
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -164,30 +255,86 @@ jobs:
             gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-
             gobuild-${{ runner.os }}-${{ github.job }}-
 
-      # Build the tools with the repository's Go version: a prebuilt golangci-lint compiled with an
-      # older Go refuses to load a module that targets a newer one.
-      - name: Install golangci-lint and deadcode
-        run: |
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
-          go install golang.org/x/tools/cmd/deadcode@v0.52.0
+      # Build the tool with the repository's Go version (a prebuilt golangci-lint compiled with an
+      # older Go refuses to load a module that targets a newer one). Cached: installs only on a miss.
+      - name: Cache golangci-lint binary
+        id: golangci-bin
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/golangci-lint
+          key: lint-tool-golangci-lint-v1.64.8-go1.25-${{ runner.os }}
 
-      - name: Cache golangci-lint
+      - name: Install golangci-lint
+        if: steps.golangci-bin.outputs.cache-hit != 'true'
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+
+      - name: Cache golangci-lint results
         uses: actions/cache@v4
         with:
           path: ~/.cache/golangci-lint
-          key: golangci-${{ runner.os }}-${{ hashFiles('.golangci.yml', '**/go.sum') }}-${{ github.sha }}
+          key: golangci-${{ runner.os }}-${{ github.job }}-${{ hashFiles('.golangci.yml', '**/go.sum') }}-${{ github.sha }}
           restore-keys: |
-            golangci-${{ runner.os }}-${{ hashFiles('.golangci.yml', '**/go.sum') }}-
-            golangci-${{ runner.os }}-
-
-      # Full-repository vet. The Go job no longer runs it; golangci below only checks changed lines.
-      - name: Vet (all packages)
-        run: go vet ./...
+            golangci-${{ runner.os }}-${{ github.job }}-${{ hashFiles('.golangci.yml', '**/go.sum') }}-
+            golangci-${{ runner.os }}-${{ github.job }}-
 
       # Correctness, security and API-hygiene linters (.golangci.yml) on every line the PR changes.
       - name: Static analysis (changed lines)
         if: github.event_name == 'pull_request'
         run: golangci-lint run --new-from-rev=origin/${{ github.base_ref }}
+
+      - name: Save Go build cache
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+
+  lint-ratchets:
+    name: Lint ratchets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - name: Restore Go build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-
+            gobuild-${{ runner.os }}-${{ github.job }}-
+
+      # The complexity ratchet runs golangci-lint; the dead-code ratchet runs deadcode. Both are
+      # cached by pinned version and go-version, so each installs only on a cache miss.
+      - name: Cache golangci-lint binary
+        id: golangci-bin
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/golangci-lint
+          key: lint-tool-golangci-lint-v1.64.8-go1.25-${{ runner.os }}
+
+      - name: Install golangci-lint
+        if: steps.golangci-bin.outputs.cache-hit != 'true'
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+
+      - name: Cache deadcode binary
+        id: deadcode-bin
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/deadcode
+          key: lint-tool-deadcode-v0.52.0-go1.25-${{ runner.os }}
+
+      - name: Install deadcode
+        if: steps.deadcode-bin.outputs.cache-hit != 'true'
+        run: go install golang.org/x/tools/cmd/deadcode@v0.52.0
 
       # God functions: no function may become newly over the complexity/length limits, and no function
       # already over them may get worse (.lint-baseline/complexity.json only ever shrinks).
@@ -217,3 +364,21 @@ jobs:
             ~/go/pkg/mod
             ~/.cache/go-build
           key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+
+  # Gate for the vet, static and ratchet jobs. Required check name: Lint.
+  lint:
+    name: Lint
+    if: always()
+    needs: [lint-vet, lint-static, lint-ratchets]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Lint job to succeed
+        env:
+          VET: ${{ needs.lint-vet.result }}
+          STATIC: ${{ needs.lint-static.result }}
+          RATCHETS: ${{ needs.lint-ratchets.result }}
+        run: |
+          if [ "$VET" != "success" ] || [ "$STATIC" != "success" ] || [ "$RATCHETS" != "success" ]; then
+            echo "::error::lint-vet=$VET lint-static=$STATIC lint-ratchets=$RATCHETS"
+            exit 1
+          fi
