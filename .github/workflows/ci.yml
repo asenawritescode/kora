@@ -425,3 +425,27 @@ jobs:
       # (.lint-baseline/params.json only ever shrinks).
       - name: Parameter-count ratchet
         run: make params-ratchet
+
+  # The vendored QuickJS reactor must be the output of the pinned sources (quickjs-ng v0.18.0, wasi-sdk 34.0).
+  wasm-build:
+    name: WASM build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache wasi-sdk download
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kora-wasi-sdk
+          key: wasi-sdk-34.0-b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4
+      - name: Build qjs.wasm from pinned sources
+        run: internal/script/qjs/build/build.sh "$RUNNER_TEMP/qjs-build" "$RUNNER_TEMP/qjs.wasm"
+      - name: Compare with vendored qjs.wasm
+        run: |
+          built=$(sha256sum "$RUNNER_TEMP/qjs.wasm" | cut -d' ' -f1)
+          vendored=$(sha256sum internal/script/qjs/testdata/qjs.wasm | cut -d' ' -f1)
+          if [ "$built" != "$vendored" ]; then
+            echo "::error::qjs.wasm is not the build of the pinned sources; rebuild with internal/script/qjs/build/build.sh"
+            echo "built=$built vendored=$vendored"
+            exit 1
+          fi
+          echo "qjs.wasm matches the pinned build: $built"

@@ -1,7 +1,7 @@
 # Building the QuickJS reactor (`testdata/qjs.wasm`)
 
 `testdata/qjs.wasm` is a pinned, reproducible build of `qjs_reactor.c`, a QuickJS
-WASI reactor. It is vendored (CI does not rebuild it yet).
+WASI reactor. It is vendored and CI checks that it is the build of the pinned sources below.
 
 ## Inputs (pinned)
 - **quickjs-ng v0.18.0**: core sources only (`quickjs.c dtoa.c libregexp.c libunicode.c`;
@@ -23,29 +23,15 @@ WASI reactor. It is vendored (CI does not rebuild it yet).
 
 ## Reproduce
 ```sh
-# 1. QuickJS source
-git clone --depth 1 --branch v0.18.0 https://github.com/quickjs-ng/quickjs.git qjs
-cp qjs_reactor.c qjs/
-
-# 2. WASI SDK 34 (self-contained, no root)
-#    https://github.com/WebAssembly/wasi-sdk/releases/tag/wasi-sdk-34
-WASI=/path/to/wasi-sdk
-
-# 3. Build the reactor
-cd qjs
-"$WASI/bin/clang" --target=wasm32-wasip1 \
-  --sysroot="$WASI/share/wasi-sysroot" \
-  -mexec-model=reactor -O2 -DQUICKJS_NG_BUILD \
-  -Wl,-z,stack-size=1048576 \
-  -o qjs.wasm \
-  qjs_reactor.c quickjs.c dtoa.c libregexp.c libunicode.c -lm
+internal/script/qjs/build/build.sh <workdir> internal/script/qjs/testdata/qjs.wasm
 ```
 
-Copy the result to `../testdata/qjs.wasm`.
+`build.sh` downloads wasi-sdk 34.0 (sha256 pinned, skipped when `WASI_SDK` is set),
+clones quickjs-ng v0.18.0, copies `qjs_reactor.c` in and runs the clang command above.
+CI (`WASM build` job in `.github/workflows/ci.yml`) rebuilds the file and fails if its
+sha256 differs from `testdata/qjs.wasm`.
 
 The wasm shadow stack is 1 MiB. The runtime caps the JS stack at 768 KiB
 (`StackBytes` in `internal/script/runtime_qjs.go`), so QuickJS throws a catchable
 RangeError before the wasm stack overflows.
 
-## Follow-up
-Wire wasi-sdk into CI so the artifact is rebuilt rather than vendored. Tracked under #843.
