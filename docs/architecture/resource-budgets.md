@@ -563,9 +563,9 @@ five-second maximum execution timeout, and at most 256 tenants with active or
 waiting executions. Configure `KORA_SCRIPT_MAX_CONCURRENCY`,
 `KORA_SCRIPT_MAX_WAITERS`, `KORA_SCRIPT_MAX_ACTIVE_TENANTS`,
 `KORA_SCRIPT_WAIT_MS`, and `KORA_SCRIPT_TIMEOUT_MS`. This is an execution
-concurrency/time bound; Goja's configured `MaxRAM` is still advisory and is not
-a per-tenant heap limit. No `KORA_SCRIPTS_MAX_RAM` environment setting is
-implemented, so it is omitted from the active environment reference.
+concurrency/time bound. Each execution's heap cap is `EmbeddedConfig.MaxRAM`
+(default 128 MB), a code setting rather than an environment variable; QuickJS
+(the default runtime) enforces it, while the goja fallback treats it as advisory.
 
 Uploads are excluded from tenant database-work admission because they can be
 long-running and use separate storage. Engine applies a process-wide weighted
