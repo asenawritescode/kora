@@ -2177,8 +2177,8 @@
    "statements": 45
   },
   "internal/script::(*EmbeddedRunner).Execute": {
-   "cognitive": 32,
-   "cyclomatic": 23
+   "cognitive": 31,
+   "cyclomatic": 22
   },
   "internal/script::(*Store).AppendAsyncHookTx": {
    "cognitive": 20,
@@ -2204,7 +2204,7 @@
    "statements": 60
   },
   "internal/script::Execute": {
-   "statements": 70
+   "statements": 67
   },
   "internal/script::InspectLifecycleInventory": {
    "cognitive": 21,
@@ -2214,7 +2214,7 @@
    "statements": 54
   },
   "internal/script::buildObject": {
-   "lines": 142
+   "lines": 135
   },
   "internal/site::(*CommonConfig).ApplyEnvOverrides": {
    "cognitive": 23,

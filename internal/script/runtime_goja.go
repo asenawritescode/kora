@@ -175,16 +175,8 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 	defer stopExecutionInterrupt()
 
 	// Inject the kora API into the runtime.
-	api := &koraAPI{
-		req:    req,
-		runner: r,
-		logs:   make([]LogEntry, 0),
-	}
-	if req.Provider != nil {
-		api.docProvider = req.Provider
-		api.secretProvider = req.Provider
-	}
-	api.httpProvider = outboundHTTPProvider(ctx, req.Provider)
+	ops := newKoraOps(ctx, req)
+	api := &koraAPI{req: req, ops: ops}
 	vm.Set("kora", api.buildObject(vm))
 
 	vm.Set("__kora_event__", map[string]any{
@@ -221,7 +213,7 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 
 	result := &ExecuteResult{
 		Duration: duration,
-		Logs:     api.logs,
+		Logs:     ops.logs,
 	}
 
 	if err != nil {
