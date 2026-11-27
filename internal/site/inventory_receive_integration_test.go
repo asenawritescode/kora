@@ -23,9 +23,9 @@ import (
 // stocked through the published operation with no pre-existing Stock Balance,
 // and that adjust_stock still refuses a missing balance.
 func TestInventoryReceiveStockCreatesFirstBalance(t *testing.T) {
-	dsn := os.Getenv("KORA_POS_E2E_MYSQL_DSN")
+	dsn := os.Getenv("KORA_SITE_DISPOSABLE_MYSQL_DSN")
 	if dsn == "" {
-		t.Skip("set KORA_POS_E2E_MYSQL_DSN to a disposable mysql server")
+		t.Skip("set KORA_SITE_DISPOSABLE_MYSQL_DSN to a disposable mysql server")
 	}
 	conn, dbName := posDB(t, "mysql", dsn)
 	dialect := kdb.Resolve("mysql")

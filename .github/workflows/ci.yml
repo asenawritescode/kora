@@ -117,6 +117,7 @@ jobs:
 
       - name: Test disposable MySQL integration packages
         env:
+          KORA_SITE_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_TEST_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_ANALYTICS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
           KORA_OUTBOX_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
@@ -239,75 +240,10 @@ jobs:
           KORA_RECON_DISPOSABLE_LIBSQL_DSN: "http://127.0.0.1:8080"
         run: go test -tags=integration ./internal/recon -run TestBusinessRunPersistenceAcrossDisposableDialects -count=1 -timeout=5m
 
-      - name: Test POS command features on disposable MySQL
+      - name: Test site packages on disposable PostgreSQL
         env:
-          KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/site -run TestPOSCommandFeaturesAcrossDialects -count=1 -timeout=10m
-
-      - name: Test POS command features on disposable Postgres
-        env:
-          KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestPOSCommandFeaturesAcrossDialects -count=1 -timeout=10m
-
-      - name: Test expected cash breakdown on disposable MySQL
-        env:
-          KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/site -run TestPOSExpectedCashAcrossDialects -count=1 -timeout=10m
-
-      - name: Test expected cash breakdown on disposable Postgres
-        env:
-          KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestPOSExpectedCashAcrossDialects -count=1 -timeout=10m
-
-      - name: Test held sales on disposable MySQL
-        env:
-          KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/site -run TestPOSHeldSalesAcrossDialects -count=1 -timeout=10m
-
-      - name: Test held sales on disposable Postgres
-        env:
-          KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestPOSHeldSalesAcrossDialects -count=1 -timeout=10m
-
-      - name: Test cash movements on disposable MySQL
-        env:
-          KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/site -run TestPOSCashMovementAcrossDialects -count=1 -timeout=10m
-
-      - name: Test cash movements on disposable Postgres
-        env:
-          KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestPOSCashMovementAcrossDialects -count=1 -timeout=10m
-
-      - name: Test X report on disposable MySQL
-        env:
-          KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/site -run TestPOSXReportAcrossDialects -count=1 -timeout=10m
-
-      - name: Test X report on disposable Postgres
-        env:
-          KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestPOSXReportAcrossDialects -count=1 -timeout=10m
-
-      - name: Test refunds with reason, limit and lookup on disposable MySQL
-        env:
-          KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/site -run TestPOSReturnBalancesAcrossDialects/mysql -count=1 -timeout=10m
-
-      - name: Test refunds with reason, limit and lookup on disposable Postgres
-        env:
-          KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestPOSReturnBalancesAcrossDialects/postgres -count=1 -timeout=10m
-
-      - name: Test count drawer on disposable MySQL
-        env:
-          KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/site -run TestPOSCountDrawerAcrossDialects -count=1 -timeout=10m
-
-      - name: Test count drawer on disposable Postgres
-        env:
-          KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestPOSCountDrawerAcrossDialects -count=1 -timeout=10m
+          KORA_SITE_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
+        run: go test -tags=integration ./internal/site -count=1 -timeout=20m
 
       - name: Test site settings and denominations on disposable Postgres
         env:
