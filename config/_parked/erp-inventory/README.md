@@ -19,8 +19,10 @@ applies it inside the same all-or-nothing step as the save. See the Engine note 
 - **Posting to the books**: with `erp-accounting` installed, a stock adjustment
   posts its value at the product's cost, in the same save. An increase debits
   Inventory and credits Stock Adjustments; a decrease does the opposite. A product
-  with no cost posts nothing. Without the books, adjustments save as before. A
-  stock count does not post yet.
+  with no cost posts nothing. A submitted stock count posts the same way: each
+  line's difference at the product's cost, netted into one entry (a net gain
+  debits Inventory and credits Stock Adjustments, a net loss does the opposite).
+  Without the books, adjustments and counts save as before.
 
 Dashboard `stock_adjustments_insights`: **Stock adjustments** (count and units changed, by reason).
 
@@ -29,5 +31,5 @@ warehouses, transfers, stock counts, and approval for large adjustments.
 Adjustments apply when created; they are not a submit-and-cancel document.
 
 Checks: `go test ./kernel ./doctype`,
-`go test -tags integration ./api -run 'TestPackScriptsInventoryPosting'` (MySQL and PostgreSQL, see
+`go test -tags integration ./api -run 'TestPackScriptsInventoryPosting|TestPackScriptsStockCount'` (MySQL and PostgreSQL, see
 `KORA_PACK_SCRIPTS_DISPOSABLE_*_DSN`) and `go test -tags integration ./api -run 'TestStock|TestGoodsReceipt|TestAdjustment'`.
