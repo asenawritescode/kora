@@ -353,6 +353,12 @@ Extensions authenticate via:
 
 This surface is permission-gated and auditable, but it is not a general-purpose plugin runtime or unchecked code execution environment.
 
+#### Script and pack trust model (current)
+
+**Script and pack authors are trusted.** A script runs author-provided JavaScript with the authority of the user whose action triggered it. The sandbox caps RAM, CPU and time and withholds filesystem and arbitrary network access, but it is **not** an adversarial-isolation boundary — anyone who can author or install a script or a pack (a workspace admin, whoever a site owner installs a pack from, a contractor or a compromised admin credential) is inside the trust boundary. Scripts are off by default (`KORA_SCRIPTS_ENABLED`); enabling them, or installing a pack that ships scripts, is a decision to trust those authors. This is adequate for self-hosted single-tenant deployments where the site owner controls who writes and installs scripts; it is not sufficient for untrusted third-party code or the multi-tenant adversarial isolation Kigae Cloud needs before shared-process scripting ships (WASM epic, #843).
+
+Consequences for review: in-engine controls around scripts — e.g. the SSRF/private-IP block on `kora.http` egress (#844) — are **defense-in-depth against footguns, not a boundary against a hostile author**. But trusting one pack author to install pack A must still not let pack B silently rewrite A's library/globals or bind a hook to a doctype it does not own; that cross-pack gap is a real defect even under this model (#847 library isolation, #848 pack script binding).
+
 ### API Versioning
 
 The REST API is versioned via URL prefix:
