@@ -19,7 +19,7 @@ func ExtensibilityTablesMySQL() []string {
 			compiled_at DATETIME(6),
 			compile_error TEXT,
 			created_by VARCHAR(140) NOT NULL DEFAULT '',
-			updated_by VARCHAR(140) NOT NULL DEFAULT '',
+			updated_by VARCHAR(140) NOT NULL DEFAULT '', owner_pack VARCHAR(140) NOT NULL DEFAULT '',
 			creation DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 			modified DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
 			INDEX idx_script_site (site),
@@ -158,6 +158,7 @@ func ExtensibilityTablesPostgres() []string {
 			run_as VARCHAR(140) NOT NULL DEFAULT '', timeout_ms INT NOT NULL DEFAULT 5000,
 			script TEXT NOT NULL, compiled_at TIMESTAMPTZ, compile_error TEXT,
 			created_by VARCHAR(140) NOT NULL DEFAULT '', updated_by VARCHAR(140) NOT NULL DEFAULT '',
+			owner_pack VARCHAR(140) NOT NULL DEFAULT '',
 			creation TIMESTAMPTZ NOT NULL DEFAULT NOW(), modified TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_script_site ON _kora_script (site)`,

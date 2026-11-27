@@ -580,6 +580,17 @@ func writeSExprScriptSnapshot(b *strings.Builder, s *ScriptSnapshot, indent stri
 	b.WriteString("(script-ref ")
 	b.WriteString(symbolName(s.Name))
 
+	props := scriptSnapshotProps(s)
+	props = append(props, scriptOwnershipProps(s)...)
+	if len(props) > 0 {
+		b.WriteString("\n")
+		writeSortedProps(b, indent+"  ", props)
+	}
+	b.WriteString(")")
+}
+
+// scriptSnapshotProps lists the script's own properties in S-expression form.
+func scriptSnapshotProps(s *ScriptSnapshot) []sExprProp {
 	var props []sExprProp
 	if s.ScriptType != "" {
 		props = append(props, sExprProp{"script-type", symbolName(s.ScriptType)})
@@ -614,12 +625,25 @@ func writeSExprScriptSnapshot(b *strings.Builder, s *ScriptSnapshot, indent stri
 	if s.Source != "" {
 		props = append(props, sExprProp{"source", quoteSExprString(s.Source)})
 	}
+	return props
+}
 
-	if len(props) > 0 {
-		b.WriteString("\n")
-		writeSortedProps(b, indent+"  ", props)
+// scriptOwnershipProps lists the pack ownership and binding properties of a script.
+func scriptOwnershipProps(s *ScriptSnapshot) []sExprProp {
+	var props []sExprProp
+	if s.OwnerPack != "" {
+		props = append(props, sExprProp{"owner-pack", quoteSExprString(s.OwnerPack)})
 	}
-	b.WriteString(")")
+	if s.ReplacesLegacy != "" {
+		props = append(props, sExprProp{"replaces-legacy", quoteSExprString(s.ReplacesLegacy)})
+	}
+	if s.PendingBinding {
+		props = append(props, sExprProp{"pending-binding", "true"})
+	}
+	if len(s.OwnerRequires) > 0 {
+		props = append(props, sExprProp{"owner-requires", quoteSExprString(strings.Join(s.OwnerRequires, ","))})
+	}
+	return props
 }
 
 // ---------------------------------------------------------------------------
@@ -1628,6 +1652,12 @@ func parseScriptSnapshot(node *sNode) (*ScriptSnapshot, error) {
 	s.TimeoutMs = kwInt(kw, "timeout")
 	s.ScriptHash = kw["hash"]
 	s.Source = kw["source"]
+	s.OwnerPack = kw["owner-pack"]
+	s.ReplacesLegacy = kw["replaces-legacy"]
+	s.PendingBinding = kwBool(kw, "pending-binding")
+	if req := kw["owner-requires"]; req != "" {
+		s.OwnerRequires = strings.Split(req, ",")
+	}
 	return s, nil
 }
 

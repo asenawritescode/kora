@@ -16,7 +16,7 @@ import (
 )
 
 // Increment this when BootstrapSystemTables gains or changes system DDL.
-const systemBootstrapVersion = 37
+const systemBootstrapVersion = 38
 
 // isIdempotentSQLError returns true if the error is expected during
 // idempotent DDL execution (CREATE IF NOT EXISTS, ALTER TABLE ADD COLUMN,
@@ -63,16 +63,16 @@ func BootstrapSystemTables(ctx context.Context, database *sql.DB, dialect db.Dia
 		return fmt.Errorf("creating system bootstrap marker: %w", err)
 	}
 	var currentVersion int
-	err := database.QueryRowContext(ctx, `SELECT version FROM _kora_system_bootstrap WHERE id = 1`).Scan(&currentVersion)
-	if err == nil {
+	markerErr := database.QueryRowContext(ctx, `SELECT version FROM _kora_system_bootstrap WHERE id = 1`).Scan(&currentVersion)
+	if markerErr == nil {
 		if currentVersion > systemBootstrapVersion {
 			return fmt.Errorf("system schema version %d is newer than supported version %d", currentVersion, systemBootstrapVersion)
 		}
 		if currentVersion == systemBootstrapVersion {
 			return nil
 		}
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("reading system bootstrap marker: %w", err)
+	} else if !errors.Is(markerErr, sql.ErrNoRows) {
+		return fmt.Errorf("reading system bootstrap marker: %w", markerErr)
 	}
 
 	execDDL := func(ddl string, label string) error {
@@ -91,16 +91,7 @@ func BootstrapSystemTables(ctx context.Context, database *sql.DB, dialect db.Dia
 		}
 	}
 
-	var extDDL []string
-	switch dialect.(type) {
-	case *db.LibSQLDialect:
-		extDDL = db.ExtensibilityTablesLibSQL()
-	case *db.PostgresDialect:
-		extDDL = db.ExtensibilityTablesPostgres()
-	default:
-		extDDL = db.ExtensibilityTablesMySQL()
-	}
-	for _, ddl := range extDDL {
+	for _, ddl := range extensibilityDDL(dialect) {
 		if err := execDDL(ddl, "creating extensibility table"); err != nil {
 			return err
 		}
@@ -270,6 +261,9 @@ func BootstrapSystemTables(ctx context.Context, database *sql.DB, dialect db.Dia
 		if err := execDDL(ddl, "creating durable workflow table or index"); err != nil {
 			return err
 		}
+	}
+	if migrateErr := migrateScriptOwners(ctx, database, dialect); migrateErr != nil {
+		return migrateErr
 	}
 	var requestAssignmentModeMigration string
 	switch dialect.(type) {
@@ -528,4 +522,24 @@ func isAlreadyAppliedMigration(err error) bool {
 		strings.Contains(message, "duplicate key name") ||
 		strings.Contains(message, "error 1060") || // MySQL duplicate column
 		strings.Contains(message, "error 1061") // MySQL duplicate index
+}
+
+// extensibilityDDL is the script, DocType-extension and related table DDL for dialect.
+func extensibilityDDL(dialect db.Dialect) []string {
+	switch dialect.(type) {
+	case *db.LibSQLDialect:
+		return db.ExtensibilityTablesLibSQL()
+	case *db.PostgresDialect:
+		return db.ExtensibilityTablesPostgres()
+	default:
+		return db.ExtensibilityTablesMySQL()
+	}
+}
+
+// scriptOwnerMigration adds _kora_script.owner_pack to databases created before pack script ownership.
+func scriptOwnerMigration(dialect db.Dialect) string {
+	if _, ok := dialect.(*db.PostgresDialect); ok {
+		return `ALTER TABLE "_kora_script" ADD COLUMN IF NOT EXISTS "owner_pack" VARCHAR(140) NOT NULL DEFAULT ''`
+	}
+	return `ALTER TABLE _kora_script ADD COLUMN owner_pack VARCHAR(140) NOT NULL DEFAULT ''`
 }

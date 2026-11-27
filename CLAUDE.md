@@ -339,6 +339,10 @@ Record-triggered automations are configured in the Automations workspace. Their 
 
 Cron-style scheduled jobs written in JavaScript. Configured via the Extensions admin panel with standard cron expressions. Each scheduled script has its own sandboxed runtime.
 
+#### Pack Scripts
+
+A pack's `scripts/<DocType>/<event>.js` binds only to a DocType the pack defines, or one defined by a pack in its transitive `requires` closure; otherwise the import is rejected naming the file and the DocType. Each owned row is named `<pack>__<DocType_with_underscores>_<event>` (or `<pack>__<file>` for unbound scripts) and records its `owner_pack`, so two packs' hooks on one DocType/event both run and neither overwrites the other. A pack library `scripts/lib/<name>.js` is stored as `lib_<name>` with its owner: importing a library owned by another pack is rejected, and a library must be define-only (no top-level side effects), which is a documented expectation, not enforced.
+
 #### Webhook Extensions (`internal/webhook/`)
 
 - **Outgoing webhooks**: Trigger HTTP calls to external services on document events (create, update, delete, submit, cancel). Configure payload templates, headers, and retry policies.

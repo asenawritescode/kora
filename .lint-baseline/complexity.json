@@ -957,9 +957,6 @@
   "internal/configstore::(*Store).AutoCreatePermissionsForDoctype": {
    "cognitive": 24
   },
-  "internal/configstore::(*Store).CommitManagementActivation": {
-   "cyclomatic": 18
-  },
   "internal/configstore::(*Store).LoadPermissions": {
    "cognitive": 16
   },
@@ -2260,8 +2257,8 @@
   },
   "internal/site::BootstrapSystemTables": {
    "cognitive": 91,
-   "cyclomatic": 82,
-   "statements": 202
+   "cyclomatic": 81,
+   "statements": 196
   },
   "internal/site::CreateDatabaseContext": {
    "cognitive": 18,
@@ -2287,13 +2284,13 @@
    "statements": 47
   },
   "internal/site::ImportConfigFromSnapshotContext": {
-   "cognitive": 78,
-   "cyclomatic": 55,
-   "statements": 122
+   "cognitive": 75,
+   "cyclomatic": 53,
+   "statements": 121
   },
   "internal/site::ParseConfigPack": {
-   "cognitive": 37,
-   "cyclomatic": 19,
+   "cognitive": 29,
+   "cyclomatic": 18,
    "statements": 49
   },
   "internal/site::ProcessBatch": {

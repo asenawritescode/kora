@@ -271,12 +271,12 @@ func TestLoadScriptSnapshots(t *testing.T) {
 	rows := sqlmock.NewRows([]string{
 		"name", "script_type", "doctype", "event", "method_path",
 		"schedule", "priority", "is_active", "run_as",
-		"timeout_ms", "script",
+		"timeout_ms", "script", "owner_pack",
 	}).
-		AddRow("validate_task", "doc_event", "Task", "before_save", "", "", 10, 1, "", 5000, "console.log('validating')").
-		AddRow("daily_report", "scheduled", "", "", "", "0 9 * * *", 5, 1, "Admin", 30000, "console.log('report')")
+		AddRow("validate_task", "doc_event", "Task", "before_save", "", "", 10, 1, "", 5000, "console.log('validating')", "").
+		AddRow("daily_report", "scheduled", "", "", "", "0 9 * * *", 5, 1, "Admin", 30000, "console.log('report')", "")
 
-	mock.ExpectQuery("SELECT name, script_type, doctype, event, method_path, schedule, priority, is_active, run_as, timeout_ms, script FROM _kora_script WHERE is_active = \\?").
+	mock.ExpectQuery("SELECT name, script_type, doctype, event, method_path, schedule, priority, is_active, run_as, timeout_ms, script, owner_pack FROM _kora_script WHERE is_active = \\?").
 		WithArgs(true, "").
 		WillReturnRows(rows)
 

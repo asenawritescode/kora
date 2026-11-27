@@ -409,16 +409,9 @@ func ImportConfigFromSnapshotContext(ctx context.Context, database *sql.DB, regi
 	if err != nil {
 		return fmt.Errorf("invalid workflow tenant ID: %w", err)
 	}
-	if _, err := kernel.DecodeCommandResources(snapshot.Commands); err != nil {
-		return fmt.Errorf("invalid command definitions: %w", err)
-	}
-	for _, raw := range snapshot.PrintFormats {
-		if _, err := print.Decode(raw); err != nil {
-			return fmt.Errorf("invalid print format: %w", err)
-		}
-	}
-	if _, err := query.Decode(snapshot.Queries, registryOf(snapshot.DocTypes)); err != nil {
-		return fmt.Errorf("invalid query definitions: %w", err)
+	err = validateSnapshotDefinitions(snapshot)
+	if err != nil {
+		return err
 	}
 	workflowDefinitions := append([]contract.WorkflowDefinition(nil), snapshot.WorkflowDefinitions...)
 	store := configstore.NewStore(database, dialect)
@@ -442,6 +435,10 @@ func ImportConfigFromSnapshotContext(ctx context.Context, database *sql.DB, regi
 	snapshotBytes, err := json.Marshal(&snapshotCopy)
 	if err != nil {
 		return fmt.Errorf("encoding config activation snapshot: %w", err)
+	}
+	err = checkSnapshotScriptBindings(database, dialect, tenant, snapshotCopy.Scripts)
+	if err != nil {
+		return err
 	}
 	expectedRevision, err := configstore.CurrentConfigRevision(ctx, database, dialect)
 	if err != nil {
@@ -607,36 +604,29 @@ func ParseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 	names := map[string]bool{}
 	scripts := map[string]string{}
 	packNames := map[string]bool{}
+	rule := newPackScriptRule()
 	for _, ns := range namespaces {
 		part := parts[ns]
-		snapshot, partScripts, err := parsePackPart(packName, part)
+		name, err := packPartName(packName, ns, part, packNames)
+		if err != nil {
+			return nil, nil, err
+		}
+		snapshot, partScripts, err := parsePackPart(name, part)
 		if err != nil {
 			return nil, nil, err
 		}
 		found := false
+		var requires []contract.ManifestPackRef
 		for _, f := range part {
 			if !isPackManifestPath(strings.TrimSpace(f.Path)) {
 				continue
 			}
 			found = true
-			name := packName
-			if ns != "" {
-				var head struct {
-					Name string `yaml:"name"`
-				}
-				if err := yaml.Unmarshal([]byte(f.Content), &head); err != nil {
-					return nil, nil, fmt.Errorf("parse %s: %w", f.Path, err)
-				}
-				name = head.Name
-				if packNames[name] {
-					return nil, nil, fmt.Errorf("pack.resource_conflict: pack %q defined in more than one component", name)
-				}
-				packNames[name] = true
-			}
 			manifest, _, err := parsePackManifest([]byte(f.Content), name)
 			if err != nil {
 				return nil, nil, err
 			}
+			requires = append(requires, manifest.Requires...)
 			if snapshot.Modules, err = GeneratePackModules(manifest, snapshot); err != nil {
 				return nil, nil, err
 			}
@@ -645,6 +635,7 @@ func ParseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 		if !found && (len(snapshot.Queries) > 0 || hasOwnerTaggedCommand(snapshot.Commands)) {
 			return nil, nil, fmt.Errorf("pack.manifest_required: component %q has queries or module-owned commands but no %s", ns, packFileName)
 		}
+		rule.addPack(name, snapshot.DocTypes, requires)
 		if err := mergePackSnapshot(merged, snapshot, names); err != nil {
 			return nil, nil, err
 		}
@@ -653,10 +644,38 @@ func ParseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 			scripts[h] = body
 		}
 	}
+	if err := rule.check(merged.Scripts); err != nil {
+		return nil, nil, err
+	}
 	if err := resolvePrintOperations(merged); err != nil {
 		return nil, nil, err
 	}
 	return merged, scripts, nil
+}
+
+// packPartName is the pack that owns one namespace's files: the manifest name of
+// a component, or packName for the root and for a component without a manifest.
+func packPartName(packName, ns string, part []PackFile, seen map[string]bool) (string, error) {
+	if ns == "" {
+		return packName, nil
+	}
+	for _, f := range part {
+		if !isPackManifestPath(strings.TrimSpace(f.Path)) {
+			continue
+		}
+		var head struct {
+			Name string `yaml:"name"`
+		}
+		if err := yaml.Unmarshal([]byte(f.Content), &head); err != nil {
+			return "", fmt.Errorf("parse %s: %w", f.Path, err)
+		}
+		if seen[head.Name] {
+			return "", fmt.Errorf("pack.resource_conflict: pack %q defined in more than one component", head.Name)
+		}
+		seen[head.Name] = true
+		return head.Name, nil
+	}
+	return packName, nil
 }
 
 // isPackManifestPath reports whether p is the root or a component pack.yaml.
@@ -905,7 +924,7 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 			printFiles = append(printFiles, f)
 
 		case "script":
-			sc := packScriptSnapshot(f.Path, data)
+			sc := packScriptSnapshot(packName, f.Path, data)
 			scripts = append(scripts, sc)
 			scriptBodyByHash[sc.ScriptHash] = f.Content
 		}
@@ -928,25 +947,27 @@ func parseConfigPack(packName string, files []PackFile) (*doctype.ConfigSnapshot
 	}, scriptBodyByHash, nil
 }
 
-// packScriptSnapshot describes one pack script file. scripts/lib/<name>.js is a
-// library; scripts/<DocType>/<event>.js is a document-event script bound to that
-// doctype and event; any other file is an unbound document-event script.
-func packScriptSnapshot(path string, data []byte) *doctype.ScriptSnapshot {
+// packScriptSnapshot describes one script file of pack. scripts/lib/<name>.js is a
+// library, named lib_<name> so global functions keep a stable name, and owned by
+// pack. scripts/<DocType>/<event>.js is a document-event script bound to that
+// doctype and event; any other file is an unbound document-event script. Document-
+// event rows are named <pack>__<base> so two packs never overwrite each other.
+func packScriptSnapshot(pack, path string, data []byte) *doctype.ScriptSnapshot {
 	h := sha256.Sum256(data)
 	hash := hex.EncodeToString(h[:])
 	if libraryName, ok := packLibraryName(path); ok {
 		return &doctype.ScriptSnapshot{
 			Name: packLibraryRowName(libraryName), ScriptType: string(script.TypeLibrary),
-			IsActive: true, Priority: 10, TimeoutMs: 5000, ScriptHash: hash,
+			IsActive: true, Priority: 10, TimeoutMs: 5000, ScriptHash: hash, OwnerPack: pack,
 		}
 	}
 	doctypeName, eventName := packScriptBinding(path)
-	scriptName := strings.TrimSuffix(filepath.Base(path), ".js")
+	base := strings.TrimSuffix(filepath.Base(path), ".js")
 	if doctypeName != "" {
-		scriptName = strings.ReplaceAll(doctypeName, " ", "_") + "_" + eventName
+		base = strings.ReplaceAll(doctypeName, " ", "_") + "_" + eventName
 	}
 	return &doctype.ScriptSnapshot{
-		Name:       scriptName,
+		Name:       packScriptRowName(pack, base),
 		ScriptType: "doc_event",
 		DocType:    doctypeName,
 		Event:      eventName,
@@ -954,6 +975,7 @@ func packScriptSnapshot(path string, data []byte) *doctype.ScriptSnapshot {
 		Priority:   10,
 		TimeoutMs:  5000,
 		ScriptHash: hash,
+		OwnerPack:  pack,
 	}
 }
 
@@ -1055,4 +1077,38 @@ func parsePackDefinitions(files []PackFile, doctypes []*doctype.DocType) ([]json
 		}
 	}
 	return metrics.EncodePack(defs, dashboards, doctypes)
+}
+
+// checkSnapshotScriptBindings resolves pending pack script bindings in a snapshot
+// against the packs the tenant has installed. It is a no-op without pending bindings.
+func checkSnapshotScriptBindings(database *sql.DB, dialect sqlDialect.Dialect, tenant contract.TenantID, scripts []*doctype.ScriptSnapshot) error {
+	if !configstore.HasPendingScriptBindings(scripts) {
+		return nil
+	}
+	installedStore := configstore.NewModuleStore(database, dialect)
+	if err := installedStore.EnsureSchema(); err != nil {
+		return fmt.Errorf("ensuring module snapshot schema: %w", err)
+	}
+	installed, err := installedStore.Load(tenant)
+	if err != nil {
+		return fmt.Errorf("loading installed packs for script bindings: %w", err)
+	}
+	return configstore.CheckPendingScriptBindings(installed, scripts)
+}
+
+// validateSnapshotDefinitions decodes the snapshot's command, print format, and query
+// definitions so an invalid one is refused before any row is written.
+func validateSnapshotDefinitions(snapshot *doctype.ConfigSnapshot) error {
+	if _, err := kernel.DecodeCommandResources(snapshot.Commands); err != nil {
+		return fmt.Errorf("invalid command definitions: %w", err)
+	}
+	for _, raw := range snapshot.PrintFormats {
+		if _, err := print.Decode(raw); err != nil {
+			return fmt.Errorf("invalid print format: %w", err)
+		}
+	}
+	if _, err := query.Decode(snapshot.Queries, registryOf(snapshot.DocTypes)); err != nil {
+		return fmt.Errorf("invalid query definitions: %w", err)
+	}
+	return nil
 }

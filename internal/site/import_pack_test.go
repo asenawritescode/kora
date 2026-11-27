@@ -28,6 +28,7 @@ func TestParseConfigPackIsPureAndReturnsSnapshotAndScriptBodies(t *testing.T) {
 
 func TestParseConfigPackBindsLifecycleScriptsFromExplicitPath(t *testing.T) {
 	files := []PackFile{
+		{Path: "doctypes/contact.yaml", ContentType: "doctype", Content: "name: Contact\nmodule: CRM\nfields:\n  - fieldname: email\n    fieldtype: Data\n"},
 		{Path: "scripts/Contact/before_insert.js", ContentType: "script", Content: "return true;"},
 		{Path: "scripts/Contact/before_save.js", ContentType: "script", Content: "return true;"},
 		{Path: "scripts/unbound.js", ContentType: "script", Content: "return true;"},
@@ -37,9 +38,9 @@ func TestParseConfigPackBindsLifecycleScriptsFromExplicitPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []struct{ name, doctype, event string }{
-		{"Contact_before_insert", "Contact", "before_insert"},
-		{"Contact_before_save", "Contact", "before_save"},
-		{"unbound", "", ""},
+		{"crm__Contact_before_insert", "Contact", "before_insert"},
+		{"crm__Contact_before_save", "Contact", "before_save"},
+		{"crm__unbound", "", ""},
 	}
 	if len(snapshot.Scripts) != len(want) {
 		t.Fatalf("script count = %d, want %d", len(snapshot.Scripts), len(want))

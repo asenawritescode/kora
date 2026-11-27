@@ -27,6 +27,15 @@ type ScriptSnapshot struct {
 	TimeoutMs  int    `json:"timeout_ms"`
 	ScriptHash string `json:"script_hash"` // SHA-256 of script body
 	Source     string `json:"source,omitempty"`
+	// OwnerPack is the pack that shipped the script. Empty for scripts not shipped by a pack.
+	OwnerPack string `json:"owner_pack,omitempty"`
+	// ReplacesLegacy names the pre-namespacing row (<DocType>_<event>) this owned hook supersedes; it is retired at activation only while unowned.
+	ReplacesLegacy string `json:"replaces_legacy,omitempty"`
+	// PendingBinding marks a binding whose DocType is defined by a pack the owner
+	// requires but that is not in the artifact; activation resolves it against the
+	// installed packs named in OwnerRequires.
+	PendingBinding bool     `json:"pending_binding,omitempty"`
+	OwnerRequires  []string `json:"owner_requires,omitempty"`
 }
 
 // ConfigSnapshot is the complete configuration state stored in _kora_config_version.config.
