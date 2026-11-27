@@ -60,7 +60,10 @@ func installPackTenant(t *testing.T, driver string, database *sql.DB, dbName str
 }
 
 func TestPOSPackTenantServicesInstallLibSQL(t *testing.T) {
-	database, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "t.db"))
+	// The tenant runtime's workers share this file while the installer creates
+	// tables. The default 5 s busy wait is too short under load, so a writer
+	// waits up to 30 s for the lock instead of failing with "database is locked".
+	database, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "t.db")+"?_busy_timeout=30000")
 	if err != nil {
 		t.Fatal(err)
 	}

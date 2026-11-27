@@ -146,7 +146,10 @@ func TestScheduledOccurrenceLeaseAndUncertainOutcomeAcrossDialects(t *testing.T)
 			}
 
 			parallelJob := &scheduler.JobConfig{Name: "parallel", Type: scheduler.JobWebhook, Schedule: "0 * * * *"}
-			if err := store.RegisterDefinition(ctx, tenant, parallelJob, scheduler.JobDefinitionDigest(parallelJob), first, now); err != nil {
+			// Two hourly slots are due (the last two hours), so the second worker can
+			// only be stopped by the running check: after the first claim commits, a
+			// second materialization would otherwise succeed for the next slot.
+			if err := store.RegisterDefinition(ctx, tenant, parallelJob, scheduler.JobDefinitionDigest(parallelJob), now.Add(-2*time.Hour), now); err != nil {
 				t.Fatal("register parallel schedule:", err)
 			}
 			start := make(chan struct{})

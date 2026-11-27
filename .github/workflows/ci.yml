@@ -31,31 +31,42 @@ jobs:
         with:
           repository: asenawritescode/kora-cloud
           # Consumer revision that carries the synced contract; bump it when a consumer syncs a newer one.
-          ref: 25d5fff968852a52bb3172aa6d63e9b40c543b07
+          ref: 6df3b1e97e9194475c1aa9dfc2bc240b4929045f
           path: kora-cloud
           ssh-key: ${{ secrets.KORA_CLOUD_READONLY_DEPLOY_KEY }}
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-ui
           # Consumer revision that carries the synced contract; bump it when a consumer syncs a newer one.
-          ref: 677c3f95815557d6420ce03b98b0fdee875f1e1d
+          ref: fd24736ec29bfe174e632fb79afc0de21435176f
           path: kora-studio-mvp
           ssh-key: ${{ secrets.KORA_UI_READONLY_DEPLOY_KEY }}
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-ts-extension-sdk
           # Consumer revision that carries the synced contract; bump it when a consumer syncs a newer one.
-          ref: 3cc7e063dd5e667e0d045e6fbea1fea0ceb68e7f
+          ref: 0f86894145dbb8284b0b10ad11e518260edcaced
           path: kora-ts-sdk
       - uses: actions/checkout@v4
         with:
           repository: asenawritescode/kora-mobile-app
           # Consumer revision that carries the synced contract; bump it when a consumer syncs a newer one.
-          ref: 177d9e642447efaab145ae4fa8ac88adcf40f292
+          ref: 23dab6715695509a33b913be06974b20ef35ce37
           path: kora-mobile
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+          cache: false
+      - name: Restore Go build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-
+            gobuild-${{ runner.os }}-${{ github.job }}-
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -70,302 +81,81 @@ jobs:
           bun install --frozen-lockfile
           bun test src/contract-fixtures.test.ts
           bun run build
+      - name: Save Go build cache
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
 
-  go:
-    name: Go
+  go-unit:
+    name: Go unit ${{ matrix.shard }}/3
     runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.4.11
-        env:
-          MYSQL_ROOT_PASSWORD: kora123
-          MYSQL_DATABASE: kora_dbaccess_test
-        ports:
-          - 3306:3306
-        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: kora
-          POSTGRES_PASSWORD: kora123
-          POSTGRES_DB: kora_recon_test
-        ports:
-          - 5432:5432
-        options: --health-cmd="pg_isready -U kora -d kora_recon_test" --health-interval=5s --health-timeout=5s --health-retries=10
-      libsql:
-        image: ghcr.io/tursodatabase/libsql-server:latest
-        env:
-          SQLD_NODE: primary
-        ports:
-          - 8080:8080
-
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+          cache: false
+      - name: Restore Go build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ matrix.shard }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            gobuild-${{ runner.os }}-${{ github.job }}-${{ matrix.shard }}-${{ hashFiles('**/go.sum') }}-
+            gobuild-${{ runner.os }}-${{ github.job }}-${{ matrix.shard }}-
 
-      - name: Lint (go vet)
-        run: go vet ./...
+      # Same flags as the former single Test step; only the package list differs per shard.
+      - name: Test (shard ${{ matrix.shard }}/3)
+        env:
+          KORA_UNIT_SHARD: ${{ matrix.shard }}/3
+        run: |
+          pkgs="$(scripts/ci-unit-shard.sh)"
+          echo "$pkgs"
+          go test $pkgs -v -count=1
 
-      - name: Test
-        run: go test ./... -v -count=1
+      - name: Save Go build cache
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ matrix.shard }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+
+  go-checks:
+    name: Go checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - name: Restore Go build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-
+            gobuild-${{ runner.os }}-${{ github.job }}-
 
       - name: Verify domain import boundary gate
         run: go test ./internal/application -run 'TestDomainPackagesDoNotImportOtherDomainInternals|TestDomainImportGateRejectsViolationFixture' -count=1
-
-      - name: Test disposable MySQL integration packages
-        env:
-          KORA_TEST_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_ANALYTICS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_OUTBOX_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_CONFIG_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_DBACCESS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/kora_dbaccess_test?parseTime=true&multiStatements=true"
-          KORA_RECON_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/kora_dbaccess_test?parseTime=true&multiStatements=true"
-          KORA_SITE_SETTINGS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_TENANT_CLOCK_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_FACTS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_METRICS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_SAVED_REPORT_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_DB_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_ASK_ZANA_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_MCP_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_PACK_SCRIPTS_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: >-
-          go test -tags=integration -p 1
-          ./internal/db ./internal/dbaccess ./internal/api ./internal/tenanttime ./internal/projection ./internal/outbox ./internal/site ./internal/requests/sqlstore ./internal/workflow/sqlstore ./internal/metrics
-          ./internal/notifications/sqlstore ./internal/management/sqlstore ./internal/facts ./internal/mcp -count=1 -timeout=15m
-
-      - name: Test AI transcript run IDs on disposable MySQL
-        env:
-          KORA_AI_TRANSCRIPT_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/api/ai -run TestTranscriptCarriesRunIDsAcrossDialects/mysql -count=1 -timeout=5m
-
-      - name: Test AI gateway usage on disposable MySQL
-        env:
-          KORA_AI_GATEWAY_USAGE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/api/ai -run TestGatewayCallUsageStoredAcrossDialects/mysql -count=1 -timeout=5m
-
-      - name: Test programmatic module owner command fixture
-        env:
-          KORA_ENGINE_MODULE_COMMAND_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/engine -run TestKernelCommandCapabilityRunsSchemaAndBusinessEffectsInOneTransaction -count=1 -timeout=5m
-
-      - name: Test published operation refusal details on disposable MySQL and PostgreSQL
-        env:
-          KORA_ENGINE_PUBOP_REFUSAL_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_ENGINE_PUBOP_REFUSAL_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/engine -run TestPublishedOperationRefusalKeepsDetailsAcrossDialects -count=1 -timeout=10m
-      - name: Test published operation first-use lease race on disposable MySQL and PostgreSQL
-        env:
-          KORA_ENGINE_PUBOP_LEASE_RACE_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_ENGINE_PUBOP_LEASE_RACE_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/engine -run TestPublishedOperationFirstUseLeaseRaceAcrossDialects -count=1 -timeout=10m
-
-      - name: Wait for disposable libSQL
-        run: |
-          for attempt in {1..45}; do
-            if (echo > /dev/tcp/127.0.0.1/8080) >/dev/null 2>&1; then exit 0; fi
-            sleep 1
-          done
-          echo "libSQL did not open port 8080" >&2
-          exit 1
-
-      - name: Test pack scripts on disposable PostgreSQL
-        env:
-          KORA_PACK_SCRIPTS_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/api -run 'TestPackScripts/postgres' -count=1 -timeout=10m
-
-      - name: Test fact tables on disposable PostgreSQL
-        env:
-          KORA_FACTS_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/facts -count=1 -timeout=5m
-
-      - name: Test metrics query on disposable PostgreSQL
-        env:
-          KORA_METRICS_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/metrics -count=1 -timeout=5m
-
-      - name: Test published projections on disposable PostgreSQL
-        env:
-          KORA_PROJECTION_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/projection -count=1 -timeout=5m
-
-      - name: Test AI transcript run IDs on disposable PostgreSQL
-        env:
-          KORA_AI_TRANSCRIPT_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/api/ai -run TestTranscriptCarriesRunIDsAcrossDialects/postgres -count=1 -timeout=5m
-
-      - name: Test AI gateway usage on disposable PostgreSQL
-        env:
-          KORA_AI_GATEWAY_USAGE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/api/ai -run TestGatewayCallUsageStoredAcrossDialects/postgres -count=1 -timeout=5m
-
-      - name: Test Ask Zana golden questions on disposable PostgreSQL
-        env:
-          KORA_ASK_ZANA_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/api -run TestAskZanaGoldenQuestions -count=1 -timeout=5m
-
-      - name: Test saved Explore reports on disposable PostgreSQL
-        env:
-          KORA_SAVED_REPORT_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/api -run TestSavedReports -count=1 -timeout=5m
-
-      - name: Test channel chat as a subject user on disposable MySQL
-        env:
-          KORA_CONFIG_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/engine -run TestChannelChatSubjectUserAcrossDialects/mysql -count=1 -timeout=10m
-
-      - name: Test channel chat as a subject user on disposable PostgreSQL
-        env:
-          KORA_CONFIG_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/engine -run TestChannelChatSubjectUserAcrossDialects/postgres -count=1 -timeout=10m
-
-      - name: Test child-row sums in doc constraints on disposable MySQL
-        env:
-          KORA_DOCTYPE_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/site -run TestDocConstraintChildSumAcrossDialects -count=1 -timeout=5m
-
-      - name: Test child-row sums in doc constraints on disposable PostgreSQL
-        env:
-          KORA_DOCTYPE_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestDocConstraintChildSumAcrossDialects -count=1 -timeout=5m
-
-      - name: Test reconciliation persistence on disposable SQL dialects
-        env:
-          KORA_RECON_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/kora_dbaccess_test?parseTime=true&multiStatements=true"
-          KORA_RECON_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-          KORA_RECON_DISPOSABLE_LIBSQL_DSN: "http://127.0.0.1:8080"
-        run: go test -tags=integration ./internal/recon -run TestBusinessRunPersistenceAcrossDisposableDialects -count=1 -timeout=5m
-
-      - name: Test POS command features on disposable MySQL
-        env:
-          KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/site -run TestPOSCommandFeaturesAcrossDialects -count=1 -timeout=10m
-
-      - name: Test POS command features on disposable Postgres
-        env:
-          KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestPOSCommandFeaturesAcrossDialects -count=1 -timeout=10m
-
-      - name: Test expected cash breakdown on disposable MySQL
-        env:
-          KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/site -run TestPOSExpectedCashAcrossDialects -count=1 -timeout=10m
-
-      - name: Test expected cash breakdown on disposable Postgres
-        env:
-          KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestPOSExpectedCashAcrossDialects -count=1 -timeout=10m
-
-      - name: Test held sales on disposable MySQL
-        env:
-          KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/site -run TestPOSHeldSalesAcrossDialects -count=1 -timeout=10m
-
-      - name: Test held sales on disposable Postgres
-        env:
-          KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestPOSHeldSalesAcrossDialects -count=1 -timeout=10m
-
-      - name: Test cash movements on disposable MySQL
-        env:
-          KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/site -run TestPOSCashMovementAcrossDialects -count=1 -timeout=10m
-
-      - name: Test cash movements on disposable Postgres
-        env:
-          KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestPOSCashMovementAcrossDialects -count=1 -timeout=10m
-
-      - name: Test X report on disposable MySQL
-        env:
-          KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/site -run TestPOSXReportAcrossDialects -count=1 -timeout=10m
-
-      - name: Test X report on disposable Postgres
-        env:
-          KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestPOSXReportAcrossDialects -count=1 -timeout=10m
-
-      - name: Test refunds with reason, limit and lookup on disposable MySQL
-        env:
-          KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/site -run TestPOSReturnBalancesAcrossDialects/mysql -count=1 -timeout=10m
-
-      - name: Test refunds with reason, limit and lookup on disposable Postgres
-        env:
-          KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestPOSReturnBalancesAcrossDialects/postgres -count=1 -timeout=10m
-
-      - name: Test count drawer on disposable MySQL
-        env:
-          KORA_POS_E2E_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/site -run TestPOSCountDrawerAcrossDialects -count=1 -timeout=10m
-
-      - name: Test count drawer on disposable Postgres
-        env:
-          KORA_POS_E2E_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestPOSCountDrawerAcrossDialects -count=1 -timeout=10m
-
-      - name: Test site settings and denominations on disposable Postgres
-        env:
-          KORA_SITE_SETTINGS_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/api -run 'TestSiteSettings|TestDenominations' -count=1 -timeout=5m
-
-      - name: Test statement timeout on disposable Postgres
-        env:
-          KORA_DBACCESS_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/dbaccess -run TestStatementTimeoutCancelsSlowReadsOnDisposableDatabases -count=1 -timeout=5m
-      - name: Test role insights_access upgrade on disposable PostgreSQL
-        env:
-          KORA_SITE_ROLE_UPGRADE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/site -run TestBootstrapAddsInsightsAccessToExistingRoleTable/postgres -count=1 -timeout=5m
-      - name: Test naming allocation on disposable PostgreSQL
-        env:
-          KORA_DB_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-          KORA_ORM_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: >-
-          go test -tags=integration ./internal/db -run 'TestNameAllocationIssuesUniqueNamesUnderConcurrency|TestReserveSeriesRangeGivesDisjointRangesToTwoTills|TestRetiredAnalyticsTablesDropIdempotentlyKeepingProjectionStorage' -count=1 -timeout=5m &&
-          go test -tags=integration ./internal/orm -run TestReserveNumberBlockRecordsDisjointOpenBlocksForTwoTills -count=1 -timeout=5m
-
-      - name: Test number blocks on disposable MySQL
-        env:
-          KORA_ORM_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/orm -run TestReserveNumberBlockRecordsDisjointOpenBlocksForTwoTills -count=1 -timeout=5m
-
-      - name: Test preset sale numbers and count limit on disposable MySQL
-        env:
-          KORA_KERNEL_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/kernel -run TestPresetSaleNumberAndCountLimitAcrossDialects -count=1 -timeout=5m
-
-      - name: Test preset sale numbers and count limit on disposable Postgres
-        env:
-          KORA_KERNEL_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/kernel -run TestPresetSaleNumberAndCountLimitAcrossDialects -count=1 -timeout=5m
-
-      - name: Test upsert steps and count limit exception on disposable MySQL
-        env:
-          KORA_KERNEL_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-        run: go test -tags=integration ./internal/kernel -run TestUpsertStepCreatesThenUpdatesAcrossDialects -count=1 -timeout=5m
-
-      - name: Test upsert steps and count limit exception on disposable Postgres
-        env:
-          KORA_KERNEL_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/kernel -run TestUpsertStepCreatesThenUpdatesAcrossDialects -count=1 -timeout=5m
-
-      - name: Test module snapshot fence on disposable SQL dialects
-        env:
-          KORA_KERNEL_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_KERNEL_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/kernel -run 'TestModuleSnapshotFence|TestReserveNumbersCommandGivesEachSessionDisjointOpenBlocks' -count=1 -timeout=5m
-
-      - name: Test signed adjust on disposable SQL dialects
-        env:
-          KORA_KERNEL_DISPOSABLE_MYSQL_DSN: "root:kora123@tcp(127.0.0.1:3306)/?parseTime=true&multiStatements=true"
-          KORA_KERNEL_DISPOSABLE_POSTGRES_DSN: "postgres://kora:kora123@127.0.0.1:5432/kora_recon_test?sslmode=disable"
-        run: go test -tags=integration ./internal/kernel -run TestSignedAdjustMovesBalanceByDirectionOnBothDialects -count=1 -timeout=5m
 
       - name: Check generated contracts
         run: go run ./contract/gen -check
@@ -382,8 +172,68 @@ jobs:
       - name: Test release tooling
         run: make release-test
 
-  lint:
-    name: Lint
+      - name: Save Go build cache
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+
+  # Gate for the unit shards and Go checks. Required check name: Go.
+  go:
+    name: Go
+    if: always()
+    needs: [go-unit, go-checks]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Go job to succeed
+        env:
+          UNIT: ${{ needs.go-unit.result }}
+          CHECKS: ${{ needs.go-checks.result }}
+        run: |
+          if [ "$UNIT" != "success" ] || [ "$CHECKS" != "success" ]; then
+            echo "::error::go-unit=$UNIT go-checks=$CHECKS"
+            exit 1
+          fi
+
+  lint-vet:
+    name: Lint vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - name: Restore Go build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-
+            gobuild-${{ runner.os }}-${{ github.job }}-
+
+      # Full-repository vet. golangci below only checks changed lines.
+      - name: Vet (all packages)
+        run: go vet ./...
+
+      - name: Save Go build cache
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+
+  lint-static:
+    name: Lint static
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -393,18 +243,98 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+          cache: false
+      - name: Restore Go build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-
+            gobuild-${{ runner.os }}-${{ github.job }}-
 
-      # Build the tools with the repository's Go version: a prebuilt golangci-lint compiled with an
-      # older Go refuses to load a module that targets a newer one.
-      - name: Install golangci-lint and deadcode
-        run: |
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
-          go install golang.org/x/tools/cmd/deadcode@v0.52.0
+      # Build the tool with the repository's Go version (a prebuilt golangci-lint compiled with an
+      # older Go refuses to load a module that targets a newer one). Cached: installs only on a miss.
+      - name: Cache golangci-lint binary
+        id: golangci-bin
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/golangci-lint
+          key: lint-tool-golangci-lint-v1.64.8-go1.25-${{ runner.os }}
+
+      - name: Install golangci-lint
+        if: steps.golangci-bin.outputs.cache-hit != 'true'
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+
+      - name: Cache golangci-lint results
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-${{ runner.os }}-${{ github.job }}-${{ hashFiles('.golangci.yml', '**/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            golangci-${{ runner.os }}-${{ github.job }}-${{ hashFiles('.golangci.yml', '**/go.sum') }}-
+            golangci-${{ runner.os }}-${{ github.job }}-
 
       # Correctness, security and API-hygiene linters (.golangci.yml) on every line the PR changes.
       - name: Static analysis (changed lines)
         if: github.event_name == 'pull_request'
         run: golangci-lint run --new-from-rev=origin/${{ github.base_ref }}
+
+      - name: Save Go build cache
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+
+  lint-ratchets:
+    name: Lint ratchets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+      - name: Restore Go build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-
+            gobuild-${{ runner.os }}-${{ github.job }}-
+
+      # The complexity ratchet runs golangci-lint; the dead-code ratchet runs deadcode. Both are
+      # cached by pinned version and go-version, so each installs only on a cache miss.
+      - name: Cache golangci-lint binary
+        id: golangci-bin
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/golangci-lint
+          key: lint-tool-golangci-lint-v1.64.8-go1.25-${{ runner.os }}
+
+      - name: Install golangci-lint
+        if: steps.golangci-bin.outputs.cache-hit != 'true'
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+
+      - name: Cache deadcode binary
+        id: deadcode-bin
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/deadcode
+          key: lint-tool-deadcode-v0.52.0-go1.25-${{ runner.os }}
+
+      - name: Install deadcode
+        if: steps.deadcode-bin.outputs.cache-hit != 'true'
+        run: go install golang.org/x/tools/cmd/deadcode@v0.52.0
 
       # God functions: no function may become newly over the complexity/length limits, and no function
       # already over them may get worse (.lint-baseline/complexity.json only ever shrinks).
@@ -425,6 +355,15 @@ jobs:
       # (.lint-baseline/params.json only ever shrinks).
       - name: Parameter-count ratchet
         run: make params-ratchet
+
+      - name: Save Go build cache
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}-${{ github.sha }}
 
   # The vendored QuickJS reactor must be the output of the pinned sources (quickjs-ng v0.18.0, wasi-sdk 34.0).
   wasm-build:
@@ -449,3 +388,21 @@ jobs:
             exit 1
           fi
           echo "qjs.wasm matches the pinned build: $built"
+
+  # Gate for the vet, static and ratchet jobs. Required check name: Lint.
+  lint:
+    name: Lint
+    if: always()
+    needs: [lint-vet, lint-static, lint-ratchets]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Lint job to succeed
+        env:
+          VET: ${{ needs.lint-vet.result }}
+          STATIC: ${{ needs.lint-static.result }}
+          RATCHETS: ${{ needs.lint-ratchets.result }}
+        run: |
+          if [ "$VET" != "success" ] || [ "$STATIC" != "success" ] || [ "$RATCHETS" != "success" ]; then
+            echo "::error::lint-vet=$VET lint-static=$STATIC lint-ratchets=$RATCHETS"
+            exit 1
+          fi

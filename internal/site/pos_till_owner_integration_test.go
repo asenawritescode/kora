@@ -26,9 +26,9 @@ import (
 // Manager and Administrator may act on any. Every till is opened by open_session,
 // which records the cashier on the Till Session.
 func TestPOSCashierTransactsOnlyOnOwnTill(t *testing.T) {
-	dsn := os.Getenv("KORA_POS_E2E_MYSQL_DSN")
+	dsn := os.Getenv("KORA_SITE_DISPOSABLE_MYSQL_DSN")
 	if dsn == "" {
-		t.Skip("set KORA_POS_E2E_MYSQL_DSN to a disposable mysql server")
+		t.Skip("set KORA_SITE_DISPOSABLE_MYSQL_DSN to a disposable mysql server")
 	}
 	conn, dbName := posDB(t, "mysql", dsn)
 	ctx := context.Background()
