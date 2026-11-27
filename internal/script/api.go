@@ -1,3 +1,5 @@
+//go:build !qjsscript
+
 package script
 
 import "github.com/dop251/goja"
