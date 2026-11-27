@@ -108,11 +108,26 @@ Roles: **Manager** (runs the shop, owns currencies and rates) and **Cashier**
 
 ## Not here yet
 
-Holding and recalling sales, voids and returns are in (a return moves no stock: returning items to stock is not ported yet). Not here yet: a stock movement ledger, per-location stock, restocking on returns, approvals, automatic posting to accounts.
+Holding and recalling sales, voids and returns are in (a return moves no stock: returning items to stock is not ported yet). Not here yet: a stock movement ledger, per-location stock, restocking on returns, approvals.
+
+## Posting to the books
+
+When the books (`erp-accounting`) are installed, each money event posts a balanced journal entry in the same save, so the record and its entry commit together or not at all. Without the books, nothing posts and every event still saves.
+
+- Register sale created or paid as Paid: Dr the payment accounts (Cash, Mobile Money, Card as Bank), Cr Sales and Tax Payable, Dr Cost of Sales, Cr Inventory. Payment lines are converted to the base currency; a rounding cent goes on the largest line.
+- Credit sale entering Awaiting Payment: Dr Receivable instead of the payment accounts (memo "Sale on credit").
+- Return: the opposite of its sale, refunded from its refund lines (Cash when it has none).
+- Voiding a paid register sale, or cancelling or voiding a credit sale with no payments, reverses its entry.
+- A payment that settles a credit sale: Dr its method's account, Cr Receivable. Voiding it reverses that entry.
+- Expense recorded: Dr Expenses, Cr the account it was paid from. Edits do not post again.
+- Cash in and float top-up: Dr Cash, Cr Cash Clearing. Cash out: the reverse. Safe drop posts nothing.
+
+A sale whose payment lines do not add up to its total is refused, and so is any entry the books' own rules refuse (a closed period, an inactive account).
 
 ## Checks
 
 - `go test ./internal/site -run 'Pack|Config'` — the pack parses as Cloud publishes it.
+- `go test -tags integration ./internal/api -run 'TestPackScriptsSellingPosting'` — sales, payments, expenses and cash movements post to the books on MySQL and PostgreSQL, and without the books they still save.
 - `go test -tags integration ./internal/api -run TestPackScriptsSellingCredit` — credit
   sales, payments and the register paths on MySQL and PostgreSQL (set
   `KORA_PACK_SCRIPTS_DISPOSABLE_MYSQL_DSN` and `KORA_PACK_SCRIPTS_DISPOSABLE_POSTGRES_DSN`).

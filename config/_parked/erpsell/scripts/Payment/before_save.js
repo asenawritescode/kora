@@ -4,9 +4,33 @@
 var doc = __kora_event__.doc;
 var oldDoc = __kora_event__.oldDoc;
 
+// booksReady is true only when the books (the lib_books library shipped by
+// erp-accounting) are loaded; the selling pack posts to the books then, and
+// saves fine without them (nothing posts).
+function booksReady() {
+  return typeof booksInstalled === "function" && booksInstalled();
+}
+
 function money(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
+
+
+// ---- payment and expense roles (#815) ----
+// paymentMethodRole maps a Payment or Expense method to the account it moves money through.
+function paymentMethodRole(method) {
+  var roles = { "Cash": "Cash", "Card": "Bank", "Bank Transfer": "Bank", "Other": "Cash Clearing" };
+  var role = roles[String(method || "")];
+  if (!role) {
+    throw new Error("No account for payment method " + method + ".");
+  }
+  return role;
+}
+
+function paymentToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+// ---- end of payment and expense roles ----
 
 var ref = doc.reference || doc.name || "This payment";
 var wasStatus = oldDoc ? oldDoc.status : "";
@@ -48,5 +72,17 @@ if (receives) {
 var left = money(total - nextPaid);
 var status = nextPaid <= 0 ? "Awaiting Payment" : (left < 0.01 ? "Paid" : "Partially Paid");
 kora.saveDoc("Sale", { name: sale.name, base_amount_paid: nextPaid, status: status });
+
+// A payment that settles a credit sale posts Dr its method's account, Cr Receivable. Voiding
+// it reverses that entry (nothing happens when it never posted).
+if (receives && booksReady()) {
+  postEntry("Payment", doc.name, paymentToday(), "Payment", [
+    { role: paymentMethodRole(doc.method), debit: amount, credit: 0 },
+    { role: "Receivable", debit: 0, credit: amount }
+  ]);
+}
+if (reverses && booksReady()) {
+  reverseEntry("Payment", doc.name, "Payment");
+}
 
 return { doc: doc };
