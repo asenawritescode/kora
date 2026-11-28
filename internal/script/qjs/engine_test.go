@@ -3,6 +3,7 @@ package qjs
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -287,6 +288,7 @@ func TestRestoredInstanceMatchesFresh(t *testing.T) {
 		{"arithmetic", `var x = 0; for (var i = 0; i < 1000; i++) x += i; x;`, "499500"},
 		{"json", `JSON.stringify({a: [1, 2], s: "x"})`, `"{\"a\":[1,2],\"s\":\"x\"}"`},
 		{"stack overflow is catchable", `function f() { return f() + 1; } try { f(); } catch (e) { "caught"; }`, `"caught"`},
+		{"deep JSON nesting is catchable", `try { JSON.parse("[".repeat(100000)); } catch (e) { e.name; }`, `"RangeError"`},
 	}
 	snap := snapshotOf(t, eng)
 	for _, tc := range tests {
@@ -325,5 +327,43 @@ func TestRestoredInstancesAreIsolatedAndReseeded(t *testing.T) {
 	}
 	if ra.Output == rb.Output {
 		t.Fatalf("restored instances share a Math.random sequence: both %q", ra.Output)
+	}
+}
+
+// Strings over 2 KiB make QuickJS copy more than 2048 bytes at once (memory.copy). Under
+// wazero v1.8.2 built with Go 1.24+ that copy clobbered a register the compiled code still
+// used, so these trapped out of bounds or crashed the process (#879).
+func TestLargeStringsDoNotTrap(t *testing.T) {
+	big := strconv.Quote(strings.Repeat("x", 40<<10))
+	tests := []struct {
+		name, src, want string
+		h               Handler
+	}{
+		{name: "JSON.parse just over 2 KiB", src: `JSON.parse('{"s":"' + "a".repeat(2049) + '"}').s.length`, want: "2049"},
+		{name: "JSON.parse 40 KiB", src: `JSON.parse('{"s":"' + "a".repeat(40960) + '"}').s.length`, want: "40960"},
+		{name: "JSON.parse 1 MiB", src: `JSON.parse('{"s":"' + "a".repeat(1 << 20) + '"}').s.length`, want: "1048576"},
+		{name: "concat 40 KiB", src: `var s = ""; for (var i = 0; i < 40960; i++) s += "a"; s.length`, want: "40960"},
+		{name: "stringify round trip 40 KiB", src: `var o = {s: "\u20ac".repeat(20480)}; JSON.parse(JSON.stringify(o)).s === o.s`, want: "true"},
+		{name: "host response 40 KiB", src: `JSON.parse(__kora_host("{}")).s.length`, want: "40960",
+			h: func(context.Context, []byte) []byte { return []byte(`{"s":` + big + `}`) }},
+	}
+	eng := newTestEngine(t)
+	snap := snapshotOf(t, eng)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := tc.h
+			if h == nil {
+				h = noHostCall(t)
+			}
+			fresh := newTestInstance(t, eng, h)
+			restored := restoredInstance(t, eng, snap)
+			restored.SetHandler(h)
+			for who, inst := range map[string]*Instance{"fresh": fresh, "restored": restored} {
+				got, err := inst.Eval(context.Background(), tc.src, ModeJSONResult)
+				if err != nil || got.Thrown || got.Output != tc.want {
+					t.Fatalf("%s: result = %+v, err %v; want %s", who, got, err, tc.want)
+				}
+			}
+		})
 	}
 }
