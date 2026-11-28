@@ -1,4 +1,4 @@
-//go:build qjsscript
+//go:build !gojascript
 
 package script
 
@@ -8,16 +8,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
-
-	"github.com/asenawritescode/kora/internal/script/qjs"
 )
 
-// koraShimSource is the JavaScript function that builds the kora global over __kora_host.
+// koraDefineSource is evaluated once in the template, before the snapshot. It captures
+// __kora_host and defines the __kora_install global that builds kora per execution.
 // It mirrors the goja binding in api.go; the Go side only marshals.
 //
 //go:embed kora_shim.js
-var koraShimSource string
+var koraDefineSource string
 
 // koraBridge answers the guest's __kora_host calls by dispatching to koraOps.
 type koraBridge struct{ ops *koraOps }
@@ -174,9 +172,9 @@ func throwJSON(msg string) []byte {
 	return b
 }
 
-// installKora evaluates the shim, which builds the kora global over __kora_host and then
-// removes __kora_host from the script's view.
-func installKora(ctx context.Context, inst *qjs.Instance, ops *koraOps, req ExecuteRequest) error {
+// koraInstallSource is the per-execution call that builds the kora global. The define
+// source is already in the template, so only this request's setup is sent.
+func koraInstallSource(ops *koraOps, req ExecuteRequest) (string, error) {
 	setup, err := json.Marshal(map[string]any{
 		"context": map[string]any{
 			"user": req.User, "userRoles": req.UserRoles, "site": req.Site,
@@ -187,9 +185,7 @@ func installKora(ctx context.Context, inst *qjs.Instance, ops *koraOps, req Exec
 		"http":    ops.hasHTTP(),
 	})
 	if err != nil {
-		return fmt.Errorf("script: encode kora setup: %w", err)
+		return "", fmt.Errorf("script: encode kora setup: %w", err)
 	}
-	src := fmt.Sprintf("globalThis.kora = %s(__kora_host, %s); delete globalThis.__kora_host;",
-		strings.TrimSpace(koraShimSource), setup)
-	return evalSetup(ctx, inst, src)
+	return fmt.Sprintf("__kora_install(%s);", setup), nil
 }

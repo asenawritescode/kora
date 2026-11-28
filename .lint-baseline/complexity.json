@@ -2173,10 +2173,6 @@
    "cyclomatic": 18,
    "statements": 45
   },
-  "internal/script::(*EmbeddedRunner).Execute": {
-   "cognitive": 18,
-   "cyclomatic": 18
-  },
   "internal/script::(*Store).AppendAsyncHookTx": {
    "cognitive": 20,
    "cyclomatic": 35
@@ -2193,15 +2189,11 @@
    "cognitive": 16,
    "cyclomatic": 17
   },
-  "internal/script::(*koraAPI).buildObject": {
-   "cognitive": 47,
-   "cyclomatic": 24
-  },
   "internal/script::ClaimAsyncHooks": {
    "statements": 60
   },
   "internal/script::Execute": {
-   "statements": 61
+   "statements": 52
   },
   "internal/script::InspectLifecycleInventory": {
    "cognitive": 21,
@@ -2209,9 +2201,6 @@
   },
   "internal/script::Update": {
    "statements": 54
-  },
-  "internal/script::buildObject": {
-   "lines": 135
   },
   "internal/site::(*CommonConfig).ApplyEnvOverrides": {
    "cognitive": 23,

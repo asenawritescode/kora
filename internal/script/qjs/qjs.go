@@ -4,9 +4,9 @@
 // JSON call (kora_host.call / kora_host.take); this package never interprets the
 // JSON. The kora.* mapping lives in package script (WASM-RUNNER, WASM-BRIDGE).
 //
-// Everything that touches QuickJS or wazero is behind the `qjsscript` build tag,
-// so the default build and CI are unchanged and goja stays the only runtime until
-// the switch (phase 5). Test with:
+// This is the production script runtime: the default build of package script runs
+// guest JavaScript on this host. The goja fallback (-tags gojascript) is removed
+// one release after the switch. Test with:
 //
-//	go test -tags qjsscript ./internal/script/qjs
+//	go test ./internal/script/qjs
 package qjs

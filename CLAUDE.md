@@ -304,7 +304,7 @@ Kigae provides a comprehensive extensibility system for customizing application 
 
 #### Script Engine (`internal/script/`)
 
-JavaScript runtime based on Go's JavaScript engine. Scripts run in a sandboxed environment with configurable RAM limits (`KORA_SCRIPTS_MAX_RAM`) and HTTP/domain allowlists. Disabled by default — enable with `KORA_SCRIPTS_ENABLED=true`.
+JavaScript runtime: QuickJS compiled to WebAssembly and run under wazero (default build). Each execution has a heap cap, enforced from `EmbeddedConfig.MaxRAM` (default 128 MB). Build with `-tags gojascript` for the goja fallback, which is removed one release after the switch. Scripts run sandboxed with HTTP/domain allowlists. Disabled by default — enable with `KORA_SCRIPTS_ENABLED=true`.
 
 - **Script types**: Event hooks, custom API methods, scheduled scripts, and computed fields. Automations are defined and run by the Engine v2 workflow system; scripts are not workflow steps.
 - **Sandboxing**: Memory limits, CPU limits, timeout enforcement, no filesystem or network access
@@ -437,7 +437,6 @@ No YAML files for site config. `CommonConfigFromEnv()` builds all config from `K
 
 Key environment variables for extensibility and analytics:
 - `KORA_SCRIPTS_ENABLED` — Enable the JS script engine (default: `false`)
-- `KORA_SCRIPTS_MAX_RAM` — Max RAM per script in MB (default: `64`)
 - `KORA_ANALYTICS_CHANNEL_SIZE` — Per-tenant in-memory change-event queue capacity (default: `1000`, max `10000`)
 - `KORA_ANALYTICS_MAX_EVENT_BYTES` — Largest encoded change event accepted by the bus (default: `1048576`)
 - `KORA_ANALYTICS_MAX_SUBSCRIBERS` — Process-wide listener limit on the in-memory bus (default: `4096`)

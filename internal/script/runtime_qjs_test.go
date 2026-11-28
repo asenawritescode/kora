@@ -1,4 +1,4 @@
-//go:build qjsscript
+//go:build !gojascript
 
 package script
 
@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,50 @@ func newQJSTestRunner(t *testing.T, cfg EmbeddedConfig) *EmbeddedRunner {
 	runner := NewEmbeddedRunner(cfg)
 	t.Cleanup(func() { _ = runner.Close() })
 	return runner
+}
+
+// A prewarmed instance serves one execution: a global set by the first is gone in the second.
+func TestQJSPrewarmedInstanceNeverServesTwoExecutions(t *testing.T) {
+	runner := newQJSTestRunner(t, EmbeddedConfig{PoolSize: 1, Timeout: 5 * time.Second})
+	if _, err := runner.Execute(context.Background(), ExecuteRequest{Script: `globalThis.leak = 1;`}); err != nil {
+		t.Fatalf("first Execute: %v", err)
+	}
+	res, err := runner.Execute(context.Background(), ExecuteRequest{Script: `return {result: typeof leak};`})
+	if err != nil {
+		t.Fatalf("second Execute: %v", err)
+	}
+	if res.Result != "undefined" {
+		t.Fatalf("second execution saw leak as %v, want undefined", res.Result)
+	}
+}
+
+// Close drains a full pool and returns promptly, leaving no goroutine behind.
+func TestQJSCloseWithFullPoolReturnsPromptly(t *testing.T) {
+	before := runtime.NumGoroutine()
+	runner := NewEmbeddedRunner(EmbeddedConfig{PoolSize: 4, Timeout: 5 * time.Second})
+	if _, err := runner.Execute(context.Background(), ExecuteRequest{Script: `return {result: 1};`}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- runner.Close() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return within 5s")
+	}
+	if n := len(runner.ready); n != 0 {
+		t.Fatalf("ready holds %d instances after Close, want 0", n)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for runtime.NumGoroutine() > before {
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutines = %d after Close, want at most %d", runtime.NumGoroutine(), before)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestQJSExecuteReturnValues(t *testing.T) {
@@ -89,6 +134,25 @@ func TestQJSHeapCapStopsAllocationAndRunnerStaysUsable(t *testing.T) {
 	}
 }
 
+// Unbounded recursion throws a catchable JS error, not a wasm trap, and the runner keeps working.
+func TestQJSDeepRecursionThrowsAndRunnerStaysUsable(t *testing.T) {
+	runner := newQJSTestRunner(t, EmbeddedConfig{PoolSize: 1, Timeout: 10 * time.Second})
+	_, err := runner.Execute(context.Background(), ExecuteRequest{Script: `function f(n){return f(n+1)} f(0)`})
+	if err == nil {
+		t.Fatal("unbounded recursion returned no error")
+	}
+	if msg := strings.ToLower(err.Error()); strings.Contains(msg, "wasm") || !strings.Contains(msg, "stack") {
+		t.Fatalf("recursion error = %q, want a JS stack error and no wasm trap", err)
+	}
+	res, err := runner.Execute(context.Background(), ExecuteRequest{Script: `return {result: 1};`})
+	if err != nil {
+		t.Fatalf("Execute after recursion: %v", err)
+	}
+	if res.Result != int64(1) {
+		t.Fatalf("result after recursion = %#v, want int64(1)", res.Result)
+	}
+}
+
 func TestQJSDocumentRoundTrip(t *testing.T) {
 	runner := newQJSTestRunner(t, EmbeddedConfig{PoolSize: 1, Timeout: 5 * time.Second})
 	doc := map[string]any{
@@ -125,6 +189,8 @@ func TestQJSValidate(t *testing.T) {
 		{name: "syntax error", script: `var x = ;`, wantErr: "syntax error"},
 		{name: "reference error", script: `return {result: missingName};`, wantErr: "compile error"},
 		{name: "runtime throw is valid", script: `throw new Error("reject");`},
+		// __kora_host must not be visible to a validated script: the call is a ReferenceError.
+		{name: "host function is not exposed", script: `__kora_host("{}"); return 1;`, wantErr: "compile error"},
 	}
 	runner := newQJSTestRunner(t, EmbeddedConfig{PoolSize: 1, Timeout: 5 * time.Second})
 	for _, tc := range tests {
@@ -140,5 +206,23 @@ func TestQJSValidate(t *testing.T) {
 				t.Fatalf("Validate error = %v, want it to contain %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// Each execution runs on a runtime restored from the same snapshot, so each must still
+// draw its own Math.random sequence.
+func TestQJSExecutionsDrawDifferentRandom(t *testing.T) {
+	runner := newQJSTestRunner(t, EmbeddedConfig{PoolSize: 1, Timeout: 5 * time.Second})
+	var first any
+	for i := range 2 {
+		res, err := runner.Execute(context.Background(), ExecuteRequest{Script: `return {result: Math.random()};`})
+		if err != nil {
+			t.Fatalf("Execute %d: %v", i, err)
+		}
+		if i == 0 {
+			first = res.Result
+		} else if reflect.DeepEqual(first, res.Result) {
+			t.Fatalf("two executions returned the same Math.random value %v", first)
+		}
 	}
 }
