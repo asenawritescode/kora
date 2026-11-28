@@ -430,7 +430,7 @@ func ImportConfigFromSnapshotContext(ctx context.Context, database *sql.DB, regi
 	if findings := doctype.ValidateSnapshotReferences(snapshot, liveRegistry); len(findings) > 0 {
 		return fmt.Errorf("configuration references are invalid: %s at %s targets %q", findings[0].Code, findings[0].Path, findings[0].Target)
 	}
-	snapshotCopy := *snapshot
+	snapshotCopy := withScriptBodies(*snapshot, scriptBodyByHash)
 	snapshotCopy.WorkflowDefinitions = workflowDefinitions
 	snapshotBytes, err := json.Marshal(&snapshotCopy)
 	if err != nil {
@@ -569,6 +569,22 @@ func ImportConfigFromSnapshotContext(ctx context.Context, database *sql.DB, regi
 	}
 
 	return nil
+}
+
+// withScriptBodies returns snapshot with each script that carries no Source given its
+// verified body, by hash. Activation persists ScriptSnapshot.Source, so a script left
+// without it is stored with an empty body and its hook runs as a no-op. The management
+// package path binds the same way.
+func withScriptBodies(snapshot doctype.ConfigSnapshot, bodyByHash map[string]string) doctype.ConfigSnapshot {
+	for _, ss := range snapshot.Scripts {
+		if ss == nil || ss.Source != "" {
+			continue
+		}
+		if body, ok := bodyByHash[ss.ScriptHash]; ok {
+			ss.Source = body
+		}
+	}
+	return snapshot
 }
 
 // readChangelog returns a version's changelog as text. NULL is scanned rather
