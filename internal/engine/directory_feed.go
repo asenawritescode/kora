@@ -75,7 +75,9 @@ func StartDirectoryFeed(parent context.Context, consumer *site.DirectoryConsumer
 			workers.Add(1)
 			go func() {
 				defer workers.Done()
-				publisher.Run(ctx, time.Second, func(err error) {
+				// Committed directory changes of this process wake the relay; the
+				// sweep only recovers a lost wake. A failed pass retries after 1 s.
+				publisher.RunOnWake(ctx, site.SubscribeDirectoryChanges(), directoryWakeSweep, time.Second, func(err error) {
 					slog.Warn("NATS directory relay will retry without advancing its SQL cursor", "error", err)
 				})
 			}()

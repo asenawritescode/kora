@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/asenawritescode/kora/internal/sweep"
 )
 
 // DirectoryChangeFeed is the minimal registry boundary needed to consume
@@ -293,6 +295,49 @@ func (c *DirectoryConsumer) Run(ctx context.Context, interval time.Duration, onE
 			return
 		case <-ticker.C:
 		}
+	}
+}
+
+// RunOnWake drives the feed from wakes instead of a fixed tick. A pass that
+// fills its page runs again at once; a failed pass retries after retry; an idle
+// pass waits for a wake or a jittered sweep. onError reports a failed pass.
+func (c *DirectoryConsumer) RunOnWake(ctx context.Context, wake <-chan struct{}, sweepEvery, retry time.Duration, onError func(error)) {
+	defer c.releaseLease() //nolint:contextcheck // releaseLease runs after ctx ends and bounds its own context
+
+	pageSize := c.PageSize
+	if pageSize == 0 {
+		pageSize = 100
+	}
+	idle := sweep.New(sweepEvery, wake)
+	for ctx.Err() == nil {
+		applied, err := c.ProcessBatch(ctx)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) && onError != nil {
+				onError(err)
+			}
+			if !waitDirectoryRetry(ctx, retry) {
+				return
+			}
+			continue
+		}
+		if applied >= pageSize {
+			continue
+		}
+		if !idle.Wait(ctx) {
+			return
+		}
+	}
+}
+
+// waitDirectoryRetry sleeps for a failed pass; it reports false when ctx ends first.
+func waitDirectoryRetry(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 

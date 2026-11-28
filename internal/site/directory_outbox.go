@@ -13,6 +13,7 @@ import (
 
 	"github.com/asenawritescode/kora/contract"
 	"github.com/asenawritescode/kora/internal/db"
+	"github.com/asenawritescode/kora/internal/sweep"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -140,6 +141,27 @@ func parseDirectoryChangeTime(value string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("unrecognized timestamp format")
+}
+
+// directoryChangeWake wakes this process's directory relay. It is signalled
+// only after a transaction that appended a change has committed.
+var directoryChangeWake = sweep.NewWake()
+
+// SubscribeDirectoryChanges returns a channel signalled after each directory
+// change this process commits. A change committed by another process is
+// published by that process's own relay.
+func SubscribeDirectoryChanges() <-chan struct{} {
+	return directoryChangeWake.Subscribe()
+}
+
+// commitDirectoryTx commits a transaction that appended directory changes and
+// then wakes the relay. The wake never precedes the commit.
+func commitDirectoryTx(tx *sql.Tx) error {
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	directoryChangeWake.Signal()
+	return nil
 }
 
 func appendDirectoryChange(tx *sql.Tx, dialect string, info DBSiteInfo) error {

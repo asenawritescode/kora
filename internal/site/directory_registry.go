@@ -695,7 +695,7 @@ func (r *SQLSiteRegistry) SetRuntimeCellIDAtRevisionContext(ctx context.Context,
 	if err := appendDirectoryChange(tx, r.dialect, info); err != nil {
 		return Descriptor{}, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitDirectoryTx(tx); err != nil {
 		return Descriptor{}, fmt.Errorf("commit revision-fenced site placement update: %w", err)
 	}
 	return DescriptorFromDBSiteInfo(info), nil
@@ -793,7 +793,7 @@ func (r *SQLSiteRegistry) SetStatusContext(ctx context.Context, siteID, status s
 	if err := appendDirectoryChange(tx, r.dialect, info); err != nil {
 		return Descriptor{}, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitDirectoryTx(tx); err != nil {
 		return Descriptor{}, fmt.Errorf("commit site status update: %w", err)
 	}
 	return DescriptorFromDBSiteInfo(info), nil
@@ -865,7 +865,7 @@ func (r *SQLSiteRegistry) SetStatusAtRevision(ctx context.Context, siteID, statu
 	if err := appendDirectoryChange(tx, r.dialect, info); err != nil {
 		return Descriptor{}, fmt.Errorf("append site status directory change: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitDirectoryTx(tx); err != nil {
 		return Descriptor{}, fmt.Errorf("commit revision-fenced site status update: %w", err)
 	}
 	return DescriptorFromDBSiteInfo(info), nil
@@ -933,7 +933,7 @@ func (r *SQLSiteRegistry) SetDeletingAtAllocation(ctx context.Context, siteID st
 	if err := appendDirectoryChange(tx, r.dialect, info); err != nil {
 		return Descriptor{}, fmt.Errorf("append tenant deletion directory change: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitDirectoryTx(tx); err != nil {
 		return Descriptor{}, fmt.Errorf("commit allocation-fenced tenant deletion: %w", err)
 	}
 	return DescriptorFromDBSiteInfo(info), nil

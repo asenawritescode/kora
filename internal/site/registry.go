@@ -191,7 +191,7 @@ func ensurePlatformSiteRegistrationAssignmentContext(ctx context.Context, platfo
 	if err := appendCurrentSiteDirectoryChange(tx, platformDBType, cfg.Hostname); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitDirectoryTx(tx); err != nil {
 		return fmt.Errorf("commit platform site registration: %w", err)
 	}
 	return nil
@@ -332,7 +332,7 @@ func UpdatePlatformSiteRegistration(platformDB *sql.DB, platformDBType string, h
 	if err := appendCurrentSiteDirectoryChange(tx, platformDBType, hostname); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitDirectoryTx(tx); err != nil {
 		return fmt.Errorf("commit platform site update: %w", err)
 	}
 	return nil
@@ -425,7 +425,7 @@ func removePlatformSiteRegistrationByID(platformDB *sql.DB, platformDBType, site
 	if err := setSiteAliasIndexStateTx(tx, dialect, true); err != nil {
 		return fmt.Errorf("mark alias projection synchronized: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitDirectoryTx(tx); err != nil {
 		return fmt.Errorf("commit platform site removal: %w", err)
 	}
 	return nil
