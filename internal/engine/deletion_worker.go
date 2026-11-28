@@ -10,8 +10,14 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/internal/site"
+	"github.com/asenawritescode/kora/internal/sweep"
 )
 
+// pendingDeletionSweep bounds an idle recovery pass. A deletion request wakes
+// the worker on commit; the sweep only recovers a dropped wake or a crash.
+const pendingDeletionSweep = 5 * time.Minute
+
+// pendingDeletionRetryInterval paces passes after a failed one.
 const pendingDeletionRetryInterval = 30 * time.Second
 
 // PendingDeletionWorker owns recovery of durable tenant-deletion intents.
@@ -50,7 +56,7 @@ type deletionWorkAdmission interface {
 
 // StartPendingDeletionWorker starts the Engine-owned deletion recovery worker.
 func StartPendingDeletionWorker(parent context.Context, platformDB *sql.DB, dbType string, common *site.CommonConfig) (*PendingDeletionWorker, error) {
-	return startPendingDeletionWorker(parent, pendingDeletionRecovery{platformDB: platformDB, dbType: dbType, common: common, retry: site.RetryPendingSiteDeletions, interval: pendingDeletionRetryInterval})
+	return startPendingDeletionWorker(parent, pendingDeletionRecovery{platformDB: platformDB, dbType: dbType, common: common, retry: site.RetryPendingSiteDeletions, interval: pendingDeletionSweep})
 }
 
 // pendingDeletionRecovery is what one pending-deletion recovery worker needs.
@@ -60,8 +66,10 @@ type pendingDeletionRecovery struct {
 	dbType     string
 	common     *site.CommonConfig
 	retry      func(context.Context, *sql.DB, string, *site.CommonConfig) error
-	interval   time.Duration
-	admission  deletionWorkAdmission
+	// interval is the idle sweep; wake, when set, ends an idle wait early.
+	interval  time.Duration
+	wake      <-chan struct{}
+	admission deletionWorkAdmission
 }
 
 func startPendingDeletionWorker(parent context.Context, rec pendingDeletionRecovery) (*PendingDeletionWorker, error) {
@@ -87,24 +95,27 @@ func (w *PendingDeletionWorker) run(ctx context.Context, rec pendingDeletionReco
 		return
 	case <-w.startCh:
 	}
+	idle := sweep.New(rec.interval, rec.wake)
 	for {
-		w.retry(ctx, rec)
-		timer := time.NewTimer(rec.interval)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
+		failed := w.retry(ctx, rec)
+		if !awaitPendingDeletionPass(ctx, idle, failed) {
 			return
-		case <-timer.C:
 		}
 	}
 }
 
-func (w *PendingDeletionWorker) retry(ctx context.Context, rec pendingDeletionRecovery) {
+// awaitPendingDeletionPass waits for the next pass: a failed or deferred pass
+// retries after pendingDeletionRetryInterval, an idle one waits for a wake or
+// the sweep. It reports false when ctx ends first.
+func awaitPendingDeletionPass(ctx context.Context, idle *sweep.Timer, failed bool) bool {
+	if failed {
+		return waitContext(ctx, pendingDeletionRetryInterval)
+	}
+	return idle.Wait(ctx)
+}
+
+// retry runs one recovery pass and reports whether it failed or was deferred.
+func (w *PendingDeletionWorker) retry(ctx context.Context, rec pendingDeletionRecovery) bool {
 	retryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if rec.admission != nil {
@@ -114,7 +125,7 @@ func (w *PendingDeletionWorker) retry(ctx context.Context, rec pendingDeletionRe
 				w.rejected.Add(1)
 				slog.Warn("pending site deletion cleanup deferred by database work admission", "error", err)
 			}
-			return
+			return true
 		}
 		defer release()
 	}
@@ -124,7 +135,9 @@ func (w *PendingDeletionWorker) retry(ctx context.Context, rec pendingDeletionRe
 		if ctx.Err() == nil {
 			slog.Warn("pending site deletion cleanup will retry", "error", err)
 		}
+		return true
 	}
+	return false
 }
 
 // Start releases the initial readiness gate exactly once.

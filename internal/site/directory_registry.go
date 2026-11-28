@@ -436,12 +436,25 @@ func (r *SQLSiteRegistry) GetDirectorySnapshotForCell(cellID string) ([]DBSiteIn
 // audit consumers. It intentionally does not query or decrypt tenant database
 // credentials or storage connection details.
 func (r *SQLSiteRegistry) GetDirectoryDescriptors() ([]Descriptor, error) {
+	return r.descriptorsQuery(`SELECT site_id, COALESCE(runtime_cell_id, ''), site, COALESCE(domains_json, '[]'), status, config_revision FROM _kora_site_registry ORDER BY site`, "read credential-free site directory descriptors")
+}
+
+// GetPendingDeletionDescriptors returns the descriptors of tenants whose
+// deletion is still pending. An idle recovery pass therefore reads no other
+// registry row.
+func (r *SQLSiteRegistry) GetPendingDeletionDescriptors() ([]Descriptor, error) {
+	return r.descriptorsQuery(`SELECT site_id, COALESCE(runtime_cell_id, ''), site, COALESCE(domains_json, '[]'), status, config_revision FROM _kora_site_registry WHERE status = 'deleting' ORDER BY site`, "read pending site deletion descriptors")
+}
+
+// descriptorsQuery scans registry rows selected by query, which must return the
+// descriptor columns in the order GetDirectoryDescriptors selects them.
+func (r *SQLSiteRegistry) descriptorsQuery(query, purpose string) ([]Descriptor, error) {
 	if r == nil || r.database == nil {
 		return nil, errors.New("site registry unavailable")
 	}
-	rows, err := r.database.Query(`SELECT site_id, COALESCE(runtime_cell_id, ''), site, COALESCE(domains_json, '[]'), status, config_revision FROM _kora_site_registry ORDER BY site`)
+	rows, err := r.database.Query(query)
 	if err != nil {
-		return nil, fmt.Errorf("read credential-free site directory descriptors: %w", err)
+		return nil, fmt.Errorf("%s: %w", purpose, err)
 	}
 	defer rows.Close()
 	var descriptors []Descriptor

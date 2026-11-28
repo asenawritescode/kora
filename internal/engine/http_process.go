@@ -16,6 +16,7 @@ import (
 	knet "github.com/asenawritescode/kora/internal/net"
 	"github.com/asenawritescode/kora/internal/site"
 	"github.com/asenawritescode/kora/internal/storage"
+	"github.com/asenawritescode/kora/internal/sweep"
 )
 
 // ConsoleAssemblyConfig contains the platform-only values needed to install
@@ -149,6 +150,9 @@ func AssembleHTTPProcess(config HTTPProcessAssemblyConfig) (*HTTPProcessAssembly
 			return nil, fmt.Errorf("register site directory feed: %w", err)
 		}
 	}
+	// One deletion wake serves the console handler's commits and the recovery
+	// worker started below; the worker subscribes now so no commit is missed.
+	deletionWake := sweep.NewWake()
 	if config.Console != nil && config.Console.SystemGuard != nil {
 		console := config.Console
 		handler := api.NewConsoleHandler(console.SystemGuard, config.Application.Tenants, api.ConsoleOptions{
@@ -159,6 +163,7 @@ func AssembleHTTPProcess(config HTTPProcessAssemblyConfig) (*HTTPProcessAssembly
 		handler.PlatformWorkAdmission = console.PlatformWorkAdmission
 		handler.TenantSiteAdmission = tenantSiteProvisioningAdmission(config.PlatformDBDriver, config.PlatformDBDSN)
 		handler.ResolveStorage = console.ResolveStorage
+		handler.DeletionWake = deletionWake
 		handler.PrepareRuntime = config.ReloadController.Coordinator.Install
 		handler.DiscardRuntime = discardTenantCandidate
 		handler.ReloadRuntime = func(ctx context.Context, name string) error {
@@ -223,25 +228,7 @@ func AssembleHTTPProcess(config HTTPProcessAssemblyConfig) (*HTTPProcessAssembly
 	if err != nil {
 		return nil, fmt.Errorf("assemble Engine HTTP listener: %w", err)
 	}
-	platformDB := config.PlatformRoutes.PlatformDB
-	if platformDB == nil {
-		return nil, errors.New("Engine platform database is required for deletion recovery")
-	}
-	if err := config.Resources.RegisterWorkerStart(func() error {
-		if config.PlatformDBDriver == "" || config.PlatformDBDSN == "" {
-			return errors.New("platform database endpoint identity is required for deletion recovery admission")
-		}
-		admission, err := dbaccess.AdmissionFor(config.PlatformDBDriver, config.PlatformDBDSN)
-		if err != nil {
-			return fmt.Errorf("resolve platform database work admission: %w", err)
-		}
-		deletionWorker, err := startPendingDeletionWorker(config.ProcessContext, pendingDeletionRecovery{platformDB: platformDB, dbType: config.Application.Common.DBType, common: config.Application.Common, retry: site.RetryPendingSiteDeletions, interval: pendingDeletionRetryInterval, admission: admission})
-		if err != nil {
-			return fmt.Errorf("start pending tenant deletion recovery worker: %w", err)
-		}
-		config.Resources.DeletionWorker = deletionWorker
-		return nil
-	}); err != nil {
+	if err := registerPendingDeletionRecovery(config, deletionWake); err != nil {
 		return nil, fmt.Errorf("register pending tenant deletion recovery worker: %w", err)
 	}
 	return &HTTPProcessAssembly{Application: application, Server: server, AsyncHookWorker: asyncHooks}, nil
@@ -271,5 +258,30 @@ func newProcessMailer(common *site.CommonConfig) *email.Sender {
 	return email.NewSender(&email.Config{
 		Host: common.SMTPHost, Port: common.SMTPPort, Username: common.SMTPUsername,
 		Password: common.SMTPPassword, From: from, TLSMode: common.SMTPTLSMode,
+	})
+}
+
+// registerPendingDeletionRecovery starts the pending tenant deletion recovery
+// worker when the Engine starts. The worker is woken by deletion requests on
+// wake and otherwise sweeps on pendingDeletionSweep.
+func registerPendingDeletionRecovery(config HTTPProcessAssemblyConfig, wake *sweep.Wake) error {
+	platformDB := config.PlatformRoutes.PlatformDB
+	if platformDB == nil {
+		return errors.New("Engine platform database is required for deletion recovery")
+	}
+	return config.Resources.RegisterWorkerStart(func() error {
+		if config.PlatformDBDriver == "" || config.PlatformDBDSN == "" {
+			return errors.New("platform database endpoint identity is required for deletion recovery admission")
+		}
+		admission, err := dbaccess.AdmissionFor(config.PlatformDBDriver, config.PlatformDBDSN)
+		if err != nil {
+			return fmt.Errorf("resolve platform database work admission: %w", err)
+		}
+		deletionWorker, err := startPendingDeletionWorker(config.ProcessContext, pendingDeletionRecovery{platformDB: platformDB, dbType: config.Application.Common.DBType, common: config.Application.Common, retry: site.RetryPendingSiteDeletions, interval: pendingDeletionSweep, wake: wake.Subscribe(), admission: admission})
+		if err != nil {
+			return fmt.Errorf("start pending tenant deletion recovery worker: %w", err)
+		}
+		config.Resources.DeletionWorker = deletionWorker
+		return nil
 	})
 }

@@ -182,3 +182,31 @@ func TestStartPendingDeletionWorkerRequiresItsInputs(t *testing.T) {
 		})
 	}
 }
+
+func TestPendingDeletionWorkerWakeRunsPassBeforeSweep(t *testing.T) {
+	database, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	passes := make(chan struct{}, 4)
+	wake := make(chan struct{}, 1)
+	worker, err := startPendingDeletionWorker(context.Background(), pendingDeletionRecovery{platformDB: database, dbType: "mysql", retry: func(context.Context, *sql.DB, string, *site.CommonConfig) error {
+		passes <- struct{}{}
+		return nil
+	}, interval: time.Hour, wake: wake})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker.Start()
+	<-passes // the readiness pass
+	wake <- struct{}{}
+	select {
+	case <-passes:
+	case <-time.After(time.Second):
+		t.Fatal("deletion request wake did not run a recovery pass within 1s")
+	}
+	if err := worker.Shutdown(context.Background()); err != nil {
+		t.Fatal("shutdown:", err)
+	}
+}

@@ -22,6 +22,7 @@ import (
 	"github.com/asenawritescode/kora/internal/net"
 	"github.com/asenawritescode/kora/internal/site"
 	"github.com/asenawritescode/kora/internal/storage"
+	"github.com/asenawritescode/kora/internal/sweep"
 )
 
 // onboardRateLimiter tracks IP → count for self-service site creation.
@@ -75,6 +76,9 @@ type ConsoleHandler struct {
 	// router rejects the new site.
 	DiscardRuntime func(*net.LoadedSite)
 	ResolveStorage func(*site.Config) (storage.Backend, error)
+	// DeletionWake wakes the pending-deletion recovery worker once a deletion
+	// request commits. A nil wake is a no-op.
+	DeletionWake *sweep.Wake
 	// ReloadRuntime publishes the durable directory config through the tenant
 	// runtime coordinator before this handler reports the update as active.
 	ReloadRuntime      func(context.Context, string) error
@@ -1338,6 +1342,16 @@ func (h *ConsoleHandler) HandleUpdateSite(c *gin.Context) {
 // HandleDeleteSite deletes a site and all its data.
 // DELETE /api/console/sites/:name
 // Requires confirmation: {"confirm": "<hostname>"}
+// markSiteDeleting commits the deleting state and then wakes the pending-deletion
+// recovery worker, so a deletion interrupted after this point is retried at once.
+func (h *ConsoleHandler) markSiteDeleting(registry *site.SQLSiteRegistry, siteID string) (site.Descriptor, error) {
+	descriptor, err := registry.SetStatusAndGetDescriptor(siteID, "deleting")
+	if err == nil {
+		h.DeletionWake.Signal()
+	}
+	return descriptor, err
+}
+
 func (h *ConsoleHandler) HandleDeleteSite(c *gin.Context) {
 	siteName := c.Param("name")
 	if siteName == "" {
@@ -1390,7 +1404,7 @@ func (h *ConsoleHandler) HandleDeleteSite(c *gin.Context) {
 		writeError(c, http.StatusServiceUnavailable, "site.directory_unavailable", "Site directory is unavailable; deletion was not started", nil)
 		return
 	}
-	descriptor, err := registry.SetStatusAndGetDescriptor(siteID, "deleting")
+	descriptor, err := h.markSiteDeleting(registry, siteID)
 	if err != nil {
 		slog.Error("marking site deleting failed", "hostname", siteName, "site_id", siteID, "error", err)
 		writeError(c, http.StatusServiceUnavailable, "site.directory_unavailable", "Site directory is unavailable; deletion was not started", nil)

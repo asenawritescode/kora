@@ -21,7 +21,7 @@ func RetryPendingSiteDeletions(ctx context.Context, platformDB *sql.DB, platform
 		return errors.New("platform site registry unavailable")
 	}
 	registry := NewSQLSiteRegistry(platformDB, platformDBType)
-	descriptors, err := registry.GetDirectoryDescriptors()
+	descriptors, err := registry.GetPendingDeletionDescriptors()
 	if err != nil {
 		return fmt.Errorf("list site deletion intents: %w", err)
 	}

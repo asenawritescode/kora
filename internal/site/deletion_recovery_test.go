@@ -71,7 +71,8 @@ func TestRetryPendingSiteDeletionsIgnoresNonDeletingSites(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT site_id, COALESCE(runtime_cell_id, ''), site, COALESCE(domains_json, '[]'), status, config_revision FROM _kora_site_registry ORDER BY site`)).
+	// The pass reads only pending-deletion rows; the filter below is a second guard.
+	mock.ExpectQuery(regexp.QuoteMeta(`WHERE status = 'deleting' ORDER BY site`)).
 		WillReturnRows(sqlmock.NewRows([]string{"site_id", "runtime_cell_id", "site", "domains_json", "status", "config_revision"}).
 			AddRow("site-active", "", "active.example", `[]`, "active", 1).
 			AddRow("site-suspended", "", "paused.example", `[]`, "suspended", 2))
