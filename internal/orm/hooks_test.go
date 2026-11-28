@@ -16,6 +16,7 @@ import (
 	"github.com/asenawritescode/kora/internal/doctype"
 	"github.com/asenawritescode/kora/internal/policy"
 	"github.com/asenawritescode/kora/internal/script"
+	"github.com/asenawritescode/kora/internal/sweep"
 )
 
 type hookRequestSink struct{ request AsyncHookRequest }
@@ -456,6 +457,8 @@ func TestCaptureAsyncAfterHooksTxFreezesScriptAndVerifiedExecution(t *testing.T)
 		t.Fatal("create verified execution:", err)
 	}
 	store := &capturedAsyncHookStore{}
+	hookWake := sweep.NewWake()
+	woken := hookWake.Subscribe()
 	target := contract.ResourceRef{Namespace: "tenant", Name: "Task", Version: 1}
 	handler := contract.ResourceRef{Namespace: "tenant", Name: "task-after-save", Version: 1}
 	ownerModule := contract.ModuleDescriptor{ID: "workflow.task", Version: "1.0.0", Resources: []contract.OwnedResource{{Ref: target}}, ExtensionPoints: []contract.ExtensionPoint{{
@@ -477,6 +480,7 @@ func TestCaptureAsyncAfterHooksTxFreezesScriptAndVerifiedExecution(t *testing.T)
 		AsyncHookSourceOperation: contract.OperationID(contract.NewOperationID()), AsyncHookConfigRevision: 42,
 		Execution: execution, SiteName: "tenant-a", SkipHookScripts: []string{"other"},
 		ModuleDescriptors: moduleDescriptors, ModuleExtensions: moduleExtensions,
+		HookWake: hookWake,
 	}
 	dt := &doctype.DocType{Name: "Task"}
 	doc := &doctype.Document{DocType: "Task", Name: "TASK-001", Fields: map[string]any{"title": "Ship"}}
@@ -497,6 +501,17 @@ func TestCaptureAsyncAfterHooksTxFreezesScriptAndVerifiedExecution(t *testing.T)
 	}
 	if !manager.SuppressAsyncHookEvents {
 		t.Fatal("durable capture must suppress post-commit compatibility enqueue")
+	}
+	// The hook row is only visible after commit, so the wake waits for the
+	// post-commit hooks and does not fire inside the source transaction.
+	if len(woken) != 0 {
+		t.Fatal("hook wake fired before commit")
+	}
+	for _, afterCommit := range manager.PostCommitHooks {
+		afterCommit()
+	}
+	if len(woken) != 1 {
+		t.Fatal("hook wake not signalled after commit")
 	}
 	mock.ExpectRollback()
 	if err := dbTx.Rollback(); err != nil {

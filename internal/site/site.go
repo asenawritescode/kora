@@ -551,7 +551,9 @@ func tuneConnectionPool(db *sql.DB, driver string, maxOpen, maxIdle int) {
 		// modest per-pool idle cap multiplies across sites and can exhaust MySQL
 		// before any request traffic arrives; open concurrency remains separately
 		// bounded for active request bursts.
-		db.SetConnMaxIdleTime(2 * time.Minute)
+		// Background workers no longer tick, so an idle tenant reaches this
+		// limit and releases its socket instead of holding it for minutes.
+		db.SetConnMaxIdleTime(30 * time.Second)
 		db.SetConnMaxLifetime(10 * time.Minute)
 	default:
 	}

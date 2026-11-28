@@ -183,6 +183,8 @@ func (tx *TxManager) CaptureAsyncAfterHooksTx(ctx context.Context, dbTx *sql.Tx,
 		if err := tx.AsyncHookInvocations.AppendAsyncHookTx(ctx, dbTx, invocation); err != nil {
 			return fmt.Errorf("persist async lifecycle hook %q: %w", record.Name, err)
 		}
+		// Signal is nil-safe, so an unwired transaction queues a no-op.
+		tx.PostCommitHooks = append(tx.PostCommitHooks, tx.HookWake.Signal)
 	}
 	// Do not reload after commit: a newly activated script must not receive an
 	// old event whose source transaction committed before that activation.

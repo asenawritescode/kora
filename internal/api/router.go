@@ -226,7 +226,7 @@ func (h *Handler) siteTx(c *gin.Context) *orm.TxManager {
 				// Wire the transactional outbox writer for this site.
 				if siteNameStr, ok := siteName.(string); ok {
 					services := h.runtimeService(c, siteNameStr)
-					tm.Outbox, tm.OutboxWake = services.Outbox, services.OutboxWake
+					tm.Outbox, tm.OutboxWake, tm.HookWake = services.Outbox, services.OutboxWake, services.HookWake
 					tm.WorkflowStatusPolicies = services.WorkflowStatusPolicies
 				}
 				// Wire script runner and store.

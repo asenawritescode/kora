@@ -176,7 +176,10 @@ type TxManager struct {
 	AsyncHookSink AsyncHookSink
 	// AsyncHookInvocations is the durable hook store installed by the tenant
 	// runtime. Kernel commands append frozen hooks in their source transaction.
-	AsyncHookInvocations     script.AsyncHookInvocationStore
+	AsyncHookInvocations script.AsyncHookInvocationStore
+	// HookWake wakes the tenant's durable lifecycle hook worker once the
+	// transaction that appended a hook commits. A nil wake is a no-op.
+	HookWake                 *sweep.Wake
 	AsyncHookTenantID        contract.TenantID
 	AsyncHookSourceOperation contract.OperationID
 	AsyncHookConfigRevision  uint64

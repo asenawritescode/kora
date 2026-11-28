@@ -146,7 +146,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		}
 	}
 	services := loaded.RuntimeServiceSnapshot()
-	services.Mailer, services.OutboxWake = config.Mailer, sweep.NewWake()
+	services.Mailer, services.OutboxWake, services.HookWake = config.Mailer, sweep.NewWake(), sweep.NewWake()
 	services.CommandSchemas = config.ModuleSchemas
 	// Publish the in-progress bundle to the still-unpublished runtime so its
 	// single Close path can roll back any worker started by this installer.
@@ -417,7 +417,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 		return fmt.Errorf("construct tenant approval transaction opener: %w", err)
 	}
 	domainTx := &orm.TxManager{
-		DB: loaded.DB, Registry: loaded.Registry, Dialect: dialect, Outbox: domainKernel.Outbox, OutboxWake: services.OutboxWake,
+		DB: loaded.DB, Registry: loaded.Registry, Dialect: dialect, Outbox: domainKernel.Outbox, OutboxWake: services.OutboxWake, HookWake: services.HookWake,
 		SiteName: loaded.Name, AsyncHookTenantID: tenantID,
 		AsyncHookConfigRevision: loaded.ConfigRevision,
 		ModuleDescriptors:       append([]contract.ModuleDescriptor(nil), moduleSnapshot.Modules...),
@@ -445,6 +445,7 @@ func installTenantServices(config TenantServiceConfig, info site.DBSiteInfo, loa
 					Runner: config.ScriptRunner, Store: services.ScriptStore, DB: loaded.DB, Registry: loaded.Registry,
 					Outbox: services.Outbox, TenantID: loaded.SiteID, Site: loaded.Name, DBType: loaded.DBType,
 					Secrets: services.SecretStore, HTTPAllowlist: config.HTTPAllowlist, Admission: workAdmission,
+					Wake: services.HookWake,
 				})
 			}) {
 				return fmt.Errorf("tenant runtime is stopping")

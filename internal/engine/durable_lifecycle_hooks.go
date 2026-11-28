@@ -21,10 +21,16 @@ import (
 	"github.com/asenawritescode/kora/internal/policy"
 	"github.com/asenawritescode/kora/internal/script"
 	"github.com/asenawritescode/kora/internal/secret"
+	"github.com/asenawritescode/kora/internal/sweep"
 )
 
 const (
-	durableLifecycleHookPoll       = time.Second
+	// durableLifecycleHookSweep bounds how long an idle worker waits before it
+	// probes SQL again. A committed hook wakes the worker at once; the sweep
+	// only recovers a dropped wake or an expired lease.
+	durableLifecycleHookSweep = 5 * time.Minute
+	// durableLifecycleHookRetry paces passes after a failed claim.
+	durableLifecycleHookRetry      = time.Second
 	durableLifecycleHookLease      = 6 * time.Minute
 	durableLifecycleHookMaxTimeout = 4 * time.Minute
 )
@@ -60,6 +66,11 @@ type LifecycleHookWorker struct {
 	Secrets       *secret.Store
 	HTTPAllowlist []string
 	Admission     hookWorkAdmission
+	// Wake is signalled after each commit that appends a hook. A nil Wake
+	// leaves the worker on its sweep alone.
+	Wake *sweep.Wake
+	// Sweep overrides durableLifecycleHookSweep when positive (tests).
+	Sweep time.Duration
 }
 
 // RunDurableLifecycleHookWorker is owned by one tenant runtime generation.
@@ -75,8 +86,9 @@ func RunDurableLifecycleHookWorker(ctx context.Context, w LifecycleHookWorker) {
 		return
 	}
 	pass := &lifecycleHookPass{LifecycleHookWorker: w, dialect: kdb.Resolve(w.DBType), tenant: tenant, owner: "doc-hook-" + contract.NewOperationID()}
-	ticker := time.NewTicker(durableLifecycleHookPoll)
-	defer ticker.Stop()
+	// Subscribe before the first pass: a commit that lands after the subscription
+	// wakes the worker, and one that landed earlier is seen by that first pass.
+	timer := sweep.New(w.sweepInterval(), w.Wake.Subscribe())
 	for ctx.Err() == nil {
 		worked, workErr := processOneDurableLifecycleHook(ctx, pass)
 		if workErr != nil && ctx.Err() == nil {
@@ -85,12 +97,27 @@ func RunDurableLifecycleHookWorker(ctx context.Context, w LifecycleHookWorker) {
 		if worked {
 			continue
 		}
-		select {
-		case <-ctx.Done():
+		if !awaitDurableLifecycleHookPass(ctx, timer, workErr) {
 			return
-		case <-ticker.C:
 		}
 	}
+}
+
+// awaitDurableLifecycleHookPass waits for the next pass: a failed pass retries
+// after durableLifecycleHookRetry, an idle one waits for a wake or the sweep.
+// It reports false when ctx ends first.
+func awaitDurableLifecycleHookPass(ctx context.Context, timer *sweep.Timer, workErr error) bool {
+	if workErr != nil {
+		return waitContext(ctx, durableLifecycleHookRetry)
+	}
+	return timer.Wait(ctx)
+}
+
+func (w LifecycleHookWorker) sweepInterval() time.Duration {
+	if w.Sweep > 0 {
+		return w.Sweep
+	}
+	return durableLifecycleHookSweep
 }
 
 // lifecycleHookPass is one claim attempt of a tenant's durable lifecycle hook
@@ -161,7 +188,8 @@ func processOneDurableLifecycleHook(ctx context.Context, w *lifecycleHookPass) (
 		user = actor.PrincipalID
 	}
 	tm := &orm.TxManager{
-		DB: w.DB, Transaction: execTx, Registry: w.Registry, Dialect: w.dialect,
+		HookWake: w.Wake,
+		DB:       w.DB, Transaction: execTx, Registry: w.Registry, Dialect: w.dialect,
 		Context: callCtx, SiteName: w.Site, CurrentUser: user, CurrentUserRoles: actor.Roles,
 		Execution: execution, ScriptRunner: w.Runner, ScriptStore: w.Store,
 		ScriptProvider: nil, AsyncHookInvocations: w.Store, AsyncHookTenantID: w.tenant,

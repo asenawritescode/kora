@@ -85,6 +85,8 @@ type Services struct {
 
 	// OutboxWake wakes the tenant outbox workers after a record write commits.
 	OutboxWake *sweep.Wake
+	// HookWake wakes the durable lifecycle hook worker after a hook row commits.
+	HookWake *sweep.Wake
 }
 
 // ModuleOpenWorkInspector binds a module owner to its lifecycle inspection
