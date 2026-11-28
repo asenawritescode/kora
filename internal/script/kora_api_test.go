@@ -18,6 +18,9 @@ func runKora(t *testing.T, ctx context.Context, req ExecuteRequest) (*ExecuteRes
 	return runner.Execute(ctx, req)
 }
 
+// largeText is a 40 KiB document text field.
+var largeText = strings.Repeat("x", 40<<10)
+
 func TestKoraAPIBehaviour(t *testing.T) {
 	boom := errors.New("boom")
 	tests := []struct {
@@ -29,6 +32,11 @@ func TestKoraAPIBehaviour(t *testing.T) {
 	}{
 		{name: "getDoc found", prov: &fakeKoraProvider{doc: map[string]any{"name": "S1"}},
 			script: `return {result: kora.getDoc("Sale", "S1").name};`, want: "S1"},
+		// #879: a document string over 2 KiB trapped the QuickJS runtime while the shim parsed it.
+		{name: "getDoc large text field", prov: &fakeKoraProvider{doc: map[string]any{"notes": largeText}},
+			script: `return {result: kora.getDoc("Sale", "S1").notes === "x".repeat(40960)};`, want: true},
+		{name: "getList large text fields", prov: &fakeKoraProvider{docs: []map[string]any{{"notes": largeText}, {"notes": largeText}}},
+			script: `return {result: kora.getList("Sale").map(d => d.notes.length).join()};`, want: "40960,40960"},
 		{name: "getDoc arity", prov: &fakeKoraProvider{},
 			script: `kora.getDoc("Sale");`, wantErr: "kora.getDoc requires 2 arguments: doctype, name"},
 		{name: "getDoc provider error", prov: &fakeKoraProvider{readErr: errors.New("boom")},
