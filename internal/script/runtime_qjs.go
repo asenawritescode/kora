@@ -21,6 +21,7 @@ const (
 	qjsHeadroomBytes = 32 << 20  // wasm pages beyond the JS heap: input buffer, wasm stack, static data
 	qjsPageBytes     = 64 << 10  // wasm linear-memory page size
 	qjsDefaultHeap   = 128 << 20
+	qjsMaxReuses     = 1000 // resets of one instance before it is closed and replaced
 
 	// validateStubSource gives a script under Validate the globals it may reference.
 	validateStubSource = `var __kora_event__ = {doc: {}, oldDoc: null}; var kora = {log: {info: function(){}, warn: function(){}, error: function(){}}, hasDocType: function(){ return false; }};`
@@ -106,21 +107,49 @@ func (r *EmbeddedRunner) newPrewarmed(ctx context.Context) (*qjs.Instance, error
 	return r.engine.Restore(ctx, r.snapshot)
 }
 
-// takeInstance returns the instance for one execution: a prewarmed one when the pool
-// has one, else one built inline. It never waits for a refill. Each call starts one
-// refill, so the pool recovers even when it was empty.
+// takeInstance returns the instance for one execution: a ready one when the pool has
+// one, else one built inline. A ready instance is not replaced here: the instance comes
+// back to the pool when its execution ends (release). An inline build starts one refill,
+// so the pool recovers when it ran dry.
 func (r *EmbeddedRunner) takeInstance(ctx context.Context) (*qjs.Instance, error) {
-	r.refillAsync() //nolint:contextcheck // the refill is bound to r.ctx, not the request, so Close cancels and waits for it
 	select {
 	case inst := <-r.ready:
 		return inst, nil
 	default:
+		r.refillAsync() //nolint:contextcheck // the refill is bound to r.ctx, not the request, so Close cancels and waits for it
 		inst, err := r.newPrewarmed(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("script: new instance: %w", err)
 		}
 		return inst, nil
 	}
+}
+
+// release ends one execution's instance. A clean run's instance is reset in place and
+// returned to the pool off the request path. Anything else is closed, and the pool gets
+// a refill: an instance whose run failed, that has been reset qjsMaxReuses times, or
+// whose memory grew past twice the snapshot. Call it while the execution still holds
+// active, so the reset goroutine it starts is covered by Close.
+func (r *EmbeddedRunner) release(inst *qjs.Instance, clean bool) {
+	if !clean || inst.Reused() >= qjsMaxReuses || inst.MemoryBytes() > 2*r.snapshot.MemoryBytes() {
+		_ = inst.Close(context.Background()) // best effort: the instance is being dropped
+		r.refillAsync()
+		return
+	}
+	r.active.Add(1)
+	go func() {
+		defer r.active.Done()
+		if err := inst.Reset(r.ctx, r.snapshot); err != nil {
+			_ = inst.Close(context.Background()) // best effort: the reset error is the one to report
+			r.refillAsync()
+			return
+		}
+		select {
+		case r.ready <- inst:
+		default:
+			_ = inst.Close(context.Background()) // the pool is full: drop the surplus instance
+		}
+	}()
 }
 
 // refillAsync prewarms one replacement in the background, bounded by the runner
@@ -166,8 +195,13 @@ func qjsLimits(maxRAM int64) qjs.Limits {
 		HeapBytes:  uint32(heap),
 		StackBytes: qjsStackBytes,
 		MaxPages:   uint32((heap + qjsHeadroomBytes) / qjsPageBytes),
+		CopyReset:  forceCopyReset,
 	}
 }
+
+// forceCopyReset is a test hook: it makes the engine copy snapshots on restore and reset
+// instead of mapping copy-on-write memory, which is the fallback for hosts without memfd.
+var forceCopyReset bool
 
 // refuseHostCall answers the guest's host calls during Validate. Validate runs no kora
 // code (its stub replaces kora), so any host call is refused.
@@ -225,12 +259,12 @@ func (r *EmbeddedRunner) Execute(ctx context.Context, req ExecuteRequest) (*Exec
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = inst.Close(context.WithoutCancel(ctx)) }() // best effort: the outcome is already decided
 	inst.SetHandler(koraBridge{ops: ops}.handle)
 
 	start := time.Now()
 	out, err := r.run(execCtx, inst, req, ops)
 	duration := time.Since(start)
+	r.release(inst, err == nil && execCtx.Err() == nil) //nolint:contextcheck // the reset and refill are bound to r.ctx, not the request
 
 	// Check for context cancellation first, as the goja runner does.
 	if execCtx.Err() != nil {
@@ -263,11 +297,11 @@ func (r *EmbeddedRunner) run(ctx context.Context, inst *qjs.Instance, req Execut
 		return "", fmt.Errorf("script: setup failed: %w", err)
 	}
 	for _, lib := range req.Libraries {
-		if err = evalSetup(ctx, inst, lib.Source); err != nil {
-			return "", fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+		if loadErr := r.loadLibrary(ctx, inst, lib); loadErr != nil {
+			return "", loadErr
 		}
 	}
-	res, err := inst.Eval(ctx, wrapScript(req.Script), qjs.ModeJSONResult)
+	res, err := r.evalCached(ctx, inst, wrapScript(req.Script), qjs.ModeJSONResult)
 	if err != nil {
 		return "", fmt.Errorf("script error: %w", err)
 	}
@@ -275,6 +309,19 @@ func (r *EmbeddedRunner) run(ctx context.Context, inst *qjs.Instance, req Execut
 		return "", fmt.Errorf("script error: %w", errors.New(res.Output))
 	}
 	return res.Output, nil
+}
+
+// loadLibrary evaluates one library for its declarations; a compile error or a throw is
+// returned as an error naming the library.
+func (r *EmbeddedRunner) loadLibrary(ctx context.Context, inst *qjs.Instance, lib Library) error {
+	res, err := r.evalCached(ctx, inst, lib.Source, 0)
+	if err != nil {
+		return fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+	}
+	if res.Thrown {
+		return fmt.Errorf("script: library %q failed to load: %w", lib.Name, errors.New(res.Output))
+	}
+	return nil
 }
 
 // evalSetup runs one source for its effect; a throw is returned as an error.
@@ -380,6 +427,7 @@ func (r *EmbeddedRunner) Close() error {
 	// Execute registers with active while holding mu, so no Add can race this Wait.
 	r.active.Wait()
 	r.drainReady()
+	r.snapshot.Close()
 	return r.engine.Close(context.Background())
 }
 
