@@ -2,9 +2,9 @@ package site
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/configstore"
 	"github.com/asenawritescode/kora/internal/doctype"
 )
 
@@ -23,15 +23,18 @@ func newPackScriptRule() *packScriptRule {
 	return &packScriptRule{defined: map[string]map[string]bool{}, requires: map[string][]string{}}
 }
 
-// addPack records the DocTypes and requires of one pack of the artifact.
+// addPack records the DocTypes and requires of one pack of the artifact. A pack
+// can span several file sets (a root manifest and a component without one), so
+// its DocTypes accumulate across calls rather than replacing an earlier set.
 func (r *packScriptRule) addPack(name string, docTypes []*doctype.DocType, requires []contract.ManifestPackRef) {
-	names := map[string]bool{}
+	if r.defined[name] == nil {
+		r.defined[name] = map[string]bool{}
+	}
 	for _, dt := range docTypes {
 		if dt != nil {
-			names[dt.Name] = true
+			r.defined[name][dt.Name] = true
 		}
 	}
-	r.defined[name] = names
 	for _, ref := range requires {
 		r.requires[name] = append(r.requires[name], ref.PackageID)
 	}
@@ -51,8 +54,8 @@ func (r *packScriptRule) check(scripts []*doctype.ScriptSnapshot) error {
 		if ss.DocType == "" {
 			continue
 		}
+		ss.ReplacesLegacy = configstore.LegacyScriptName(ss.DocType, ss.Event)
 		if r.defined[ss.OwnerPack][ss.DocType] {
-			ss.ReplacesLegacy = strings.ReplaceAll(ss.DocType, " ", "_") + "_" + ss.Event
 			continue
 		}
 		found, external := r.requiredDefines(ss.OwnerPack, ss.DocType)

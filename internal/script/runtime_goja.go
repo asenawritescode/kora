@@ -211,11 +211,55 @@ func runWithLibraries(vm *goja.Runtime, libraries []Library, script string) (goj
 // throws fails the run with its name in the error.
 func runLibraries(vm *goja.Runtime, libraries []Library) error {
 	for _, lib := range libraries {
-		if _, err := vm.RunString(lib.Source); err != nil {
-			return fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+		if err := loadGojaLibrary(vm, lib); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// loadGojaLibrary evaluates one library, then locks the globals it defined.
+func loadGojaLibrary(vm *goja.Runtime, lib Library) error {
+	before, err := gojaGlobalNames(vm)
+	if err != nil {
+		return fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+	}
+	if _, err = vm.RunString(lib.Source); err != nil {
+		return fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+	}
+	after, err := gojaGlobalNames(vm)
+	if err != nil {
+		return fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+	}
+	lock, err := lockGlobalsSource(newGlobalNames(before, after))
+	if err != nil {
+		return err
+	}
+	if _, err = vm.RunString(lock); err != nil {
+		return fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+	}
+	return nil
+}
+
+// gojaGlobalNames returns the names of the global object's own properties.
+func gojaGlobalNames(vm *goja.Runtime) ([]string, error) {
+	value, err := vm.RunString(globalNamesExpr)
+	if err != nil {
+		return nil, err
+	}
+	items, ok := value.Export().([]any)
+	if !ok {
+		return nil, fmt.Errorf("global names are not a list")
+	}
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		name, ok := item.(string)
+		if !ok {
+			return nil, fmt.Errorf("global name is not a string")
+		}
+		names = append(names, name)
+	}
+	return names, nil
 }
 
 // Validate checks that a script compiles without running it.

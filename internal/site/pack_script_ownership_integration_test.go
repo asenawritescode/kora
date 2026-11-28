@@ -210,10 +210,13 @@ func TestPackScriptUpgradeBackfillAcrossDialects(t *testing.T) {
 				t.Fatal(err)
 			}
 			importPackSnapshot(t, conn, dialect, name, site, "alpha", alphaFiles(true))
-			// Make the database look as a pre-38 install left it: unowned, unnamespaced rows.
+			// Make the database look as a pre-38 install left it: unowned, unnamespaced rows
+			// that still hold the script bodies the pack shipped.
 			for _, q := range []string{
 				`UPDATE _kora_script SET owner_pack = ''`,
 				`UPDATE _kora_script SET name = 'Alpha_Item_before_save' WHERE name = 'alpha__Alpha_Item_before_save'`,
+				`UPDATE _kora_script SET script = 'return true;' WHERE name = 'Alpha_Item_before_save'`,
+				`UPDATE _kora_script SET script = 'function post() {}' WHERE name = 'lib_books'`,
 				`UPDATE _kora_system_bootstrap SET version = 37`,
 			} {
 				if _, err := conn.Exec(kdb.Rebind(dialect, q)); err != nil {
@@ -224,8 +227,8 @@ func TestPackScriptUpgradeBackfillAcrossDialects(t *testing.T) {
 				t.Fatalf("bootstrap upgrade: %v", err)
 			}
 			got := scriptRows(t, conn, dialect, site)
-			if got["lib_books"] != "alpha" || got["Alpha_Item_before_save"] != "alpha" {
-				t.Fatalf("backfilled rows = %v, want both owned by alpha", got)
+			if got["lib_books"] != "" || got["Alpha_Item_before_save"] != "" {
+				t.Fatalf("upgraded rows = %v, want both left unowned (no installed content proves an owner)", got)
 			}
 			snapshot, bodies, err := ParseConfigPack("alpha", alphaFiles(true))
 			if err != nil {
@@ -235,7 +238,7 @@ func TestPackScriptUpgradeBackfillAcrossDialects(t *testing.T) {
 				t.Fatalf("re-import: %v", err)
 			}
 			got = scriptRows(t, conn, dialect, site)
-			if got["alpha__Alpha_Item_before_save"] != "alpha" || got["Alpha_Item_before_save"] != "(inactive) alpha" || got["lib_books"] != "alpha" {
+			if got["alpha__Alpha_Item_before_save"] != "alpha" || got["Alpha_Item_before_save"] != "(inactive) " || got["lib_books"] != "alpha" {
 				t.Fatalf("after re-import rows = %v, want one active hook owned by alpha", got)
 			}
 			var active int

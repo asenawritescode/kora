@@ -963,37 +963,71 @@ func (s *Store) SaveScriptsTx(tx *sql.Tx, scripts []*doctype.ScriptSnapshot, sit
 			return fmt.Errorf("saving script %s during activation: %w", ss.Name, err)
 		}
 	}
-	return nil
+	return retireReplacedScriptsTx(tx, site, dialect)
 }
 
-// upsertScriptTx writes one script row. A row already owned by another pack, or
-// a legacy row with no owner that an owned script would take over, is refused:
-// no pack can overwrite another pack's script. A ReplacesLegacy row that is still
-// unowned is deactivated so the pack's namespaced row is the only active hook.
+// upsertScriptTx writes one script row. CheckScriptOwnership refuses a row another
+// pack owns. A script with an empty OwnerPack (written before ownership) leaves the
+// stored owner untouched.
 func upsertScriptTx(tx *sql.Tx, ss *doctype.ScriptSnapshot, site string, dialect db.QueryDialect, body string) error {
-	var owner string
-	err := tx.QueryRow(db.Rebind(dialect, `SELECT owner_pack FROM _kora_script WHERE name = ?`), ss.Name).Scan(&owner)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-	case err != nil:
-		return fmt.Errorf("reading script owner: %w", err)
-	case owner != ss.OwnerPack:
-		return fmt.Errorf("pack.script_owned_elsewhere: script %q is owned by %q and cannot be taken by %q; installed scripts without an owner need an explicit decision", ss.Name, owner, ss.OwnerPack)
+	if err := CheckScriptOwnership(tx, dialect, []*doctype.ScriptSnapshot{ss}); err != nil {
+		return err
 	}
-	if ss.ReplacesLegacy != "" {
-		retire := `UPDATE _kora_script SET is_active = ? WHERE name = ? AND site = ? AND (owner_pack = '' OR owner_pack = ?) AND script_type = ? AND doctype = ? AND event = ?`
-		if _, err = tx.Exec(db.Rebind(dialect, retire), false, ss.ReplacesLegacy, site, ss.OwnerPack, "doc_event", ss.DocType, ss.Event); err != nil {
-			return fmt.Errorf("retiring legacy script %s: %w", ss.ReplacesLegacy, err)
-		}
+	updateCols := []string{"script_type", "doctype", "event", "method_path", "schedule",
+		"priority", "is_active", "run_as", "timeout_ms", "script"}
+	if ss.OwnerPack != "" {
+		updateCols = append(updateCols, "owner_pack")
 	}
 	upsertSQL := `INSERT INTO _kora_script (name, site, script_type, doctype, event, method_path, schedule,
 		priority, is_active, run_as, timeout_ms, script, owner_pack)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		` + dialect.UpsertClause([]string{"name"}, []string{"script_type", "doctype", "event", "method_path", "schedule",
-		"priority", "is_active", "run_as", "timeout_ms", "script", "owner_pack"})
-	_, err = tx.Exec(db.Rebind(dialect, upsertSQL), ss.Name, site, ss.ScriptType, ss.DocType, ss.Event, ss.MethodPath,
+		` + dialect.UpsertClause([]string{"name"}, updateCols)
+	_, err := tx.Exec(db.Rebind(dialect, upsertSQL), ss.Name, site, ss.ScriptType, ss.DocType, ss.Event, ss.MethodPath,
 		ss.Schedule, ss.Priority, ss.IsActive, ss.RunAs, ss.TimeoutMs, body, ss.OwnerPack)
 	return err
+}
+
+// ownedScriptHook is an active owned document-event hook: its owner and the DocType and event it binds.
+type ownedScriptHook struct{ owner, docType, event string }
+
+// retireReplacedScriptsTx runs once after every script upsert of an activation, so
+// the result does not depend on row order. For each active owned document-event
+// hook, the unnamespaced row of the same DocType and event is deactivated when it
+// is unowned or owned by that same pack. A row another pack owns is left alone.
+func retireReplacedScriptsTx(tx *sql.Tx, site string, dialect db.QueryDialect) error {
+	hooks, err := listOwnedScriptHooksTx(tx, site, dialect)
+	if err != nil {
+		return err
+	}
+	retire := `UPDATE _kora_script SET is_active = ? WHERE name = ? AND site = ? AND (owner_pack = '' OR owner_pack = ?)`
+	for _, h := range hooks {
+		legacy := LegacyScriptName(h.docType, h.event)
+		if _, err := tx.Exec(db.Rebind(dialect, retire), false, legacy, site, h.owner); err != nil {
+			return fmt.Errorf("retiring legacy script %s: %w", legacy, err)
+		}
+	}
+	return nil
+}
+
+// listOwnedScriptHooksTx reads the active owned document-event hooks of site.
+func listOwnedScriptHooksTx(tx *sql.Tx, site string, dialect db.QueryDialect) ([]ownedScriptHook, error) {
+	rows, err := tx.Query(db.Rebind(dialect, `SELECT owner_pack, doctype, event FROM _kora_script WHERE site = ? AND is_active = ? AND script_type = ? AND owner_pack <> '' AND doctype <> ''`), site, true, "doc_event")
+	if err != nil {
+		return nil, fmt.Errorf("listing owned script hooks: %w", err)
+	}
+	defer rows.Close()
+	var hooks []ownedScriptHook
+	for rows.Next() {
+		var h ownedScriptHook
+		if err := rows.Scan(&h.owner, &h.docType, &h.event); err != nil {
+			return nil, fmt.Errorf("reading owned script hook: %w", err)
+		}
+		hooks = append(hooks, h)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("listing owned script hooks: %w", err)
+	}
+	return hooks, nil
 }
 
 // SaveScripts upserts active scripts from a config snapshot during site provisioning.
@@ -1014,6 +1048,9 @@ func (s *Store) SaveScripts(scripts []*doctype.ScriptSnapshot, scriptBodyByHash 
 		if err := upsertScriptTx(tx, ss, site, s.Dialect, scriptBodyByHash[ss.ScriptHash]); err != nil {
 			return fmt.Errorf("saving script %s: %w", ss.Name, err)
 		}
+	}
+	if err := retireReplacedScriptsTx(tx, site, s.Dialect); err != nil {
+		return err
 	}
 	if err := BumpConfigRevisionTx(tx, s.Dialect); err != nil {
 		return err
@@ -1109,6 +1146,9 @@ func (s *Store) CommitManagementActivation(ctx context.Context, tx *sql.Tx, snap
 		return "", 0, fmt.Errorf("management activation commit requires store, transaction, and snapshot")
 	}
 	if err := checkPendingScriptBindingsTx(ctx, tx, dialect, commit.ModuleTenantID, snapshot.Scripts); err != nil {
+		return "", 0, err
+	}
+	if err := CheckScriptOwnership(tx, dialect, snapshot.Scripts); err != nil {
 		return "", 0, err
 	}
 	if err := checkManagementActivationIdentity(siteName, commit); err != nil {

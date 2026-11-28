@@ -182,8 +182,8 @@ func (r *EmbeddedRunner) run(ctx context.Context, inst *qjs.Instance, req Execut
 		}
 	}
 	for _, lib := range req.Libraries {
-		if err = evalSetup(ctx, inst, lib.Source); err != nil {
-			return "", fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+		if err = loadQJSLibrary(ctx, inst, lib); err != nil {
+			return "", err
 		}
 	}
 	res, err := inst.Eval(ctx, wrapScript(req.Script), qjs.ModeJSONResult)
@@ -194,6 +194,45 @@ func (r *EmbeddedRunner) run(ctx context.Context, inst *qjs.Instance, req Execut
 		return "", fmt.Errorf("script error: %w", errors.New(res.Output))
 	}
 	return res.Output, nil
+}
+
+// loadQJSLibrary evaluates one library, then locks the globals it defined.
+func loadQJSLibrary(ctx context.Context, inst *qjs.Instance, lib Library) error {
+	before, err := qjsGlobalNames(ctx, inst)
+	if err != nil {
+		return fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+	}
+	if err = evalSetup(ctx, inst, lib.Source); err != nil {
+		return fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+	}
+	after, err := qjsGlobalNames(ctx, inst)
+	if err != nil {
+		return fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+	}
+	lock, err := lockGlobalsSource(newGlobalNames(before, after))
+	if err != nil {
+		return err
+	}
+	if err = evalSetup(ctx, inst, lock); err != nil {
+		return fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+	}
+	return nil
+}
+
+// qjsGlobalNames returns the names of the global object's own properties.
+func qjsGlobalNames(ctx context.Context, inst *qjs.Instance) ([]string, error) {
+	res, err := inst.Eval(ctx, globalNamesExpr, qjs.ModeJSONResult)
+	if err != nil {
+		return nil, err
+	}
+	if res.Thrown {
+		return nil, errors.New(res.Output)
+	}
+	var names []string
+	if err := json.Unmarshal([]byte(res.Output), &names); err != nil {
+		return nil, fmt.Errorf("decode global names: %w", err)
+	}
+	return names, nil
 }
 
 // evalSetup runs one source for its effect; a throw is returned as an error.

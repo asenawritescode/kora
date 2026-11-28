@@ -58,13 +58,13 @@ func TestPackScriptBindingRule(t *testing.T) {
 		{name: "other pack doctype without requires", packs: map[string][]*doctype.DocType{"sales": docTypes("Sale"), "ext": docTypes("Contact")},
 			script: bound("ext", "Sale"), wantErr: "pack.script_binding_undefined"},
 		{name: "doctype of a required pack", packs: map[string][]*doctype.DocType{"core": docTypes("Sale"), "ext": nil},
-			reqs: map[string][]contract.ManifestPackRef{"ext": ref("core")}, script: bound("ext", "Sale")},
+			reqs: map[string][]contract.ManifestPackRef{"ext": ref("core")}, script: bound("ext", "Sale"), legacy: "Sale_before_save"},
 		{name: "doctype of a transitively required pack", packs: map[string][]*doctype.DocType{"core": docTypes("Sale"), "mid": nil, "ext": nil},
-			reqs: map[string][]contract.ManifestPackRef{"ext": ref("mid"), "mid": ref("core")}, script: bound("ext", "Sale")},
+			reqs: map[string][]contract.ManifestPackRef{"ext": ref("mid"), "mid": ref("core")}, script: bound("ext", "Sale"), legacy: "Sale_before_save"},
 		{name: "requires cycle terminates", packs: map[string][]*doctype.DocType{"a": nil, "b": nil},
 			reqs: map[string][]contract.ManifestPackRef{"a": ref("b"), "b": ref("a")}, script: bound("a", "Sale"), wantErr: "pack.script_binding_undefined"},
 		{name: "requires a pack outside the artifact is resolved at activation", packs: map[string][]*doctype.DocType{"ext": nil},
-			reqs: map[string][]contract.ManifestPackRef{"ext": ref("installed")}, script: bound("ext", "Sale"), pending: true},
+			reqs: map[string][]contract.ManifestPackRef{"ext": ref("installed")}, script: bound("ext", "Sale"), legacy: "Sale_before_save", pending: true},
 		{name: "row name over the column limit", packs: map[string][]*doctype.DocType{"sales": docTypes(strings.Repeat("A", 140))},
 			script: bound("sales", strings.Repeat("A", 140)), wantErr: "pack.script_name_too_long"},
 		{name: "library and flat scripts are not bound", packs: map[string][]*doctype.DocType{"books": nil},
@@ -82,10 +82,10 @@ func TestPackScriptBindingRule(t *testing.T) {
 			if tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
 				t.Fatalf("check = %v; want %s", err, tc.wantErr)
 			}
-			if tc.script.ReplacesLegacy != tc.legacy {
+			if tc.wantErr == "" && tc.script.ReplacesLegacy != tc.legacy {
 				t.Fatalf("ReplacesLegacy = %q; want %q", tc.script.ReplacesLegacy, tc.legacy)
 			}
-			if tc.script.PendingBinding != tc.pending {
+			if tc.wantErr == "" && tc.script.PendingBinding != tc.pending {
 				t.Fatalf("PendingBinding = %v; want %v", tc.script.PendingBinding, tc.pending)
 			}
 		})
@@ -162,5 +162,20 @@ func TestPackScriptOwnershipSurvivesConfigVersionEncoding(t *testing.T) {
 	}
 	if got[owned.Name] != [2]string{"sales", "Sale_before_save"} || got["lib_books"] != [2]string{"books", ""} {
 		t.Fatalf("decoded ownership = %v", got)
+	}
+}
+
+func TestPackScriptRuleMergesDocTypesOfOnePack(t *testing.T) {
+	// A pack whose files span a root manifest and a component without pack.yaml
+	// reaches addPack twice under one name: the second call must not drop the first.
+	rule := newPackScriptRule()
+	rule.addPack("alpha", []*doctype.DocType{{Name: "Sale"}}, nil)
+	rule.addPack("alpha", []*doctype.DocType{{Name: "Alpha Item"}}, nil)
+	scripts := []*doctype.ScriptSnapshot{
+		{Name: "alpha__Sale_before_save", OwnerPack: "alpha", DocType: "Sale", Event: "before_save", ScriptType: "doc_event"},
+		{Name: "alpha__Alpha_Item_before_save", OwnerPack: "alpha", DocType: "Alpha Item", Event: "before_save", ScriptType: "doc_event"},
+	}
+	if err := rule.check(scripts); err != nil {
+		t.Fatalf("check after merged addPack: %v", err)
 	}
 }

@@ -1079,9 +1079,13 @@ func parsePackDefinitions(files []PackFile, doctypes []*doctype.DocType) ([]json
 	return metrics.EncodePack(defs, dashboards, doctypes)
 }
 
-// checkSnapshotScriptBindings resolves pending pack script bindings in a snapshot
-// against the packs the tenant has installed. It is a no-op without pending bindings.
+// checkSnapshotScriptBindings is the planning check of a snapshot's script rows,
+// run before any DDL: row ownership first, then pending bindings against the
+// packs the tenant has installed (a no-op without pending bindings).
 func checkSnapshotScriptBindings(database *sql.DB, dialect sqlDialect.Dialect, tenant contract.TenantID, scripts []*doctype.ScriptSnapshot) error {
+	if err := configstore.CheckScriptOwnership(database, dialect, scripts); err != nil {
+		return err
+	}
 	if !configstore.HasPendingScriptBindings(scripts) {
 		return nil
 	}
