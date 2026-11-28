@@ -451,7 +451,7 @@ Analytics listener registrations must be capped across the Engine process as wel
 
 The per-tenant analytics wake-up queue byte limit and process-wide queued-payload budget are separate settings. `KORA_ANALYTICS_MAX_QUEUED_BYTES` controls the tenant queue; `KORA_ANALYTICS_PROCESS_MAX_QUEUED_BYTES` controls the shared process budget. For existing deployments, Engine may use the former as the process budget when the latter is unset, but new deployment files should set both explicitly.
 
-Go's process memory limit is soft; leave container headroom. Embedded Goja has no proven hard per-tenant RAM limit in the inspected implementation. Bound inputs/concurrency/time and restrict untrusted code accordingly. A future process-isolated executor is a separately tested capability; do not advertise `MaxRAM` as enforcement. Do not create per-tenant sidecars in this pass.
+Go's process memory limit is soft; leave container headroom. The default embedded QuickJS runtime enforces a per-execution heap cap from `EmbeddedConfig.MaxRAM` (default 128 MB); the temporary `-tags gojascript` goja fallback has no proven hard RAM limit. Bound inputs/concurrency/time and restrict untrusted code accordingly. A future process-isolated executor is a separately tested capability; do not advertise `MaxRAM` as a per-tenant or process-wide limit. Do not create per-tenant sidecars in this pass.
 
 Metrics: pool open/in-use/idle, waits and duration; admission rejects/waits; query duration and lock contention; oldest queued job; resident tenants and retiring generations; cache/queue bytes; goroutines; process heap/RSS; script timeout; worker lease loss. Avoid raw user IDs, request IDs, or every tenant in unbounded metric labels; detailed tenant diagnostics belong in bounded queries/logs.
 
@@ -1696,7 +1696,7 @@ Tests below are required additions or strengthened existing tests, not claims th
 | `internal/tenantruntime/manager_test.go` | Failed prepare preserves previous snapshot; simultaneous acquire/reload; same revision distinct generations; old context cannot cancel new; retirement waits for handles; bounded retiring generations |
 | `auth/session_test.go` | Close stops sweeper and releases registry references; revoked sessions fail after reload; no duplicate manager after activation |
 | `internal/dbaccess/manager_test.go` | Pool sum cannot exceed allocation; runtime/admin reserves; canceled wait removes waiter; nested unit of work no second permit; pool retirement returns capacity |
-| `script/runtime_goja_test.go` | Execute/Close race; timeout; no send on closed channel; no new admissions while draining; not claiming hard RAM enforcement |
+| `script/runtime_goja_test.go` | Execute/Close race; timeout; no send on closed channel; no new admissions while draining; goja fallback makes no hard RAM claim |
 | `policy/read_test.go`, `eventstream/projection_test.go` | Reader/owner/field combinations; deleted subject; owner transfer; hidden fields and old values; lookup error; replay after revocation; metadata existence leak |
 | `analytics/sqlstore/store_test.go` | Every write failure rolls back; commit failure preserves batch; duplicate batch no rollup increment; dialect SQL uses correct placeholders |
 | `configstore/restore_test.go` | Snapshot/version/restore/journal error surfaced; restart phase resumes safely; nontransactional DDL cannot claim rollback |

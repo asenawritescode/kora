@@ -38,7 +38,7 @@ require (
 
 require github.com/go-pdf/fpdf v0.9.0
 
-require github.com/tetratelabs/wazero v1.8.2
+require github.com/tetratelabs/wazero v1.12.0
 
 require (
 	4d63.com/embedfiles v0.0.0-20190311033909-995e0740726f // indirect

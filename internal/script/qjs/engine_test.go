@@ -288,6 +288,7 @@ func TestRestoredInstanceMatchesFresh(t *testing.T) {
 		{"arithmetic", `var x = 0; for (var i = 0; i < 1000; i++) x += i; x;`, "499500"},
 		{"json", `JSON.stringify({a: [1, 2], s: "x"})`, `"{\"a\":[1,2],\"s\":\"x\"}"`},
 		{"stack overflow is catchable", `function f() { return f() + 1; } try { f(); } catch (e) { "caught"; }`, `"caught"`},
+		{"deep JSON nesting is catchable", `try { JSON.parse("[".repeat(100000)); } catch (e) { e.name; }`, `"RangeError"`},
 	}
 	snap := snapshotOf(t, eng)
 	for _, tc := range tests {
@@ -404,6 +405,90 @@ func TestHostResponseBuffer(t *testing.T) {
 				res, err := inst.Eval(context.Background(), `__kora_host("{}").length`, ModeJSONResult)
 				if err != nil || res.Thrown || res.Output != strconv.Itoa(tc.size) {
 					t.Fatalf("host answer length = %+v, %v; want %d", res, err, tc.size)
+				}
+			}
+		})
+	}
+}
+
+// Strings over 2 KiB make QuickJS copy more than 2048 bytes at once (memory.copy). Under
+// wazero v1.8.2 built with Go 1.24+ that copy clobbered a register the compiled code still
+// used, so these trapped out of bounds or crashed the process (#879).
+func TestLargeStringsDoNotTrap(t *testing.T) {
+	big := strconv.Quote(strings.Repeat("x", 40<<10))
+	tests := []struct {
+		name, src, want string
+		h               Handler
+	}{
+		{name: "JSON.parse just over 2 KiB", src: `JSON.parse('{"s":"' + "a".repeat(2049) + '"}').s.length`, want: "2049"},
+		{name: "JSON.parse 40 KiB", src: `JSON.parse('{"s":"' + "a".repeat(40960) + '"}').s.length`, want: "40960"},
+		{name: "JSON.parse 1 MiB", src: `JSON.parse('{"s":"' + "a".repeat(1 << 20) + '"}').s.length`, want: "1048576"},
+		{name: "concat 40 KiB", src: `var s = ""; for (var i = 0; i < 40960; i++) s += "a"; s.length`, want: "40960"},
+		{name: "stringify round trip 40 KiB", src: `var o = {s: "\u20ac".repeat(20480)}; JSON.parse(JSON.stringify(o)).s === o.s`, want: "true"},
+		{name: "host response 40 KiB", src: `JSON.parse(__kora_host("{}")).s.length`, want: "40960",
+			h: func(context.Context, []byte) []byte { return []byte(`{"s":` + big + `}`) }},
+	}
+	eng := newTestEngine(t)
+	snap := snapshotOf(t, eng)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := tc.h
+			if h == nil {
+				h = noHostCall(t)
+			}
+			fresh := newTestInstance(t, eng, h)
+			restored := restoredInstance(t, eng, snap)
+			restored.SetHandler(h)
+			for who, inst := range map[string]*Instance{"fresh": fresh, "restored": restored} {
+				got, err := inst.Eval(context.Background(), tc.src, ModeJSONResult)
+				if err != nil || got.Thrown || got.Output != tc.want {
+					t.Fatalf("%s: result = %+v, err %v; want %s", who, got, err, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestLargeBytecodeReadBackOnSameRuntime compiles a library well over 2 KiB of bytecode
+// and reads it back on the same runtime: on the compiling instance, a fresh instance and
+// a restored instance. Bug #879 trapped on this read-back under wazero v1.8.2.
+func TestLargeBytecodeReadBackOnSameRuntime(t *testing.T) {
+	var lib strings.Builder
+	for i := range 400 {
+		lib.WriteString("function f" + strconv.Itoa(i) + "(a) { return a + " + strconv.Itoa(i) + "; }\n")
+	}
+	lib.WriteString("var total = f399(1);\n")
+	src := lib.String()
+	const want = "400"
+	eng := newTestEngine(t)
+	snap := snapshotOf(t, eng)
+	tests := []struct {
+		name    string
+		compile func() *Instance
+	}{
+		{name: "compiled on a fresh instance", compile: func() *Instance { return newTestInstance(t, eng, noHostCall(t)) }},
+		{name: "compiled on a restored instance", compile: func() *Instance { return restoredInstance(t, eng, snap) }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			compiler := tc.compile()
+			code, res, err := compiler.Compile(context.Background(), src)
+			if err != nil || res.Thrown || len(code) <= 2048 {
+				t.Fatalf("Compile: %d bytes, res %+v, err %v; want a result over 2 KiB", len(code), res, err)
+			}
+			readers := map[string]*Instance{
+				"same instance": compiler,
+				"fresh":         newTestInstance(t, eng, noHostCall(t)),
+				"restored":      restoredInstance(t, eng, snap),
+			}
+			for who, inst := range readers {
+				got, err := inst.EvalBytecode(context.Background(), code, 0)
+				if err != nil || got.Thrown {
+					t.Fatalf("%s: EvalBytecode = %+v, %v", who, got, err)
+				}
+				check, err := inst.Eval(context.Background(), "total", ModeJSONResult)
+				if err != nil || check.Thrown || check.Output != want {
+					t.Fatalf("%s: total = %+v, %v; want %s", who, check, err, want)
 				}
 			}
 		})

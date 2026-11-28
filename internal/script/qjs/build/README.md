@@ -18,8 +18,8 @@ It is the production script runtime (the default build of `internal/script`), so
   0 ok, 1 JS exception, -2 not initialised.
 - `output() -> ptr`, `output_len() -> i32`: the result or exception text of the last eval.
 - `compile(len) -> i32`: compiles the source in the input buffer without running it; 0 ok with output = the
-  bytecode (binary), 1 syntax error with output = its message. Bytecode is read back only by an
-  `eval_bytecode` on a different instance (reading it into the compiling instance fails).
+  bytecode (binary), 1 syntax error with output = its message. Bytecode runs through `eval_bytecode` on any
+  instance of the same runtime, the compiling one included (wazero v1.12.0; v1.8.2 trapped on large bytecode, #879).
 - `eval_bytecode(len, flags) -> i32`: runs bytecode from the input buffer with the same flags and answers as `eval`.
 - `reseed(lo, hi)`: sets the context's `Math.random` state. Called on every instance restored from a
   snapshot (the snapshot copies the generator state, so each instance reseeds from crypto/rand).

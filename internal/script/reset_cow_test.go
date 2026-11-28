@@ -66,8 +66,8 @@ func TestCowResetLeavesNoGlobalsOrClosuresAfterManyRuns(t *testing.T) {
 }
 
 // TestLargeStringsAcrossResets keeps large strings and JSON round trips correct on a
-// reused instance. JSON.parse is kept under the ~2.3 KB threshold of bug #879, which
-// traps the reactor on larger strings; the large cases only stringify.
+// reused instance, including JSON.parse of strings far past the 2 KiB copy that bug #879
+// trapped on under wazero v1.8.2.
 func TestLargeStringsAcrossResets(t *testing.T) {
 	r := onePoolRunner(t, EmbeddedConfig{MaxRAM: 64 << 20, Timeout: 10 * time.Second})
 	tests := []struct {
@@ -75,7 +75,6 @@ func TestLargeStringsAcrossResets(t *testing.T) {
 		script string // %d is the string length
 		n      int
 		want   func(n int) string
-		skip   string
 	}{
 		{name: "64 KiB string stringifies", n: 64 << 10,
 			script: `var s = "x".repeat(%d); return {result: JSON.stringify(s).length};`,
@@ -86,8 +85,10 @@ func TestLargeStringsAcrossResets(t *testing.T) {
 		{name: "JSON.parse of a 2000 byte string", n: 2000,
 			script: `var s = "x".repeat(%d); return {result: JSON.parse(JSON.stringify(s)).length};`,
 			want:   strconv.Itoa},
-		// Bug #879: JSON.parse of a string over about 2.3 KB traps the reactor on both reset paths.
-		{name: "JSON.parse of a 4 KiB string", n: 4 << 10, skip: "#879",
+		{name: "JSON.parse of a 4 KiB string", n: 4 << 10,
+			script: `var s = "x".repeat(%d); return {result: JSON.parse(JSON.stringify(s)).length};`,
+			want:   strconv.Itoa},
+		{name: "JSON.parse of a 64 KiB string", n: 64 << 10,
 			script: `var s = "x".repeat(%d); return {result: JSON.parse(JSON.stringify(s)).length};`,
 			want:   strconv.Itoa},
 	}
@@ -96,9 +97,6 @@ func TestLargeStringsAcrossResets(t *testing.T) {
 	// see the right result, so no wait for a reset is needed.
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.skip != "" {
-				t.Skip(tc.skip)
-			}
 			src := fmt.Sprintf(tc.script, tc.n)
 			runOK(t, r, ExecuteRequest{Script: src})
 			got := runOK(t, r, ExecuteRequest{Script: src})

@@ -6,7 +6,6 @@ import (
 	"container/list"
 	"context"
 	"crypto/sha256"
-	"fmt"
 	"sync"
 
 	"github.com/asenawritescode/kora/internal/script/qjs"
@@ -94,24 +93,11 @@ func (r *EmbeddedRunner) evalCached(ctx context.Context, inst *qjs.Instance, src
 	if !ok {
 		var res qjs.Result
 		var err error
-		code, res, err = r.compile(ctx, src)
+		code, res, err = inst.Compile(ctx, src)
 		if err != nil || res.Thrown {
 			return res, err
 		}
 		scriptBytecode.put(key, code)
 	}
 	return inst.EvalBytecode(ctx, code, mode)
-}
-
-// compile returns the bytecode of src. It compiles on a throwaway instance, never on the
-// one that runs the script: reading bytecode back into the runtime that compiled it
-// fails with an out-of-bounds access for a library of the real erp-accounting pack.
-// Only a cache miss pays for the extra instance.
-func (r *EmbeddedRunner) compile(ctx context.Context, src string) ([]byte, qjs.Result, error) {
-	scratch, err := r.newPrewarmed(ctx)
-	if err != nil {
-		return nil, qjs.Result{}, fmt.Errorf("script: compile instance: %w", err)
-	}
-	defer func() { _ = scratch.Close(context.WithoutCancel(ctx)) }() // best effort: the bytecode is already taken
-	return scratch.Compile(ctx, src)
 }

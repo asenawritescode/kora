@@ -36,7 +36,7 @@ network, and future workers so later groups are not pulled forward implicitly.
 | NATS realtime bridge and outbox side-effect consumer | Tenant-owned and joined; application queues/subscriptions bounded; durable SQL source remains replay authority |
 | Cloud analytics relay | Tenant-owned and joined; bounded subscriber queue and HTTP client timeout; it performs no tenant SQL |
 | System-session cleanup | Process-owned and joined; it only removes expired in-memory entries |
-| Script runner | Tenant-specific active execution and waiter limits, global tenant-gate cap, and context timeout; Goja `MaxRAM` is not represented as hard enforcement |
+| Script runner | Tenant-specific active execution and waiter limits, global tenant-gate cap, and context timeout; `MaxRAM` is a per-execution heap cap enforced by QuickJS (default); the goja fallback (`-tags gojascript`) treats it as advisory |
 
 ## Admission-aware workers staged for later groups
 
