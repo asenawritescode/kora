@@ -973,6 +973,9 @@ func upsertScriptTx(tx *sql.Tx, ss *doctype.ScriptSnapshot, site string, dialect
 	if err := CheckScriptOwnership(tx, dialect, []*doctype.ScriptSnapshot{ss}); err != nil {
 		return err
 	}
+	if err := adoptLegacyScriptRowTx(tx, ss, site, dialect); err != nil {
+		return err
+	}
 	updateCols := []string{"script_type", "doctype", "event", "method_path", "schedule",
 		"priority", "is_active", "run_as", "timeout_ms", "script"}
 	if ss.OwnerPack != "" {

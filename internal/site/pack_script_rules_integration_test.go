@@ -89,7 +89,7 @@ func TestPackScriptLegacyRowSortingAfterNamespacedRow(t *testing.T) {
 		}
 		importPackSnapshot(t, conn, dialect, name, site, "accounts", files)
 		got := scriptRows(t, conn, dialect, site)
-		if got["accounts__eTIMS_Invoice_before_save"] != "accounts" || got["eTIMS_Invoice_before_save"] != "(inactive) " {
+		if got["accounts__eTIMS_Invoice_before_save"] != "accounts" || got["eTIMS_Invoice_before_save"] != "(inactive) accounts" {
 			t.Fatalf("rows = %v, want namespaced row active and legacy row inactive", got)
 		}
 		if hooks := activeHooks(t, conn, dialect, site, "eTIMS Invoice", "before_save"); len(hooks) != 1 || hooks["accounts"] != 1 {
@@ -219,6 +219,61 @@ func TestPackScriptTwoPacksReimportAfterUpgrade(t *testing.T) {
 		}
 		if hooks := activeHooks(t, conn, dialect, site, "Sale", "before_save"); len(hooks) != 2 || hooks["alpha"] != 1 || hooks["beta"] != 1 {
 			t.Fatalf("active Sale hooks = %v, want one per pack", hooks)
+		}
+	})
+}
+
+// An unowned legacy row named by the pack's document-event hook (empty stored body, as
+// the import path leaves it) is adopted by the importing pack, and retired behind the
+// namespaced hook.
+func TestPackScriptLegacyRowAdoptedByName(t *testing.T) {
+	forEachScriptDialect(t, func(t *testing.T, conn *sql.DB, name string, dialect kdb.Dialect) {
+		const site = "adopt-name.example.test"
+		insertLegacyScript(t, conn, dialect, site, "Sale_before_save", "", "Sale", "before_save", "")
+		files := []PackFile{
+			{Path: "doctypes/sale.yaml", ContentType: "doctype", Content: salesDoctype},
+			{Path: "scripts/Sale/before_save.js", ContentType: "script", Content: "return true;"},
+		}
+		importPackSnapshot(t, conn, dialect, name, site, "erpsell", files)
+		got := scriptRows(t, conn, dialect, site)
+		if got["Sale_before_save"] != "(inactive) erpsell" || got["erpsell__Sale_before_save"] != "erpsell" {
+			t.Fatalf("rows = %v, want legacy row adopted by erpsell and inactive, namespaced hook active", got)
+		}
+	})
+}
+
+// An unowned library row with an empty stored body is adopted by the pack that ships it.
+func TestPackScriptEmptyLibraryRowAdopted(t *testing.T) {
+	forEachScriptDialect(t, func(t *testing.T, conn *sql.DB, name string, dialect kdb.Dialect) {
+		const site = "adopt-empty-lib.example.test"
+		insertLegacyScript(t, conn, dialect, site, "lib_books", "", "", "", "")
+		importPackSnapshot(t, conn, dialect, name, site, "alpha", alphaFiles(true))
+		if got := scriptRows(t, conn, dialect, site); got["lib_books"] != "alpha" {
+			t.Fatalf("lib_books owner = %q, want alpha: %v", got["lib_books"], got)
+		}
+	})
+}
+
+// A legacy row whose stored body differs from the pack's script is never adopted: the
+// import is refused at planning and the row is left as it was.
+func TestPackScriptLegacyRowMismatchRefused(t *testing.T) {
+	forEachScriptDialect(t, func(t *testing.T, conn *sql.DB, name string, dialect kdb.Dialect) {
+		const site = "mismatch-name.example.test"
+		insertLegacyScript(t, conn, dialect, site, "Sale_before_save", "", "Sale", "before_save", "return 1;")
+		files := []PackFile{
+			{Path: "doctypes/sale.yaml", ContentType: "doctype", Content: salesDoctype},
+			{Path: "scripts/Sale/before_save.js", ContentType: "script", Content: "return true;"},
+		}
+		snapshot, bodies, err := ParseConfigPack("erpsell", files)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = ImportConfigFromSnapshotForTenant(conn, doctype.NewRegistry(), name, site, site, "erpsell-mismatch", snapshot, dialect, bodies)
+		if err == nil || !strings.Contains(err.Error(), "pack.script_unowned_mismatch") || !strings.Contains(err.Error(), "Sale_before_save") {
+			t.Fatalf("import over mismatching legacy row: %v, want pack.script_unowned_mismatch naming the row", err)
+		}
+		if got := scriptRows(t, conn, dialect, site); len(got) != 1 || got["Sale_before_save"] != "" {
+			t.Fatalf("rows after refusal = %v, want only the untouched legacy row", got)
 		}
 	})
 }

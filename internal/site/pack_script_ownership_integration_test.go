@@ -106,8 +106,9 @@ func TestPackScriptOwnershipAcrossDialects(t *testing.T) {
 
 			t.Run("upgrade retires the unnamespaced row", func(t *testing.T) {
 				conn, name := fresh(t)
-				// The row an installed site already has from the unnamespaced naming.
-				if _, err := conn.Exec(kdb.Rebind(dialect, `INSERT INTO _kora_script (name, site, script_type, doctype, event, script, is_active) VALUES (?, ?, 'doc_event', 'Sale', 'before_save', 'return false;', ?)`), "Sale_before_save", site, true); err != nil {
+				// The row an installed site already has from the unnamespaced naming. The import path
+				// leaves its body empty, so the pack adopts it and the retire pass deactivates it.
+				if _, err := conn.Exec(kdb.Rebind(dialect, `INSERT INTO _kora_script (name, site, script_type, doctype, event, script, is_active) VALUES (?, ?, 'doc_event', 'Sale', 'before_save', '', ?)`), "Sale_before_save", site, true); err != nil {
 					t.Fatal(err)
 				}
 				files := []PackFile{
@@ -119,8 +120,8 @@ func TestPackScriptOwnershipAcrossDialects(t *testing.T) {
 				if got["core-pack__Sale_before_save"] != "core-pack" {
 					t.Fatalf("namespaced row = %q, want active and owned by core-pack: %v", got["core-pack__Sale_before_save"], got)
 				}
-				if got["Sale_before_save"] != "(inactive) " {
-					t.Fatalf("legacy row = %q, want inactive and unowned: %v", got["Sale_before_save"], got)
+				if got["Sale_before_save"] != "(inactive) core-pack" {
+					t.Fatalf("legacy row = %q, want inactive and adopted by core-pack: %v", got["Sale_before_save"], got)
 				}
 				var active int
 				if err := conn.QueryRow(kdb.Rebind(dialect, `SELECT COUNT(*) FROM _kora_script WHERE site = ? AND doctype = ? AND event = ? AND is_active = ?`), site, "Sale", "before_save", true).Scan(&active); err != nil {
@@ -238,7 +239,7 @@ func TestPackScriptUpgradeBackfillAcrossDialects(t *testing.T) {
 				t.Fatalf("re-import: %v", err)
 			}
 			got = scriptRows(t, conn, dialect, site)
-			if got["alpha__Alpha_Item_before_save"] != "alpha" || got["Alpha_Item_before_save"] != "(inactive) " || got["lib_books"] != "alpha" {
+			if got["alpha__Alpha_Item_before_save"] != "alpha" || got["Alpha_Item_before_save"] != "(inactive) alpha" || got["lib_books"] != "alpha" {
 				t.Fatalf("after re-import rows = %v, want one active hook owned by alpha", got)
 			}
 			var active int
