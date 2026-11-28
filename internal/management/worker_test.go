@@ -96,7 +96,7 @@ func TestWorkerBoundsConcurrencyAndJoinsAllOperationsOnShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- worker.Run(ctx, WorkerConfig{Owner: "engine:1", Concurrency: 2, Lease: 3 * time.Second, Poll: 10 * time.Millisecond})
+		done <- worker.Run(ctx, WorkerConfig{Owner: "engine:1", Concurrency: 2, Lease: 3 * time.Second, Sweep: 10 * time.Millisecond})
 	}()
 	for i := 0; i < 5; i++ {
 		select {
@@ -146,7 +146,7 @@ func TestWorkerPassesValidatedFenceToExecutor(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- worker.Run(ctx, WorkerConfig{Owner: "engine:fenced", Concurrency: 1, Lease: 3 * time.Second, Poll: 10 * time.Millisecond})
+		done <- worker.Run(ctx, WorkerConfig{Owner: "engine:fenced", Concurrency: 1, Lease: 3 * time.Second, Sweep: 10 * time.Millisecond})
 	}()
 	select {
 	case claim := <-seen:
@@ -184,7 +184,7 @@ func TestWorkerRecordsUnknownOutcomeAndStopsExecutionOnCancellation(t *testing.T
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- worker.Run(ctx, WorkerConfig{Owner: "engine:cancel", Concurrency: 1, Lease: 3 * time.Second, Poll: 10 * time.Millisecond})
+		done <- worker.Run(ctx, WorkerConfig{Owner: "engine:cancel", Concurrency: 1, Lease: 3 * time.Second, Sweep: 10 * time.Millisecond})
 	}()
 	select {
 	case <-started:
@@ -226,7 +226,7 @@ func TestWorkerDoesNotExecuteClaimRejectedByInitialRenewal(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- worker.Run(ctx, WorkerConfig{Owner: "engine:stale", Concurrency: 1, Lease: 3 * time.Second, Poll: 10 * time.Millisecond})
+		done <- worker.Run(ctx, WorkerConfig{Owner: "engine:stale", Concurrency: 1, Lease: 3 * time.Second, Sweep: 10 * time.Millisecond})
 	}()
 	select {
 	case <-store.renewAttempted:
@@ -279,5 +279,87 @@ func TestNormalizeFinishResultDoesNotPersistProviderError(t *testing.T) {
 	}
 	if strings.Contains(got.Error.Message, "secret") || strings.Contains(got.Error.Message, "provider.test") {
 		t.Fatalf("provider error leaked into persisted outcome: %q", got.Error.Message)
+	}
+}
+
+// wokenStore lets a test add an operation after the worker is idle, the way a
+// commit that accepts one does, and gates claims on a lease expiry.
+type wokenStore struct {
+	workerStore
+	claimable  time.Time
+	nextExpiry time.Time
+}
+
+func (s *wokenStore) ClaimDue(ctx context.Context, owner string, limit uint16, lease time.Duration) ([]Claim, error) {
+	s.mu.Lock()
+	due := s.claimable.IsZero() || !time.Now().Before(s.claimable)
+	s.mu.Unlock()
+	if !due {
+		return nil, nil
+	}
+	return s.workerStore.ClaimDue(ctx, owner, limit, lease)
+}
+
+func (s *wokenStore) NextLeaseExpiry(context.Context) (time.Time, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.nextExpiry.IsZero() || !time.Now().Before(s.nextExpiry) {
+		return time.Time{}, false, nil
+	}
+	return s.nextExpiry, true, nil
+}
+
+func startIdleWorker(t *testing.T, store Store, config WorkerConfig, processed chan<- struct{}) {
+	t.Helper()
+	executor := OperationExecutorFunc(func(context.Context, Claim) (FinishResult, error) {
+		processed <- struct{}{}
+		return FinishResult{State: contract.OperationSucceeded}, nil
+	})
+	worker, err := NewWorker(store, executor, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() {
+		if err := worker.Run(ctx, config); err != nil {
+			t.Errorf("worker stopped: %v", err)
+		}
+	}()
+}
+
+func TestWorkerWakeRunsOperationWithoutWaitingForSweep(t *testing.T) {
+	store := &wokenStore{}
+	store.workerStore.pending = nil
+	wake := make(chan struct{}, 1)
+	processed := make(chan struct{}, 1)
+	// The sweep is an hour away: only the wake can run the operation in time.
+	startIdleWorker(t, store, WorkerConfig{Owner: "engine:wake", Concurrency: 1, Lease: 3 * time.Second, Sweep: 5 * time.Minute, Wake: wake}, processed)
+	time.Sleep(50 * time.Millisecond)
+	store.mu.Lock()
+	store.pending = []Operation{{ID: contract.OperationID(contract.NewID()), Tenant: "tenant-1", State: contract.OperationRequested}}
+	store.mu.Unlock()
+	wake <- struct{}{}
+	select {
+	case <-processed:
+	case <-time.After(time.Second):
+		t.Fatal("wake did not run the accepted operation within 1s")
+	}
+}
+
+func TestWorkerSleepsUntilLeaseExpiryThenReclaims(t *testing.T) {
+	expiry := time.Now().Add(300 * time.Millisecond)
+	store := &wokenStore{claimable: expiry, nextExpiry: expiry}
+	store.pending = []Operation{{ID: contract.OperationID(contract.NewID()), Tenant: "tenant-1", State: contract.OperationRunning}}
+	processed := make(chan struct{}, 1)
+	// No wake and a one-hour sweep: only the lease expiry can make the claim due.
+	startIdleWorker(t, store, WorkerConfig{Owner: "engine:lease", Concurrency: 1, Lease: 3 * time.Second, Sweep: 5 * time.Minute}, processed)
+	select {
+	case <-processed:
+		if at := time.Now(); at.Before(expiry) {
+			t.Fatalf("claimed at %v before lease expiry %v", at, expiry)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expired claim was not reclaimed at lease expiry")
 	}
 }

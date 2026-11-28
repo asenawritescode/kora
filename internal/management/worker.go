@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asenawritescode/kora/contract"
+	"github.com/asenawritescode/kora/internal/sweep"
 )
 
 type OperationExecutor interface {
@@ -19,12 +20,27 @@ type OperationExecutor interface {
 	Execute(context.Context, Claim) (FinishResult, error)
 }
 
+// LeaseExpiryStore reports when the earliest unexpired claim lapses, so an idle
+// worker sleeps until a crashed claim is due for reclaim instead of polling.
+type LeaseExpiryStore interface {
+	NextLeaseExpiry(context.Context) (time.Time, bool, error)
+}
+
+// minLeaseWait floors the sleep before a lease-expiry recheck so clock skew
+// between the database and this process cannot spin the worker.
+const minLeaseWait = 50 * time.Millisecond
+
 type WorkerConfig struct {
 	Owner       string
 	Deployment  contract.DeploymentID
 	Concurrency uint16
 	Lease       time.Duration
-	Poll        time.Duration
+	// Sweep bounds an idle wait. A commit that accepts or requeues an operation
+	// signals Wake, so Sweep only recovers a dropped wake; each wait is jittered.
+	Sweep time.Duration
+	// Wake is signalled after a commit that makes operations claimable. A nil
+	// channel leaves the worker on Sweep and lease expiry alone.
+	Wake <-chan struct{}
 }
 
 type Worker struct {
@@ -43,8 +59,9 @@ func NewWorker(store Store, executor OperationExecutor, logger *slog.Logger) (*W
 	return &Worker{store: store, executor: executor, logger: logger}, nil
 }
 
-// Run polls the durable journal, executes a bounded batch, and joins every
-// operation and lease-renewal goroutine before returning. Expired claims are
+// Run claims due operations, executes a bounded batch, and joins every
+// operation and lease-renewal goroutine before returning. An idle worker sleeps
+// until a wake, the next lease expiry, or the sweep. Expired claims are
 // reclaimable by another process; the stable operation ID lets handlers make
 // repeated side effects idempotent or reconcile them after restart.
 func (w *Worker) Run(ctx context.Context, config WorkerConfig) error {
@@ -54,8 +71,8 @@ func (w *Worker) Run(ctx context.Context, config WorkerConfig) error {
 	if ctx == nil {
 		return fmt.Errorf("management worker requires a context")
 	}
-	if config.Owner == "" || len(config.Owner) > 160 || config.Concurrency == 0 || config.Concurrency > 100 || config.Lease < 3*time.Second || config.Lease > 5*time.Minute || config.Poll < 10*time.Millisecond || config.Poll > time.Minute {
-		return fmt.Errorf("management worker owner, concurrency, lease, or poll interval is invalid")
+	if config.Owner == "" || len(config.Owner) > 160 || config.Concurrency == 0 || config.Concurrency > 100 || config.Lease < 3*time.Second || config.Lease > 5*time.Minute || config.Sweep < 10*time.Millisecond || config.Sweep > 10*time.Minute {
+		return fmt.Errorf("management worker owner, concurrency, lease, or sweep interval is invalid")
 	}
 	for {
 		if err := ctx.Err(); err != nil {
@@ -91,14 +108,42 @@ func (w *Worker) Run(ctx context.Context, config WorkerConfig) error {
 			joined.Wait()
 			continue
 		}
-		timer := time.NewTimer(config.Poll)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return nil
-		case <-timer.C:
-		}
+		w.idle(ctx, config)
 	}
+}
+
+// idle waits until a commit wakes the worker, the sweep is due, or a claimed
+// lease expires, whichever comes first.
+func (w *Worker) idle(ctx context.Context, config WorkerConfig) {
+	delay := sweep.Jitter(config.Sweep)
+	if next, ok := w.nextLeaseExpiry(ctx); ok {
+		until := max(time.Until(next), minLeaseWait)
+		delay = min(delay, until)
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-config.Wake:
+	case <-timer.C:
+	}
+}
+
+// nextLeaseExpiry returns the earliest lease expiry when the store reports one.
+// A failed read is logged and the sweep bound applies alone.
+func (w *Worker) nextLeaseExpiry(ctx context.Context) (time.Time, bool) {
+	store, ok := w.store.(LeaseExpiryStore)
+	if !ok {
+		return time.Time{}, false
+	}
+	next, found, err := store.NextLeaseExpiry(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			w.logger.WarnContext(ctx, "read management lease expiry", "error", err)
+		}
+		return time.Time{}, false
+	}
+	return next, found
 }
 
 func (w *Worker) process(parent context.Context, claim Claim, lease time.Duration) error {

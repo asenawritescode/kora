@@ -232,7 +232,7 @@ func (h *addModuleHarness) apply(a addModuleArtifact) management.Operation {
 	workerCtx, stop := context.WithCancel(h.ctx)
 	done := make(chan error, 1)
 	go func() {
-		done <- worker.Run(workerCtx, management.WorkerConfig{Owner: "add-module-worker", Concurrency: 1, Lease: 10 * time.Second, Poll: 10 * time.Millisecond})
+		done <- worker.Run(workerCtx, management.WorkerConfig{Owner: "add-module-worker", Concurrency: 1, Lease: 10 * time.Second, Sweep: 10 * time.Millisecond})
 	}()
 	var operation management.Operation
 	for operation.State != contract.OperationSucceeded && operation.State != contract.OperationFailed && operation.State != contract.OperationRecoveryRequired {

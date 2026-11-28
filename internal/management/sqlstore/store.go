@@ -310,6 +310,27 @@ func (s *Store) Release(ctx context.Context, claim management.Claim) error {
 	return nil
 }
 
+// NextLeaseExpiry returns the earliest future lease expiry among operations
+// that are not terminal. The boolean is false when no lease is pending.
+func (s *Store) NextLeaseExpiry(ctx context.Context) (time.Time, bool, error) {
+	if s == nil || s.database == nil || s.dialect == nil {
+		return time.Time{}, false, fmt.Errorf("management operation store is not configured")
+	}
+	var raw any
+	query := `SELECT MIN(lease_until) FROM _kora_managed_operation WHERE state IN ('requested','running') AND lease_until > ` + dbNow(s.dialect)
+	if err := s.database.QueryRowContext(ctx, db.Rebind(s.dialect, query)).Scan(&raw); err != nil {
+		return time.Time{}, false, fmt.Errorf("read next management lease expiry: %w", err)
+	}
+	if raw == nil {
+		return time.Time{}, false, nil
+	}
+	at, err := parseTime(raw)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return at, true, nil
+}
+
 func validateClaim(claim management.Claim) error {
 	if _, err := contract.ParseOperationID(string(claim.Operation.ID)); err != nil {
 		return err

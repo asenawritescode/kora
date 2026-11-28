@@ -248,7 +248,7 @@ func TestLiveManagementPackageExecutorAcrossDialects(t *testing.T) {
 				workerCtx, stop := context.WithCancel(ctx)
 				done := make(chan error, 1)
 				go func() {
-					done <- worker.Run(workerCtx, management.WorkerConfig{Owner: "package-worker", Concurrency: 1, Lease: 3 * time.Second, Poll: 10 * time.Millisecond})
+					done <- worker.Run(workerCtx, management.WorkerConfig{Owner: "package-worker", Concurrency: 1, Lease: 3 * time.Second, Sweep: 10 * time.Millisecond})
 				}()
 				return stop, done
 			}

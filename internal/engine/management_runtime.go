@@ -16,7 +16,13 @@ import (
 	"github.com/asenawritescode/kora/internal/management/sqlstore"
 	knet "github.com/asenawritescode/kora/internal/net"
 	"github.com/asenawritescode/kora/internal/site"
+	"github.com/asenawritescode/kora/internal/sweep"
 )
+
+// managementWorkerSweep bounds an idle management worker's wait. Accepted and
+// requeued operations wake the worker on commit; the sweep only recovers a
+// dropped wake.
+const managementWorkerSweep = 5 * time.Minute
 
 type managementWorkAdmission interface {
 	Acquire(context.Context) (func(), error)
@@ -25,6 +31,9 @@ type managementWorkAdmission interface {
 type admittedManagementStore struct {
 	store     management.Store
 	admission managementWorkAdmission
+	// wake is signalled after a successful commit that accepts or requeues an
+	// operation. A nil wake is a no-op.
+	wake *sweep.Wake
 }
 
 func (s admittedManagementStore) with(ctx context.Context, run func() error) error {
@@ -41,6 +50,9 @@ func (s admittedManagementStore) with(ctx context.Context, run func() error) err
 
 func (s admittedManagementStore) Accept(ctx context.Context, input management.AcceptCommand) (value management.Operation, err error) {
 	err = s.with(ctx, func() error { value, err = s.store.Accept(ctx, input); return err })
+	if err == nil {
+		s.wake.Signal()
+	}
 	return
 }
 func (s admittedManagementStore) Get(ctx context.Context, caller contract.PrincipalID, id contract.OperationID) (value management.Operation, err error) {
@@ -72,12 +84,23 @@ func (s admittedManagementStore) Release(ctx context.Context, claim management.C
 func (s admittedManagementStore) Finish(ctx context.Context, claim management.Claim, outcome management.FinishResult) error {
 	return s.with(ctx, func() error { return s.store.Finish(ctx, claim, outcome) })
 }
+func (s admittedManagementStore) NextLeaseExpiry(ctx context.Context) (value time.Time, found bool, err error) {
+	store, ok := s.store.(management.LeaseExpiryStore)
+	if !ok {
+		return time.Time{}, false, nil
+	}
+	err = s.with(ctx, func() error { value, found, err = store.NextLeaseExpiry(ctx); return err })
+	return
+}
 func (s admittedManagementStore) RetryStateOperation(ctx context.Context, caller contract.PrincipalID, id contract.OperationID, key contract.IdempotencyKey, reason string) (value management.Operation, err error) {
 	store, ok := s.store.(management.StateRecoveryStore)
 	if !ok {
 		return management.Operation{}, contract.NewError(contract.CodeDependencyUnavailable, "tenant-state operation recovery is unavailable")
 	}
 	err = s.with(ctx, func() error { value, err = store.RetryStateOperation(ctx, caller, id, key, reason); return err })
+	if err == nil {
+		s.wake.Signal()
+	}
 	return
 }
 
@@ -87,6 +110,9 @@ func (s admittedManagementStore) RetryProvisionOperation(ctx context.Context, ca
 		return management.Operation{}, contract.NewError(contract.CodeDependencyUnavailable, "tenant provisioning operation recovery is unavailable")
 	}
 	err = s.with(ctx, func() error { value, err = store.RetryProvisionOperation(ctx, caller, id, key, reason); return err })
+	if err == nil {
+		s.wake.Signal()
+	}
 	return
 }
 
@@ -96,6 +122,9 @@ func (s admittedManagementStore) RetryPackageOperation(ctx context.Context, call
 		return management.Operation{}, contract.NewError(contract.CodeDependencyUnavailable, "package application recovery is unavailable")
 	}
 	err = s.with(ctx, func() error { value, err = store.RetryPackageOperation(ctx, caller, id, key, reason); return err })
+	if err == nil {
+		s.wake.Signal()
+	}
 	return
 }
 
@@ -105,6 +134,9 @@ func (s admittedManagementStore) RetryDeleteOperation(ctx context.Context, calle
 		return management.Operation{}, contract.NewError(contract.CodeDependencyUnavailable, "tenant deletion recovery is unavailable")
 	}
 	err = s.with(ctx, func() error { value, err = store.RetryDeleteOperation(ctx, caller, id, key, reason); return err })
+	if err == nil {
+		s.wake.Signal()
+	}
 	return
 }
 
@@ -117,6 +149,9 @@ func (s admittedManagementStore) RetryInvitationOperation(ctx context.Context, c
 		value, err = store.RetryInvitationOperation(ctx, caller, id, key, outcome, reason)
 		return err
 	})
+	if err == nil {
+		s.wake.Signal()
+	}
 	return
 }
 
@@ -192,7 +227,7 @@ func assembleManagementOperationRuntime(ctx context.Context, opts managementRunt
 	if err != nil {
 		return nil, fmt.Errorf("initialize management operation schema: %w", err)
 	}
-	operationStore := admittedManagementStore{store: store, admission: opts.admission}
+	operationStore := admittedManagementStore{store: store, admission: opts.admission, wake: sweep.NewWake()}
 	service, err := management.NewService(operationStore, managementOperationIDs{}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("configure management operation service: %w", err)
@@ -299,7 +334,7 @@ func assembleManagementOperationRuntime(ctx context.Context, opts managementRunt
 			MemberPlanner:          memberExecutor,
 		},
 		worker: worker,
-		config: management.WorkerConfig{Owner: owner, Deployment: contract.DeploymentID(opts.deploymentID), Concurrency: 2, Lease: 30 * time.Second, Poll: 250 * time.Millisecond},
+		config: management.WorkerConfig{Owner: owner, Deployment: contract.DeploymentID(opts.deploymentID), Concurrency: 2, Lease: 30 * time.Second, Sweep: managementWorkerSweep, Wake: operationStore.wake.Subscribe()},
 	}, nil
 }
 

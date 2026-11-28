@@ -128,7 +128,7 @@ func applyManagedPackage(t *testing.T, ctx context.Context, database *sql.DB, in
 	workerCtx, stop := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() {
-		done <- worker.Run(workerCtx, management.WorkerConfig{Owner: "kitchen-worker", Concurrency: 1, Lease: 10 * time.Second, Poll: 10 * time.Millisecond})
+		done <- worker.Run(workerCtx, management.WorkerConfig{Owner: "kitchen-worker", Concurrency: 1, Lease: 10 * time.Second, Sweep: 10 * time.Millisecond})
 	}()
 	var operation management.Operation
 	for {
