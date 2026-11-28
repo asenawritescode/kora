@@ -19,6 +19,11 @@ import (
 // recovers a lost wakeup.
 const directoryWakeSweep = 5 * time.Minute
 
+// directoryOutageCheck is how often the consumer checks the directory revision
+// while the broker is down. It bounds how long a change made during an outage
+// waits to reach the consumer.
+const directoryOutageCheck = 5 * time.Second
+
 // SiteDirectoryWakeups provides best-effort wakeups for the durable SQL
 // directory feed. SQL polling remains authoritative when the broker is absent.
 type SiteDirectoryWakeups interface {
@@ -58,29 +63,7 @@ func StartDirectoryFeed(parent context.Context, consumer *site.DirectoryConsumer
 		}
 		if revisionWakeups != nil {
 			pollInterval = directoryWakeSweep
-			digest := sha256.Sum256([]byte(consumer.ID))
-			publisher := &site.DirectoryConsumer{
-				Registry:        consumer.Registry,
-				ContextRegistry: consumer.ContextRegistry,
-				WorkAdmission:   consumer.WorkAdmission,
-				ID:              "engine-directory-nats:" + hex.EncodeToString(digest[:]),
-				PageSize:        100, InitialCursor: consumer.InitialCursor,
-				Apply: func(_ context.Context, change site.DirectoryChange) error {
-					return wakeups.PublishSiteDirectoryRevision(ctx, change.Cursor)
-				},
-				Resync: func(_ context.Context, revision uint64) error {
-					return wakeups.PublishSiteDirectoryRevision(ctx, revision)
-				},
-			}
-			workers.Add(1)
-			go func() {
-				defer workers.Done()
-				// Committed directory changes of this process wake the relay; the
-				// sweep only recovers a lost wake. A failed pass retries after 1 s.
-				publisher.RunOnWake(ctx, site.SubscribeDirectoryChanges(), directoryWakeSweep, time.Second, func(err error) {
-					slog.Warn("NATS directory relay will retry without advancing its SQL cursor", "error", err)
-				})
-			}()
+			startDirectoryRelay(ctx, consumer, wakeups, &workers)
 		}
 	}
 
@@ -92,6 +75,11 @@ func StartDirectoryFeed(parent context.Context, consumer *site.DirectoryConsumer
 		})
 	}()
 	if revisionWakeups != nil {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			runDirectoryOutageCheck(ctx, consumer, wakeups)
+		}()
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
@@ -120,6 +108,96 @@ func StartDirectoryFeed(parent context.Context, consumer *site.DirectoryConsumer
 		close(worker.done)
 	}()
 	return worker, nil
+}
+
+// directoryPageSize mirrors the consumer's default page size.
+func directoryPageSize(consumer *site.DirectoryConsumer) int {
+	if consumer.PageSize > 0 {
+		return consumer.PageSize
+	}
+	return 100
+}
+
+// startDirectoryRelay runs the NATS relay: it publishes each revision this
+// process commits, retries a failed publish without advancing its SQL cursor,
+// and is joined through workers.
+func startDirectoryRelay(ctx context.Context, consumer *site.DirectoryConsumer, wakeups SiteDirectoryWakeups, workers *sync.WaitGroup) {
+	digest := sha256.Sum256([]byte(consumer.ID))
+	publisher := &site.DirectoryConsumer{
+		Registry:        consumer.Registry,
+		ContextRegistry: consumer.ContextRegistry,
+		WorkAdmission:   consumer.WorkAdmission,
+		ID:              "engine-directory-nats:" + hex.EncodeToString(digest[:]),
+		PageSize:        100, InitialCursor: consumer.InitialCursor,
+		Apply: func(_ context.Context, change site.DirectoryChange) error {
+			return wakeups.PublishSiteDirectoryRevision(ctx, change.Cursor)
+		},
+		Resync: func(_ context.Context, revision uint64) error {
+			return wakeups.PublishSiteDirectoryRevision(ctx, revision)
+		},
+	}
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		// Committed directory changes of this process wake the relay; the
+		// sweep only recovers a lost wake. A failed pass retries after 1 s.
+		publisher.RunOnWake(ctx, site.SubscribeDirectoryChanges(), directoryWakeSweep, time.Second, func(err error) {
+			slog.Warn("NATS directory relay will retry without advancing its SQL cursor", "error", err)
+		})
+	}()
+}
+
+// siteDirectoryConnectivity is implemented by brokers that can report whether
+// their connection is up. Brokers without it are treated as connected.
+type siteDirectoryConnectivity interface {
+	Connected() bool
+}
+
+// runDirectoryOutageCheck runs the consumer's NATS-down fallback. While the
+// broker is down no wakeup can arrive, so every directoryOutageCheck it reads
+// the one-row directory revision and runs a consumer pass only when that
+// revision moved. While the broker is up it reads no SQL at all.
+func runDirectoryOutageCheck(ctx context.Context, consumer *site.DirectoryConsumer, wakeups SiteDirectoryWakeups) {
+	connectivity, _ := wakeups.(siteDirectoryConnectivity)
+	ticker := time.NewTicker(directoryOutageCheck)
+	defer ticker.Stop()
+	var seen uint64
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		if connectivity == nil || connectivity.Connected() {
+			continue
+		}
+		seen = checkDirectoryRevision(ctx, consumer, seen)
+	}
+}
+
+// checkDirectoryRevision runs one consumer pass when the directory revision
+// moved past seen. It returns the revision the next check compares against; a
+// failed pass or a pass that filled a page keeps the older value so it retries.
+func checkDirectoryRevision(ctx context.Context, consumer *site.DirectoryConsumer, seen uint64) uint64 {
+	latest, err := consumer.Registry.CurrentDirectoryRevision()
+	if err != nil {
+		slog.Warn("site directory revision check failed while NATS is down", "error", err)
+		return seen
+	}
+	if latest == seen {
+		return seen
+	}
+	applied, err := consumer.ProcessBatch(ctx)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			logDirectoryConsumerRetry(consumer.ID, err)
+		}
+		return seen
+	}
+	if applied >= directoryPageSize(consumer) {
+		return seen
+	}
+	return latest
 }
 
 // Shutdown cancels the feed and waits for its goroutines to release their

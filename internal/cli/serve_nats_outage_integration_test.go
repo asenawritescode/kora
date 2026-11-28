@@ -6,7 +6,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -109,7 +108,7 @@ func TestLiveEngineProcessResilienceToNATSAndPlatformDatabaseOutages(t *testing.
 	}
 
 	container := "kora-engine-outage-nats-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-	startNATS := exec.CommandContext(ctx, "docker", "run", "--rm", "-d", "--name", container, "-p", "127.0.0.1::4222", "nats:2.10", "-js")
+	startNATS := exec.CommandContext(ctx, "docker", "run", "--rm", "-d", "--name", container, "-p", "127.0.0.1::4222", "nats:2.14-alpine", "-js")
 	if output, err := startNATS.CombinedOutput(); err != nil {
 		t.Fatalf("start disposable NATS container: %v (%s)", err, strings.TrimSpace(string(output)))
 	}
@@ -128,19 +127,21 @@ func TestLiveEngineProcessResilienceToNATSAndPlatformDatabaseOutages(t *testing.
 	}
 	natsAddress := net.JoinHostPort("127.0.0.1", natsPort)
 	waitTCP(ctx, t, natsAddress)
+	// Writes below stand in for the kora CLI, so they announce through the same
+	// helper the CLI uses while NATS is up.
+	t.Setenv("KORA_EVENT_PROVIDER", "nats")
+	t.Setenv("KORA_NATS_URLS", "nats://"+natsAddress)
 
 	_, sourceFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve test source directory")
 	}
-	root := filepath.Dir(filepath.Dir(sourceFile))
+	root := filepath.Dir(filepath.Dir(filepath.Dir(sourceFile)))
 	binary := filepath.Join(t.TempDir(), "kora-engine-outage-test")
-	build := exec.CommandContext(ctx, "go", "build", "-o", binary, ".")
+	build := exec.CommandContext(ctx, "go", "build", "-o", binary, "./cmd/kora")
 	build.Dir = root
-	build.Stdout = io.Discard
-	build.Stderr = io.Discard
-	if err := build.Run(); err != nil {
-		t.Fatal("build Engine process for live acceptance:", err)
+	if output, buildErr := build.CombinedOutput(); buildErr != nil {
+		t.Fatalf("build Engine process for live acceptance: %v (%s)", buildErr, strings.TrimSpace(string(output)))
 	}
 	port := freeTCPPort(t)
 	consumerID := "integration:engine-nats-outage:" + strconv.FormatInt(time.Now().UnixNano(), 10)
@@ -207,6 +208,7 @@ func TestLiveEngineProcessResilienceToNATSAndPlatformDatabaseOutages(t *testing.
 	}); err != nil {
 		t.Fatal("commit hot-add site registration:", err)
 	}
+	announceDirectoryRevision("mysql", dsn)
 	hotAdded, err := registry.ResolveAlias(hotAddedHost)
 	if err != nil {
 		t.Fatal("resolve hot-added site:", err)
@@ -222,6 +224,7 @@ func TestLiveEngineProcessResilienceToNATSAndPlatformDatabaseOutages(t *testing.
 	if err := registry.SetStatus(hotAdded.SiteID, "deleted"); err != nil {
 		t.Fatal("tombstone hot-added site:", err)
 	}
+	announceDirectoryRevision("mysql", dsn)
 	latest, err = registry.CurrentDirectoryRevision()
 	if err != nil {
 		t.Fatal("read tombstone directory revision:", err)

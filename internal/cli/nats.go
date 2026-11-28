@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/asenawritescode/kora/internal/dbaccess"
 	"github.com/asenawritescode/kora/internal/natsprovider"
+	"github.com/asenawritescode/kora/internal/site"
 )
 
 var natsCmd = &cobra.Command{
@@ -121,6 +124,33 @@ func init() {
 	for _, c := range []*cobra.Command{natsValidateCmd, natsBootstrapCmd, natsStatusCmd, natsBackupManifestCmd, natsDrainCmd} {
 		c.Flags().String("site", "", "Reserved for site-scoped bootstrap flows")
 		_ = c.Flags().MarkHidden("site")
+	}
+}
+
+// announceDirectoryRevision wakes running Engines after this CLI process
+// committed a site directory change. It skips quietly when NATS is not the
+// event provider, and logs a failed announce: the Engine recovers through its
+// NATS-down revision check or 5 min sweep.
+func announceDirectoryRevision(driver, dsn string) {
+	if !natsEnabled() {
+		return
+	}
+	database, err := dbaccess.Open(driver, dsn)
+	if err != nil {
+		slog.Warn("announce site directory change: open platform registry failed", "error", err)
+		return
+	}
+	defer database.Close()
+	provider, err := connectNATSProvider()
+	if err != nil {
+		slog.Warn("announce site directory change: NATS unavailable; Engine recovers on its sweep", "error", err)
+		return
+	}
+	defer provider.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := site.AnnounceDirectoryRevision(ctx, database, provider); err != nil {
+		slog.Warn("announce site directory change failed; Engine recovers on its sweep", "error", err)
 	}
 }
 

@@ -209,6 +209,12 @@ func New(ctx context.Context, cfg Config) (*Provider, error) {
 	return &Provider{cfg: cfg, nc: nc, js: js}, nil
 }
 
+// Connected reports whether the broker connection is currently up. The Engine
+// uses it to switch to the revision check while NATS is down.
+func (p *Provider) Connected() bool {
+	return p != nil && p.nc != nil && p.nc.IsConnected()
+}
+
 // Close closes the underlying connection.
 func (p *Provider) Close() {
 	if p.nc != nil {

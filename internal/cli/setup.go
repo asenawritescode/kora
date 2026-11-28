@@ -84,6 +84,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating site: %w", err)
 	}
 	defer result.DB.Close()
+	announceDirectoryRevision(platformDriver, createInput.PlatformDBDSN)
 
 	fmt.Printf("  ✓ Site %s created (database: %s)\n", siteName, result.Config.DBName)
 	fmt.Printf("  ✓ Admin user: %s\n", setupAdminEmail)

@@ -113,12 +113,9 @@ func runSiteDirectoryAssignment(cmd *cobra.Command, args []string, apply bool, p
 		return fmt.Errorf("ping platform site directory: %w", pingErr)
 	}
 	registry := site.NewSQLSiteRegistry(database, startup.DBType)
-	var endpoints map[string]string
-	if apply {
-		endpoints, err = parseURLs(os.Getenv(endpointEnv))
-		if err != nil {
-			return fmt.Errorf("validate %s: %w", endpointEnv, err)
-		}
+	endpoints, err := assignmentEndpoints(apply, endpointEnv, parseURLs)
+	if err != nil {
+		return err
 	}
 	admission, err := dbaccess.AdmissionFor(startup.DBType, startup.DBDSN)
 	if err != nil {
@@ -132,6 +129,9 @@ func runSiteDirectoryAssignment(cmd *cobra.Command, args []string, apply bool, p
 	})
 	if err != nil {
 		return err
+	}
+	if report.Applied {
+		announceDirectoryRevision(startup.DBType, startup.DBDSN)
 	}
 	return writeReport(cmd, report)
 }
@@ -174,6 +174,19 @@ func applySiteCellAssignment(ctx context.Context, registry siteCellAssignmentReg
 	report.ConfigRevision = updated.ConfigRevision
 	report.Applied = true
 	return report, nil
+}
+
+// assignmentEndpoints parses the Engine endpoints an apply needs. A dry run
+// needs none.
+func assignmentEndpoints(apply bool, endpointEnv string, parseURLs assignmentURLParser) (map[string]string, error) {
+	if !apply {
+		return nil, nil
+	}
+	endpoints, err := parseURLs(os.Getenv(endpointEnv))
+	if err != nil {
+		return nil, fmt.Errorf("validate %s: %w", endpointEnv, err)
+	}
+	return endpoints, nil
 }
 
 func writeSiteCellAssignmentReport(cmd *cobra.Command, report siteCellAssignmentReport) error {
