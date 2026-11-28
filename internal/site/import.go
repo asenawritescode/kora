@@ -436,7 +436,7 @@ func ImportConfigFromSnapshotContext(ctx context.Context, database *sql.DB, regi
 	if err != nil {
 		return fmt.Errorf("encoding config activation snapshot: %w", err)
 	}
-	err = checkSnapshotScriptBindings(database, dialect, tenant, snapshotCopy.Scripts)
+	err = configstore.CheckSnapshotScripts(database, dialect, tenant, snapshotCopy.Scripts)
 	if err != nil {
 		return err
 	}
@@ -1093,27 +1093,6 @@ func parsePackDefinitions(files []PackFile, doctypes []*doctype.DocType) ([]json
 		}
 	}
 	return metrics.EncodePack(defs, dashboards, doctypes)
-}
-
-// checkSnapshotScriptBindings is the planning check of a snapshot's script rows,
-// run before any DDL: row ownership first, then pending bindings against the
-// packs the tenant has installed (a no-op without pending bindings).
-func checkSnapshotScriptBindings(database *sql.DB, dialect sqlDialect.Dialect, tenant contract.TenantID, scripts []*doctype.ScriptSnapshot) error {
-	if err := configstore.CheckScriptOwnership(database, dialect, scripts); err != nil {
-		return err
-	}
-	if !configstore.HasPendingScriptBindings(scripts) {
-		return nil
-	}
-	installedStore := configstore.NewModuleStore(database, dialect)
-	if err := installedStore.EnsureSchema(); err != nil {
-		return fmt.Errorf("ensuring module snapshot schema: %w", err)
-	}
-	installed, err := installedStore.Load(tenant)
-	if err != nil {
-		return fmt.Errorf("loading installed packs for script bindings: %w", err)
-	}
-	return configstore.CheckPendingScriptBindings(installed, scripts)
 }
 
 // validateSnapshotDefinitions decodes the snapshot's command, print format, and query

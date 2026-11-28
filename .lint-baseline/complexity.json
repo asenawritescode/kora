@@ -423,13 +423,13 @@
    "statements": 57
   },
   "internal/api::HandleConfigVersionActivate": {
-   "statements": 162
+   "statements": 161
   },
   "internal/api::HandleConfigVersionPreview": {
    "statements": 42
   },
   "internal/api::HandleConfigVersionRollback": {
-   "statements": 138
+   "statements": 137
   },
   "internal/api::HandleConfigVersionSnapshot": {
    "statements": 42

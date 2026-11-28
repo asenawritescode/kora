@@ -33,7 +33,7 @@ func CheckPendingScriptBindings(installed contract.ModuleSnapshot, scripts []*do
 			continue
 		}
 		if !closureDefines(ss.OwnerRequires, ss.DocType, defined, requires) {
-			return fmt.Errorf("pack.script_binding_undefined: scripts/%s/%s.js in pack %q binds DocType %q, which no installed pack it requires defines", ss.DocType, ss.Event, ss.OwnerPack, ss.DocType)
+			return refuse("pack.script_binding_undefined", "scripts/%s/%s.js in pack %q binds DocType %q, which no installed pack it requires defines", ss.DocType, ss.Event, ss.OwnerPack, ss.DocType)
 		}
 	}
 	return nil

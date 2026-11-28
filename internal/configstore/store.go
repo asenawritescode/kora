@@ -973,6 +973,9 @@ func upsertScriptTx(tx *sql.Tx, ss *doctype.ScriptSnapshot, site string, dialect
 	if err := CheckScriptOwnership(tx, dialect, []*doctype.ScriptSnapshot{ss}); err != nil {
 		return err
 	}
+	if ss.OwnerPack != "" && body == "" {
+		return refuse("pack.script_body_missing", "script %q of pack %q has no body; it would blank the live row", ss.Name, ss.OwnerPack)
+	}
 	if err := adoptLegacyScriptRowTx(tx, ss, site, dialect); err != nil {
 		return err
 	}

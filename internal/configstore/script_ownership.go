@@ -71,13 +71,13 @@ func checkScriptRow(q scriptRowQuerier, dialect db.QueryDialect, ss *doctype.Scr
 		return nil
 	case owner != "":
 		if own {
-			return fmt.Errorf("pack.script_owned_elsewhere: script %q is owned by %q and cannot be taken by %q; installed scripts without an owner need an explicit decision", name, owner, ss.OwnerPack)
+			return refuse("pack.script_owned_elsewhere", "script %q is owned by %q and cannot be taken by %q; installed scripts without an owner need an explicit decision", name, owner, ss.OwnerPack)
 		}
 		return nil
 	case body == "" || sameScriptContent(body, ss.ScriptHash):
 		return nil
 	default:
-		return fmt.Errorf("pack.script_unowned_mismatch: row %q of pack %q holds content that differs from the pack's script; the row is left as it is", name, ss.OwnerPack)
+		return refuse("pack.script_unowned_mismatch", "row %q of pack %q holds content that differs from the pack's script; the row is left as it is", name, ss.OwnerPack)
 	}
 }
 
