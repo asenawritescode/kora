@@ -14,6 +14,11 @@ import (
 	"github.com/asenawritescode/kora/internal/site"
 )
 
+// directoryWakeSweep is the consumer's SQL sweep while NATS wakeups are
+// subscribed. A relayed revision wakes the consumer at once; the sweep only
+// recovers a lost wakeup.
+const directoryWakeSweep = 5 * time.Minute
+
 // SiteDirectoryWakeups provides best-effort wakeups for the durable SQL
 // directory feed. SQL polling remains authoritative when the broker is absent.
 type SiteDirectoryWakeups interface {
@@ -52,7 +57,7 @@ func StartDirectoryFeed(parent context.Context, consumer *site.DirectoryConsumer
 			revisionWakeups = nil
 		}
 		if revisionWakeups != nil {
-			pollInterval = 30 * time.Second
+			pollInterval = directoryWakeSweep
 			digest := sha256.Sum256([]byte(consumer.ID))
 			publisher := &site.DirectoryConsumer{
 				Registry:        consumer.Registry,

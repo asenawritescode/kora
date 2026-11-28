@@ -555,6 +555,10 @@ func tuneConnectionPool(db *sql.DB, driver string, maxOpen, maxIdle int) {
 		// limit and releases its socket instead of holding it for minutes.
 		db.SetConnMaxIdleTime(30 * time.Second)
 		db.SetConnMaxLifetime(10 * time.Minute)
+	case "postgres":
+		// Same idle bound as MySQL: an idle tenant returns its socket to the server.
+		db.SetConnMaxIdleTime(30 * time.Second)
+		db.SetConnMaxLifetime(10 * time.Minute)
 	default:
 	}
 }

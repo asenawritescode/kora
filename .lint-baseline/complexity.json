@@ -1303,9 +1303,9 @@
    "cyclomatic": 40
   },
   "internal/engine::AssembleHTTPProcess": {
-   "cognitive": 58,
-   "cyclomatic": 46,
-   "statements": 95
+   "cognitive": 50,
+   "cyclomatic": 41,
+   "statements": 94
   },
   "internal/engine::AssembleTenantRuntime": {
    "cognitive": 22,
@@ -1654,8 +1654,8 @@
    "statements": 64
   },
   "internal/management::(*Worker).Run": {
-   "cognitive": 30,
-   "cyclomatic": 24
+   "cognitive": 28,
+   "cyclomatic": 22
   },
   "internal/natsprovider::(*Consumer).Run": {
    "cognitive": 81,
