@@ -296,10 +296,8 @@ func (r *EmbeddedRunner) run(ctx context.Context, inst *qjs.Instance, req Execut
 	if err = evalSetup(ctx, inst, setup); err != nil {
 		return "", fmt.Errorf("script: setup failed: %w", err)
 	}
-	for _, lib := range req.Libraries {
-		if loadErr := r.loadLibrary(ctx, inst, lib); loadErr != nil {
-			return "", loadErr
-		}
+	if libErr := r.loadLibraries(ctx, inst, req.Libraries); libErr != nil {
+		return "", libErr
 	}
 	res, err := r.evalCached(ctx, inst, wrapScript(req.Script), qjs.ModeJSONResult)
 	if err != nil {
@@ -309,6 +307,55 @@ func (r *EmbeddedRunner) run(ctx context.Context, inst *qjs.Instance, req Execut
 		return "", fmt.Errorf("script error: %w", errors.New(res.Output))
 	}
 	return res.Output, nil
+}
+
+// loadLibraries evaluates the libraries in order, locking each one's globals after it loads.
+func (r *EmbeddedRunner) loadLibraries(ctx context.Context, inst *qjs.Instance, libs []Library) error {
+	for _, lib := range libs {
+		if err := r.loadLockedLibrary(ctx, inst, lib); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// loadLockedLibrary evaluates one library, then locks the globals it defined.
+func (r *EmbeddedRunner) loadLockedLibrary(ctx context.Context, inst *qjs.Instance, lib Library) error {
+	before, err := qjsGlobalNames(ctx, inst)
+	if err != nil {
+		return fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+	}
+	if err = r.loadLibrary(ctx, inst, lib); err != nil {
+		return err
+	}
+	after, err := qjsGlobalNames(ctx, inst)
+	if err != nil {
+		return fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+	}
+	lock, err := lockGlobalsSource(newGlobalNames(before, after))
+	if err != nil {
+		return err
+	}
+	if err = evalSetup(ctx, inst, lock); err != nil {
+		return fmt.Errorf("script: library %q failed to load: %w", lib.Name, err)
+	}
+	return nil
+}
+
+// qjsGlobalNames returns the names of the global object's own properties.
+func qjsGlobalNames(ctx context.Context, inst *qjs.Instance) ([]string, error) {
+	res, err := inst.Eval(ctx, globalNamesExpr, qjs.ModeJSONResult)
+	if err != nil {
+		return nil, err
+	}
+	if res.Thrown {
+		return nil, errors.New(res.Output)
+	}
+	var names []string
+	if err := json.Unmarshal([]byte(res.Output), &names); err != nil {
+		return nil, fmt.Errorf("decode global names: %w", err)
+	}
+	return names, nil
 }
 
 // loadLibrary evaluates one library for its declarations; a compile error or a throw is

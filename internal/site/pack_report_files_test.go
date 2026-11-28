@@ -1,6 +1,7 @@
 package site
 
 import (
+	"github.com/asenawritescode/kora/contract"
 	"path/filepath"
 	"testing"
 )
@@ -40,7 +41,7 @@ func TestPackPartIgnoresRetiredReportFiles(t *testing.T) {
 func TestValidatePackAcceptsRetiredReportFiles(t *testing.T) {
 	files := readPackFiles(t, filepath.Join("..", "..", "config", "pos"), "")
 	files = append(files, PackFile{Path: "reports/components/633d951f29be55aa/sales_overview.yaml", ContentType: "report", Content: "name: sales_overview\n"})
-	v, err := ValidatePack(PackManifest{SchemaVersion: 1, Name: "pos", Version: "1.0.0"}, files)
+	v, err := ValidatePack(PackManifest{SchemaVersion: 1, Name: "pos", Version: "1.0.0", Requires: []contract.ManifestPackRef{{PackageID: "inventory", Version: "1"}}}, files)
 	if err != nil {
 		t.Fatal(err)
 	}

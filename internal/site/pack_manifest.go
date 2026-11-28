@@ -37,10 +37,21 @@ func CanonicalManifestJSON(manifest any) ([]byte, error) {
 	return contract.CanonicalManifestJSON(manifest)
 }
 
+// packRequiresValidation starts a validation with the root pack.yaml requires check:
+// a finding when pack.yaml and the manifest disagree.
+func packRequiresValidation(manifest PackManifest, files []PackFile) PackValidation {
+	result := PackValidation{Valid: true, Findings: []PackFinding{}}
+	if err := CheckPackRootRequires(manifest.Requires, files); err != nil {
+		result.Valid = false
+		result.Findings = append(result.Findings, PackFinding{Code: "pack.requires_mismatch", Severity: "error", Path: packFileName, Message: "pack.yaml requires differ from the manifest requires"})
+	}
+	return result
+}
+
 // ValidatePack checks v1 manifest identity and package file boundaries before
 // deeper YAML/schema validation or import.
 func ValidatePack(manifest PackManifest, files []PackFile) (PackValidation, error) {
-	result := PackValidation{Valid: true, Findings: []PackFinding{}}
+	result := packRequiresValidation(manifest, files)
 	add := func(code, file, message string) {
 		result.Valid = false
 		result.Findings = append(result.Findings, PackFinding{Code: code, Severity: "error", Path: file, Message: message})

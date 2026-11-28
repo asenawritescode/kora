@@ -928,7 +928,7 @@ func (s *Store) activeHead(site string) (*doctype.ConfigSnapshot, error) {
 // Script bodies are hashed (SHA-256) rather than stored inline to avoid DB bloat.
 func (s *Store) LoadScriptSnapshots(site string) ([]*doctype.ScriptSnapshot, error) {
 	rows, err := s.DB.Query(db.Rebind(s.Dialect, `SELECT name, script_type, doctype, event, method_path, schedule,
-		priority, is_active, run_as, timeout_ms, script FROM _kora_script WHERE is_active = ? AND (site = ? OR site = '')`), true, site)
+		priority, is_active, run_as, timeout_ms, script, owner_pack FROM _kora_script WHERE is_active = ? AND (site = ? OR site = '')`), true, site)
 	if err != nil {
 		return nil, err
 	}
@@ -940,7 +940,7 @@ func (s *Store) LoadScriptSnapshots(site string) ([]*doctype.ScriptSnapshot, err
 		var script string
 		if err := rows.Scan(&ss.Name, &ss.ScriptType, &ss.DocType, &ss.Event, &ss.MethodPath,
 			&ss.Schedule, &ss.Priority, &ss.IsActive, &ss.RunAs,
-			&ss.TimeoutMs, &script); err != nil {
+			&ss.TimeoutMs, &script, &ss.OwnerPack); err != nil {
 			return nil, err
 		}
 		ss.Source = script
@@ -959,17 +959,81 @@ func (s *Store) SaveScriptsTx(tx *sql.Tx, scripts []*doctype.ScriptSnapshot, sit
 		if ss == nil {
 			continue
 		}
-		upsertSQL := `INSERT INTO _kora_script (name, site, script_type, doctype, event, method_path, schedule,
-			priority, is_active, run_as, timeout_ms, script)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			` + dialect.UpsertClause([]string{"name"}, []string{"script_type", "doctype", "event", "method_path", "schedule",
-			"priority", "is_active", "run_as", "timeout_ms", "script"})
-		if _, err := tx.Exec(db.Rebind(dialect, upsertSQL), ss.Name, site, ss.ScriptType, ss.DocType, ss.Event, ss.MethodPath,
-			ss.Schedule, ss.Priority, ss.IsActive, ss.RunAs, ss.TimeoutMs, ss.Source); err != nil {
+		if err := upsertScriptTx(tx, ss, site, dialect, ss.Source); err != nil {
 			return fmt.Errorf("saving script %s during activation: %w", ss.Name, err)
 		}
 	}
+	return retireReplacedScriptsTx(tx, site, dialect)
+}
+
+// upsertScriptTx writes one script row. CheckScriptOwnership refuses a row another
+// pack owns. A script with an empty OwnerPack (written before ownership) leaves the
+// stored owner untouched.
+func upsertScriptTx(tx *sql.Tx, ss *doctype.ScriptSnapshot, site string, dialect db.QueryDialect, body string) error {
+	if err := CheckScriptOwnership(tx, dialect, []*doctype.ScriptSnapshot{ss}); err != nil {
+		return err
+	}
+	if ss.OwnerPack != "" && body == "" {
+		return refuse("pack.script_body_missing", "script %q of pack %q has no body; it would blank the live row", ss.Name, ss.OwnerPack)
+	}
+	if err := adoptLegacyScriptRowTx(tx, ss, site, dialect); err != nil {
+		return err
+	}
+	updateCols := []string{"script_type", "doctype", "event", "method_path", "schedule",
+		"priority", "is_active", "run_as", "timeout_ms", "script"}
+	if ss.OwnerPack != "" {
+		updateCols = append(updateCols, "owner_pack")
+	}
+	upsertSQL := `INSERT INTO _kora_script (name, site, script_type, doctype, event, method_path, schedule,
+		priority, is_active, run_as, timeout_ms, script, owner_pack)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		` + dialect.UpsertClause([]string{"name"}, updateCols)
+	_, err := tx.Exec(db.Rebind(dialect, upsertSQL), ss.Name, site, ss.ScriptType, ss.DocType, ss.Event, ss.MethodPath,
+		ss.Schedule, ss.Priority, ss.IsActive, ss.RunAs, ss.TimeoutMs, body, ss.OwnerPack)
+	return err
+}
+
+// ownedScriptHook is an active owned document-event hook: its owner and the DocType and event it binds.
+type ownedScriptHook struct{ owner, docType, event string }
+
+// retireReplacedScriptsTx runs once after every script upsert of an activation, so
+// the result does not depend on row order. For each active owned document-event
+// hook, the unnamespaced row of the same DocType and event is deactivated when it
+// is unowned or owned by that same pack. A row another pack owns is left alone.
+func retireReplacedScriptsTx(tx *sql.Tx, site string, dialect db.QueryDialect) error {
+	hooks, err := listOwnedScriptHooksTx(tx, site, dialect)
+	if err != nil {
+		return err
+	}
+	retire := `UPDATE _kora_script SET is_active = ? WHERE name = ? AND site = ? AND (owner_pack = '' OR owner_pack = ?)`
+	for _, h := range hooks {
+		legacy := LegacyScriptName(h.docType, h.event)
+		if _, err := tx.Exec(db.Rebind(dialect, retire), false, legacy, site, h.owner); err != nil {
+			return fmt.Errorf("retiring legacy script %s: %w", legacy, err)
+		}
+	}
 	return nil
+}
+
+// listOwnedScriptHooksTx reads the active owned document-event hooks of site.
+func listOwnedScriptHooksTx(tx *sql.Tx, site string, dialect db.QueryDialect) ([]ownedScriptHook, error) {
+	rows, err := tx.Query(db.Rebind(dialect, `SELECT owner_pack, doctype, event FROM _kora_script WHERE site = ? AND is_active = ? AND script_type = ? AND owner_pack <> '' AND doctype <> ''`), site, true, "doc_event")
+	if err != nil {
+		return nil, fmt.Errorf("listing owned script hooks: %w", err)
+	}
+	defer rows.Close()
+	var hooks []ownedScriptHook
+	for rows.Next() {
+		var h ownedScriptHook
+		if err := rows.Scan(&h.owner, &h.docType, &h.event); err != nil {
+			return nil, fmt.Errorf("reading owned script hook: %w", err)
+		}
+		hooks = append(hooks, h)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("listing owned script hooks: %w", err)
+	}
+	return hooks, nil
 }
 
 // SaveScripts upserts active scripts from a config snapshot during site provisioning.
@@ -987,17 +1051,12 @@ func (s *Store) SaveScripts(scripts []*doctype.ScriptSnapshot, scriptBodyByHash 
 		if ss == nil {
 			continue
 		}
-		scriptBody := scriptBodyByHash[ss.ScriptHash]
-		upsertSQL := `INSERT INTO _kora_script (name, site, script_type, doctype, event, method_path, schedule,
-			priority, is_active, run_as, timeout_ms, script)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			` + s.Dialect.UpsertClause([]string{"name"}, []string{"script_type", "doctype", "event", "method_path", "schedule",
-			"priority", "is_active", "run_as", "timeout_ms", "script"})
-		_, err := tx.Exec(db.Rebind(s.Dialect, upsertSQL), ss.Name, site, ss.ScriptType, ss.DocType, ss.Event, ss.MethodPath,
-			ss.Schedule, ss.Priority, ss.IsActive, ss.RunAs, ss.TimeoutMs, scriptBody)
-		if err != nil {
+		if err := upsertScriptTx(tx, ss, site, s.Dialect, scriptBodyByHash[ss.ScriptHash]); err != nil {
 			return fmt.Errorf("saving script %s: %w", ss.Name, err)
 		}
+	}
+	if err := retireReplacedScriptsTx(tx, site, s.Dialect); err != nil {
+		return err
 	}
 	if err := BumpConfigRevisionTx(tx, s.Dialect); err != nil {
 		return err
@@ -1092,8 +1151,14 @@ func (s *Store) CommitManagementActivation(ctx context.Context, tx *sql.Tx, snap
 	if s == nil || s.Dialect == nil || tx == nil || snapshot == nil {
 		return "", 0, fmt.Errorf("management activation commit requires store, transaction, and snapshot")
 	}
-	if siteName == "" || commit.OperationID == "" || commit.JournalKind == "" || commit.FromPhase != ActivationValidated || commit.CreatedBy == "" || commit.VersionLabel == "" {
-		return "", 0, fmt.Errorf("management activation commit identity, validated phase, and version metadata are required")
+	if err := checkPendingScriptBindingsTx(ctx, tx, dialect, commit.ModuleTenantID, snapshot.Scripts); err != nil {
+		return "", 0, err
+	}
+	if err := CheckScriptOwnership(tx, dialect, snapshot.Scripts); err != nil {
+		return "", 0, err
+	}
+	if err := checkManagementActivationIdentity(siteName, commit); err != nil {
+		return "", 0, err
 	}
 	if err := ValidateManagementActivationFenceTx(ctx, tx, dialect, siteName, commit.OperationID, commit.Fence, commit.ExpectedRevision, commit.ArtifactDigest); err != nil {
 		return "", 0, err
@@ -1116,6 +1181,15 @@ func (s *Store) CommitManagementActivation(ctx context.Context, tx *sql.Tx, snap
 		return "", 0, err
 	}
 	return versionID, version, nil
+}
+
+// checkManagementActivationIdentity rejects a commit that lacks its site, operation,
+// journal, validated phase, creator, or version label.
+func checkManagementActivationIdentity(siteName string, commit ManagementActivationCommit) error {
+	if siteName == "" || commit.OperationID == "" || commit.JournalKind == "" || commit.FromPhase != ActivationValidated || commit.CreatedBy == "" || commit.VersionLabel == "" {
+		return fmt.Errorf("management activation commit identity, validated phase, and version metadata are required")
+	}
+	return nil
 }
 
 // ActivateSnapshotAtConfigRevision is the management package/config activation

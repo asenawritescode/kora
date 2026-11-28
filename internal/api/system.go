@@ -1240,11 +1240,8 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	}
 
 	// Parse the config snapshot with backward compatibility (old array vs new object format).
-	snapshot, err := doctype.ParseConfig(configJSON)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: map[string]string{"message": "Failed to parse version config: " + err.Error()},
-		})
+	snapshot, ok := parseVersionSnapshot(c, db, h.siteDialect(c), configJSON)
+	if !ok {
 		return
 	}
 	if len(snapshot.PublishedBindings) > 0 {
@@ -1257,7 +1254,6 @@ func (h *Handler) HandleConfigVersionActivate(c *gin.Context) {
 	if rejectInvalidSnapshotReferences(c, snapshot, reg) {
 		return
 	}
-
 	journal, err := configstore.EnsureActivationOperation(db, h.siteDialect(c), siteName, versionID, "activate", snapshot)
 	if err != nil {
 		internalError(c, "persisting config activation operation", err)
@@ -1537,11 +1533,8 @@ func (h *Handler) HandleConfigVersionRollback(c *gin.Context) {
 	}
 
 	// Parse the target version's snapshot (the state we're rolling back to).
-	snapshot, err := doctype.ParseConfig(configJSON)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: map[string]string{"message": "Failed to parse version config: " + err.Error()},
-		})
+	snapshot, ok := parseVersionSnapshot(c, db, h.siteDialect(c), configJSON)
+	if !ok {
 		return
 	}
 	dialect := h.siteDialect(c)

@@ -2639,6 +2639,12 @@
         "digest": {
           "type": "string"
         },
+        "doctypes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "package_id": {
           "type": "string"
         },
@@ -8878,6 +8884,12 @@
         },
         "digest": {
           "type": "string"
+        },
+        "doctypes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "package_id": {
           "type": "string"
