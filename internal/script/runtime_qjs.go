@@ -195,8 +195,13 @@ func qjsLimits(maxRAM int64) qjs.Limits {
 		HeapBytes:  uint32(heap),
 		StackBytes: qjsStackBytes,
 		MaxPages:   uint32((heap + qjsHeadroomBytes) / qjsPageBytes),
+		CopyReset:  forceCopyReset,
 	}
 }
+
+// forceCopyReset is a test hook: it makes the engine copy snapshots on restore and reset
+// instead of mapping copy-on-write memory, which is the fallback for hosts without memfd.
+var forceCopyReset bool
 
 // refuseHostCall answers the guest's host calls during Validate. Validate runs no kora
 // code (its stub replaces kora), so any host call is refused.
@@ -422,6 +427,7 @@ func (r *EmbeddedRunner) Close() error {
 	// Execute registers with active while holding mu, so no Add can race this Wait.
 	r.active.Wait()
 	r.drainReady()
+	r.snapshot.Close()
 	return r.engine.Close(context.Background())
 }
 

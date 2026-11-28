@@ -14,6 +14,7 @@ import (
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/experimental"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 )
 
@@ -42,7 +43,12 @@ type Limits struct {
 	HeapBytes  uint32 // QuickJS JS_SetMemoryLimit
 	StackBytes uint32 // QuickJS JS_SetMaxStackSize
 	MaxPages   uint32 // wazero linear-memory cap, in 64 KiB pages
+	CopyReset  bool   // restore and reset by copying the snapshot, never by copy-on-write
 }
+
+// errNoCOW means copy-on-write memory is unavailable for this instance or snapshot; the
+// caller falls back to copying the snapshot.
+var errNoCOW = errors.New("qjs: copy-on-write memory is not available")
 
 // Handler answers one guest host call. The request and response are JSON text;
 // this package never interprets either.
@@ -54,6 +60,7 @@ type Engine struct {
 	rt       wazero.Runtime
 	compiled wazero.CompiledModule
 	limits   Limits
+	cow      bool // instances get copy-on-write memory and snapshots a memfd image
 }
 
 // NewEngine compiles the QuickJS reactor once under the given limits.
@@ -68,7 +75,7 @@ func NewEngine(ctx context.Context, limits Limits) (*Engine, error) {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("compile: %w", err)
 	}
-	return &Engine{rt: rt, compiled: compiled, limits: limits}, nil
+	return &Engine{rt: rt, compiled: compiled, limits: limits, cow: !limits.CopyReset && probeCOW()}, nil
 }
 
 // compileCache keeps the compiled QuickJS module in memory across every runtime in the
@@ -107,14 +114,25 @@ var snapshotGlobals = []string{"__stack_pointer"}
 // Snapshot is the state of one initialised instance: its whole linear memory and the
 // mutable globals in snapshotGlobals. It is never mutated after Snapshot returns, so
 // any number of instances can be restored from it.
+//
+// The bytes are always kept, so a copy restore works anywhere. When copy-on-write is
+// available the same bytes are also held in a memfd, which instances map instead of
+// copying.
 type Snapshot struct {
-	memory  []byte
+	memory  []byte    // the snapshot bytes
+	image   *cowImage // memfd copy of memory; nil when copy-on-write is unavailable
 	globals map[string]uint64
 }
 
 // MemoryBytes returns the size of the snapshot's linear memory.
 func (s *Snapshot) MemoryBytes() int {
 	return len(s.memory)
+}
+
+// Close releases the snapshot's memfd. Call it once no instance restores from the
+// snapshot again; instances that already mapped it keep their memory.
+func (s *Snapshot) Close() {
+	s.image.Close()
 }
 
 // Close releases the runtime and every instance it created.
@@ -128,7 +146,8 @@ type Instance struct {
 	mu           sync.Mutex
 	mod          api.Module
 	h            Handler
-	reused       int // Reset calls since the instance was restored
+	cow          *cowMemory // linear memory when copy-on-write, else nil
+	reused       int        // Reset calls since the instance was restored
 	eval         api.Function
 	compile      api.Function
 	evalBytecode api.Function
@@ -140,7 +159,7 @@ type Instance struct {
 // NewInstance creates a fresh QuickJS runtime with the engine's limits. It has no
 // handler yet: a host call made before SetHandler throws.
 func (e *Engine) NewInstance(ctx context.Context) (*Instance, error) {
-	mod, err := e.instantiate(ctx)
+	mod, cow, err := e.instantiate(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -149,17 +168,28 @@ func (e *Engine) NewInstance(ctx context.Context) (*Instance, error) {
 		_ = mod.Close(ctx) // best effort: the init error is the one to report
 		return nil, err
 	}
+	inst.cow = cow
 	return inst, nil
 }
 
-// instantiate creates a wasm module instance from the compiled reactor, without running it.
-func (e *Engine) instantiate(ctx context.Context) (api.Module, error) {
+// instantiate creates a wasm module instance from the compiled reactor, without running
+// it. With copy-on-write enabled its memory comes from a cowAllocator, and the returned
+// cowMemory is that memory (nil otherwise).
+func (e *Engine) instantiate(ctx context.Context) (api.Module, *cowMemory, error) {
 	cfg := wazero.NewModuleConfig().WithName("").WithSysWalltime().WithSysNanotime()
+	var alloc *cowAllocator
+	if e.cow {
+		alloc = &cowAllocator{}
+		ctx = experimental.WithMemoryAllocator(ctx, alloc)
+	}
 	mod, err := e.rt.InstantiateModule(ctx, e.compiled, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("instantiate: %w", err)
+		return nil, nil, fmt.Errorf("instantiate: %w", err)
 	}
-	return mod, nil
+	if alloc == nil {
+		return mod, nil, nil
+	}
+	return mod, alloc.mem, nil
 }
 
 // initInstance resolves the reactor exports and runs QuickJS init under the limits.
@@ -213,9 +243,14 @@ func (i *Instance) Snapshot() (*Snapshot, error) {
 		return nil, errors.New("qjs: read guest memory for snapshot")
 	}
 	snap := &Snapshot{memory: bytes.Clone(view), globals: make(map[string]uint64, len(snapshotGlobals))}
+	if i.cow != nil {
+		// Without the image the snapshot still restores by copying, so a failure is not fatal.
+		snap.image, _ = newCowImage(snap.memory)
+	}
 	for _, name := range snapshotGlobals {
 		g := i.mod.ExportedGlobal(name)
 		if g == nil {
+			snap.Close()
 			return nil, fmt.Errorf("qjs: guest global %q is not exported", name)
 		}
 		snap.globals[name] = g.Get()
@@ -227,11 +262,11 @@ func (i *Instance) Snapshot() (*Snapshot, error) {
 // already holds the initialised runtime. The instance gets its own Math.random seed,
 // because the snapshot copies the generator state.
 func (e *Engine) Restore(ctx context.Context, snap *Snapshot) (*Instance, error) {
-	mod, err := e.instantiate(ctx)
+	mod, cow, err := e.instantiate(ctx)
 	if err != nil {
 		return nil, err
 	}
-	inst, err := restoreInstance(ctx, mod, snap)
+	inst, err := restoreInstance(ctx, mod, cow, snap)
 	if err != nil {
 		_ = mod.Close(ctx) // best effort: the restore error is the one to report
 		return nil, err
@@ -240,7 +275,7 @@ func (e *Engine) Restore(ctx context.Context, snap *Snapshot) (*Instance, error)
 }
 
 // restoreInstance writes the snapshot into a fresh module instance and reseeds it.
-func restoreInstance(ctx context.Context, mod api.Module, snap *Snapshot) (*Instance, error) {
+func restoreInstance(ctx context.Context, mod api.Module, cow *cowMemory, snap *Snapshot) (*Instance, error) {
 	mem := mod.Memory()
 	size := uint32(len(snap.memory))
 	if mem.Size() > size {
@@ -251,8 +286,8 @@ func restoreInstance(ctx context.Context, mod api.Module, snap *Snapshot) (*Inst
 			return nil, errors.New("qjs: grow guest memory for snapshot")
 		}
 	}
-	if !mem.Write(0, snap.memory) {
-		return nil, errors.New("qjs: write snapshot to guest memory")
+	if err := snap.load(mem, cow); err != nil {
+		return nil, err
 	}
 	for name, v := range snap.globals {
 		g, ok := mod.ExportedGlobal(name).(api.MutableGlobal)
@@ -265,35 +300,53 @@ func restoreInstance(ctx context.Context, mod api.Module, snap *Snapshot) (*Inst
 	if err != nil {
 		return nil, err
 	}
+	inst.cow = cow
 	if err := reseedRandom(ctx, mod); err != nil {
 		return nil, err
 	}
 	return inst, nil
 }
 
-// zeroPage is the source of the zeroing Reset does for pages a run grew.
+// zeroPage is the source of the zeroing a copy restore does for pages past the snapshot.
 var zeroPage [wasmPageBytes]byte
 
+// load makes linear memory hold the snapshot. A cow memory maps the memfd image, which
+// discards every page the instance wrote. Otherwise the bytes are copied in and the
+// pages past the snapshot are zeroed. Memory must already be at least as large as the snapshot.
+func (s *Snapshot) load(mem api.Memory, cow *cowMemory) error {
+	size := uint32(len(s.memory))
+	err := cow.mapImage(s.image, len(s.memory))
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, errNoCOW) {
+		return err
+	}
+	for off := size; off < mem.Size(); off += wasmPageBytes {
+		if !mem.Write(off, zeroPage[:]) {
+			return errors.New("qjs: zero guest memory on restore")
+		}
+	}
+	if !mem.Write(0, s.memory) {
+		return errors.New("qjs: write snapshot to guest memory")
+	}
+	return nil
+}
+
 // Reset returns an instance that ran to completion to the state of snap, without
-// instantiating a new module. The snapshot is copied back over linear memory, the pages a
-// run grew beyond it are zeroed, the snapshot globals are restored, the handler is dropped
+// instantiating a new module. The snapshot is mapped (or copied) back over linear memory,
+// the pages a run grew beyond it are zeroed, the snapshot globals are restored, the handler is dropped
 // and Math.random is reseeded. Only an instance whose last Eval completed normally may be
 // reset: a run cut short (a timeout that closed the module, a trap) must be closed instead.
 func (i *Instance) Reset(ctx context.Context, snap *Snapshot) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	mem := i.mod.Memory()
-	size := uint32(len(snap.memory))
-	if mem.Size() < size {
+	if mem.Size() < uint32(len(snap.memory)) {
 		return errors.New("qjs: module memory is smaller than the snapshot")
 	}
-	for off := size; off < mem.Size(); off += wasmPageBytes {
-		if !mem.Write(off, zeroPage[:]) {
-			return errors.New("qjs: zero guest memory on reset")
-		}
-	}
-	if !mem.Write(0, snap.memory) {
-		return errors.New("qjs: write snapshot to guest memory on reset")
+	if err := snap.load(mem, i.cow); err != nil {
+		return fmt.Errorf("qjs: reset: %w", err)
 	}
 	for name, v := range snap.globals {
 		g, ok := i.mod.ExportedGlobal(name).(api.MutableGlobal)
