@@ -26,23 +26,8 @@ func HasPendingScriptBindings(scripts []*doctype.ScriptSnapshot) bool {
 // owner's requires defines the DocType (owned in the module ownership index).
 // Installed requires come from the installed package records.
 func CheckPendingScriptBindings(installed contract.ModuleSnapshot, scripts []*doctype.ScriptSnapshot) error {
-	defined := map[string]map[string]bool{}
-	for _, owner := range installed.Ownership {
-		if owner.Resource.Namespace != "tenant" || !strings.HasSuffix(string(owner.OwnerModuleID), ".core") {
-			continue
-		}
-		pack := strings.TrimSuffix(string(owner.OwnerModuleID), ".core")
-		if defined[pack] == nil {
-			defined[pack] = map[string]bool{}
-		}
-		defined[pack][owner.Resource.Name] = true
-	}
-	requires := map[string][]string{}
-	for _, pkg := range installed.Packages {
-		for _, ref := range pkg.Requires {
-			requires[pkg.PackageID] = append(requires[pkg.PackageID], ref.PackageID)
-		}
-	}
+	defined := definedDocTypes(installed)
+	requires := requiresByPackage(installed)
 	for _, ss := range scripts {
 		if ss == nil || !ss.PendingBinding {
 			continue
@@ -52,6 +37,42 @@ func CheckPendingScriptBindings(installed contract.ModuleSnapshot, scripts []*do
 		}
 	}
 	return nil
+}
+
+// definedDocTypes maps each installed pack to the DocTypes it defines: the names in
+// its package record, and the tenant modules its ownership index attributes to it.
+// A record written before the names were recorded contributes through the index only.
+func definedDocTypes(installed contract.ModuleSnapshot) map[string]map[string]bool {
+	defined := map[string]map[string]bool{}
+	add := func(pack, name string) {
+		if defined[pack] == nil {
+			defined[pack] = map[string]bool{}
+		}
+		defined[pack][name] = true
+	}
+	for _, owner := range installed.Ownership {
+		if owner.Resource.Namespace != "tenant" || !strings.HasSuffix(string(owner.OwnerModuleID), ".core") {
+			continue
+		}
+		add(strings.TrimSuffix(string(owner.OwnerModuleID), ".core"), owner.Resource.Name)
+	}
+	for _, pkg := range installed.Packages {
+		for _, name := range pkg.DocTypes {
+			add(pkg.PackageID, name)
+		}
+	}
+	return defined
+}
+
+// requiresByPackage maps each installed package to the packages its record requires.
+func requiresByPackage(installed contract.ModuleSnapshot) map[string][]string {
+	requires := map[string][]string{}
+	for _, pkg := range installed.Packages {
+		for _, ref := range pkg.Requires {
+			requires[pkg.PackageID] = append(requires[pkg.PackageID], ref.PackageID)
+		}
+	}
+	return requires
 }
 
 // closureDefines walks installed requires from start and reports whether a reached pack defines docType.

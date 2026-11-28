@@ -17,11 +17,24 @@ import (
 	"github.com/asenawritescode/kora/internal/query"
 )
 
+// sameReleaseIgnoringDocTypes reports whether two records describe the same release
+// and differ at most in their DocType names.
+func sameReleaseIgnoringDocTypes(a, b contract.InstalledPackage) bool {
+	a.DocTypes, b.DocTypes = nil, nil
+	return reflect.DeepEqual(a, b)
+}
+
 func mergeManagementPackageConstraints(existing []contract.InstalledPackage, incoming contract.InstalledPackage) ([]contract.InstalledPackage, error) {
 	merged := append([]contract.InstalledPackage(nil), existing...)
-	for _, installed := range existing {
+	for i, installed := range existing {
 		if installed.ReleaseID != incoming.ReleaseID {
 			continue
+		}
+		// A record installed before DocType names were recorded matches the artifact
+		// everywhere else; reapplying it refreshes the record with the names.
+		if len(installed.DocTypes) == 0 && sameReleaseIgnoringDocTypes(installed, incoming) {
+			merged[i] = incoming
+			return merged, nil
 		}
 		if !reflect.DeepEqual(installed, incoming) {
 			return nil, fmt.Errorf("installed package release %q does not match the verified artifact", incoming.ReleaseID)
@@ -298,6 +311,8 @@ func containsMatch[T any](items []T, match func(T) bool) bool {
 type packageAuthority struct {
 	packageID   string
 	installedBy map[contract.ModuleID]string
+	release     contract.InstalledPackage
+	installed   contract.ModuleSnapshot
 }
 
 // newPackageAuthority reads which installed package owns each module through
@@ -311,7 +326,7 @@ func newPackageAuthority(release contract.InstalledPackage, installed contract.M
 	for _, installation := range installed.Installations {
 		installedBy[installation.ModuleID] = packageByDigest[installation.ArtifactDigest]
 	}
-	return packageAuthority{packageID: release.PackageID, installedBy: installedBy}
+	return packageAuthority{packageID: release.PackageID, installedBy: installedBy, release: release, installed: installed}
 }
 
 // moduleVersion is a module version of one to three dot-separated decimal

@@ -262,10 +262,8 @@ func (r *EmbeddedRunner) run(ctx context.Context, inst *qjs.Instance, req Execut
 	if err = evalSetup(ctx, inst, setup); err != nil {
 		return "", fmt.Errorf("script: setup failed: %w", err)
 	}
-	for _, lib := range req.Libraries {
-		if err = loadQJSLibrary(ctx, inst, lib); err != nil {
-			return "", err
-		}
+	if libErr := loadQJSLibraries(ctx, inst, req.Libraries); libErr != nil {
+		return "", libErr
 	}
 	res, err := inst.Eval(ctx, wrapScript(req.Script), qjs.ModeJSONResult)
 	if err != nil {
@@ -275,6 +273,16 @@ func (r *EmbeddedRunner) run(ctx context.Context, inst *qjs.Instance, req Execut
 		return "", fmt.Errorf("script error: %w", errors.New(res.Output))
 	}
 	return res.Output, nil
+}
+
+// loadQJSLibraries evaluates the libraries in order.
+func loadQJSLibraries(ctx context.Context, inst *qjs.Instance, libs []Library) error {
+	for _, lib := range libs {
+		if err := loadQJSLibrary(ctx, inst, lib); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // loadQJSLibrary evaluates one library, then locks the globals it defined.

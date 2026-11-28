@@ -80,7 +80,7 @@ func (e *managementPackageExecutor) Execute(ctx context.Context, claim managemen
 		}
 		return failed(contract.CodeValidationFailed, "package artifact failed immutable digest or Engine validation"), nil
 	}
-	packageConstraint := contract.InstalledPackage{PackageID: artifactManifest.PackageID, ReleaseID: artifactManifest.ReleaseID, Version: artifactManifest.Version, Digest: command.Digest, Requires: artifactManifest.Requires, Conflicts: artifactManifest.Conflicts}
+	packageConstraint := contract.InstalledPackage{PackageID: artifactManifest.PackageID, ReleaseID: artifactManifest.ReleaseID, Version: artifactManifest.Version, Digest: command.Digest, Requires: artifactManifest.Requires, Conflicts: artifactManifest.Conflicts, DocTypes: docTypeNames(incoming.DocTypes)}
 
 	info, err := e.tenantInfo(ctx, string(operation.Tenant))
 	if err != nil {

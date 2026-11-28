@@ -1133,6 +1133,9 @@ type InstalledPackage struct {
 	Digest    string            `json:"digest"`
 	Requires  []ManifestPackRef `json:"requires,omitempty"`
 	Conflicts []ManifestPackRef `json:"conflicts,omitempty"`
+	// DocTypes names the DocTypes the package's artifact defines. Empty for
+	// packages installed before the field existed.
+	DocTypes []string `json:"doctypes,omitempty"`
 }
 
 // ModuleStore is the persistence boundary used by activation. CommitActivation

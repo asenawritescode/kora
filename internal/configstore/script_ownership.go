@@ -101,8 +101,12 @@ func adoptLegacyScriptRowTx(tx *sql.Tx, ss *doctype.ScriptSnapshot, site string,
 	if err != nil {
 		return fmt.Errorf("adopting legacy script %s: %w", legacy, err)
 	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return fmt.Errorf("adopting legacy script %s: row changed concurrently (rows %d, err %v)", legacy, n, err)
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("adopting legacy script %s: %w", legacy, err)
+	}
+	if n != 1 {
+		return fmt.Errorf("adopting legacy script %s: row changed concurrently (rows %d)", legacy, n)
 	}
 	slog.Info("adopted unowned script row", "row", legacy, "pack", ss.OwnerPack, "body_empty", body == "")
 	return nil
