@@ -38,7 +38,7 @@ require (
 
 require github.com/go-pdf/fpdf v0.9.0
 
-require github.com/tetratelabs/wazero v1.8.2
+require github.com/tetratelabs/wazero v1.12.0
 
 require (
 	4d63.com/embedfiles v0.0.0-20190311033909-995e0740726f // indirect
@@ -110,7 +110,7 @@ require (
 	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.47.0
 	golang.org/x/text v0.41.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260819154853-08b0e4226688 // indirect

@@ -58,6 +58,7 @@ type tenantHumanWaitRecoveryStore struct {
 	workflows interface {
 		ResumeTerminalHumanWaits(context.Context, contract.TenantID, uint16) (uint16, error)
 		ResumeDueTimedWaits(context.Context, contract.TenantID, uint16) (uint16, error)
+		ResumeEventSignals(context.Context, contract.TenantID, uint16) (uint16, error)
 	}
 }
 
@@ -71,4 +72,8 @@ func (s tenantHumanWaitRecoveryStore) ResumeTerminalHumanWaits(ctx context.Conte
 
 func (s tenantHumanWaitRecoveryStore) ResumeDueTimedWaits(ctx context.Context, tenant contract.TenantID, limit uint16) (uint16, error) {
 	return s.workflows.ResumeDueTimedWaits(ctx, tenant, limit)
+}
+
+func (s tenantHumanWaitRecoveryStore) ResumeEventSignals(ctx context.Context, tenant contract.TenantID, limit uint16) (uint16, error) {
+	return s.workflows.ResumeEventSignals(ctx, tenant, limit)
 }
